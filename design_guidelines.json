@@ -1,0 +1,182 @@
+{
+  "theme": {
+    "archetype": "4 - Swiss & High-Contrast (Dashboard Adapted)",
+    "mode": "light_and_dark_toggle",
+    "rationale": "For an e-commerce B2B SaaS dashboard (ObiHub), data clarity and trust are paramount. A clean, high-contrast utility design (Stripe/Linear aesthetic) strips away unnecessary decorations, allowing seller data, platform logos, and actionable items to take center stage. We are using tinted neutrals rather than pure greys to maintain an organic, premium feel."
+  },
+  "colors": {
+    "light": {
+      "background": "#F8FBFF",
+      "surface": "#FFFFFF",
+      "surface_elevated": "#FFFFFF",
+      "border": "#E2E8F0",
+      "text_primary": "#0F172A",
+      "text_secondary": "#64748B",
+      "text_tertiary": "#94A3B8",
+      "primary": "#2563EB",
+      "primary_hover": "#1D4ED8",
+      "primary_soft": "#EFF6FF",
+      "success": "#16A34A",
+      "success_bg": "#F0FDF4",
+      "warning": "#F59E0B",
+      "warning_bg": "#FEF3C7",
+      "error": "#EF4444",
+      "error_bg": "#FEF2F2",
+      "hepsijet": "#F97316",
+      "trendyol": "#FF671B",
+      "n11": "#4F46E5"
+    },
+    "dark": {
+      "background": "#0B101A",
+      "surface": "#111827",
+      "surface_elevated": "#1E293B",
+      "border": "#334155",
+      "text_primary": "#F8FAFC",
+      "text_secondary": "#94A3B8",
+      "text_tertiary": "#64748B",
+      "primary": "#3B82F6",
+      "primary_hover": "#60A5FA",
+      "primary_soft": "#1E3A8A",
+      "success": "#22C55E",
+      "success_bg": "#14532D",
+      "warning": "#FBBF24",
+      "warning_bg": "#78350F",
+      "error": "#F87171",
+      "error_bg": "#7F1D1D",
+      "hepsijet": "#FB923C",
+      "trendyol": "#FF8A4C",
+      "n11": "#6366F1"
+    }
+  },
+  "typography": {
+    "font_family_heading": "Inter, 'SF Pro Display', system-ui",
+    "font_family_body": "Inter, 'SF Pro Text', system-ui",
+    "sizes": {
+      "xs": { "fontSize": 12, "lineHeight": 16, "letterSpacing": 0.2 },
+      "sm": { "fontSize": 14, "lineHeight": 20, "letterSpacing": 0 },
+      "base": { "fontSize": 16, "lineHeight": 24, "letterSpacing": -0.1 },
+      "lg": { "fontSize": 18, "lineHeight": 28, "letterSpacing": -0.2 },
+      "xl": { "fontSize": 20, "lineHeight": 28, "letterSpacing": -0.3 },
+      "2xl": { "fontSize": 24, "lineHeight": 32, "letterSpacing": -0.5 },
+      "3xl": { "fontSize": 32, "lineHeight": 40, "letterSpacing": -0.8 }
+    },
+    "weights": {
+      "regular": "400",
+      "medium": "500",
+      "semibold": "600",
+      "bold": "700"
+    }
+  },
+  "spacing": {
+    "2": 8,
+    "3": 12,
+    "4": 16,
+    "6": 24,
+    "8": 32,
+    "10": 40,
+    "12": 48
+  },
+  "radius": {
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "pill": 9999
+  },
+  "shadows": {
+    "light": {
+      "sm": { "shadowColor": "#0F172A", "shadowOffset": { "width": 0, "height": 1 }, "shadowOpacity": 0.05, "shadowRadius": 2, "elevation": 2 },
+      "md": { "shadowColor": "#0F172A", "shadowOffset": { "width": 0, "height": 4 }, "shadowOpacity": 0.08, "shadowRadius": 12, "elevation": 4 }
+    },
+    "dark": {
+      "sm": { "shadowColor": "#000000", "shadowOffset": { "width": 0, "height": 1 }, "shadowOpacity": 0.3, "shadowRadius": 2, "elevation": 2 },
+      "md": { "shadowColor": "#000000", "shadowOffset": { "width": 0, "height": 4 }, "shadowOpacity": 0.4, "shadowRadius": 12, "elevation": 4 }
+    }
+  },
+  "components": {
+    "cards": {
+      "style": "Neomorphism/Clay approach. Sharp yet slightly rounded corners (12px). 1px border matching the background context to ground it. Very subtle drop shadows in light mode, solid surface elevation without shadows in dark mode.",
+      "padding": "16px to 24px internal padding"
+    },
+    "buttons": {
+      "primary": "Solid primary color, no border, white text, 12px radius. Press state: opacity 0.8 or scale down 0.98.",
+      "secondary": "Transparent background, 1px border of surface_elevated, text_primary. Press state: light grey background.",
+      "ghost": "No border, transparent. Press state: light primary_soft background."
+    },
+    "bottom_tabs": {
+      "style": "Floating glassmorphism effect if possible, or solid surface with top border. Active tab has a subtle primary_soft pill background with primary color icon.",
+      "icons": "Use Phosphor Icons (Regular for inactive, Fill for active) or Lucide (Stroke width 1.5 for inactive, 2.5 for active)."
+    },
+    "status_badges": {
+      "style": "Pill shaped (radius: 9999). Soft background (e.g., success_bg) with strong text (success). E.g. Hazırlanıyor (warning), Kargoda (primary), Teslim Edildi (success)."
+    },
+    "inputs": {
+      "style": "Floating labels for a premium compact look. 12px radius. 1px solid border. Active focus state: 2px border of primary color. Light background inside input."
+    }
+  },
+  "micro_interactions": {
+    "list_entrance": "Staggered fade-up using react-native-reanimated (SlideInDown with delay index * 50ms).",
+    "press_states": "Touchable element should gently scale down (0.97) on press rather than just dimming opacity.",
+    "skeleton_loaders": "Shimmer effect across a muted grey block, rounded exactly like the content it replaces.",
+    "pull_to_refresh": "Custom Lottie or subtle custom Reanimated spinner, no default system spinner if possible."
+  },
+  "screens": {
+    "dashboard": {
+      "layout": "Header with user greeting and Date. Grid of 2x2 metric cards (Orders, Revenue, Low Stock, Pending). Horizontal scroll for Recent Orders to break vertical monotony. Clean list view below.",
+      "metric_card_design": "Value in 2xl font, label in xs secondary text. Trend indicator (green/red pill) at top right."
+    },
+    "integrations": {
+      "layout": "Bento grid mode. Each platform gets a blocky card with the brand color as a 4px left border or subtle background tint. Large platform logos. Sync button inside card with a circular progress timer for cooldown."
+    },
+    "invoices": {
+      "layout": "Month filter pill scroll at top. List of invoices. Each invoice card shows Company Name, Amount, Date, and a clear Status Badge. Swipe-to-action to Download PDF."
+    },
+    "reports": {
+      "layout": "Premium detail focus. This is the showcase screen.",
+      "hero_stat_card": "A dark, immersive card regardless of light/dark mode (creates contrast). Displays 'Total Revenue' massively. Incorporates a glowing sparkline (react-native-svg) running across the bottom of the card.",
+      "period_selector": "Floating pill bar overlapping the bottom of the hero card (Today / 7d / 30d).",
+      "kpi_grid": "3-column micro-grid for Average Order Value, Conversion, Total Orders. 1px borders between them.",
+      "charts": "Channel Revenue: Donut chart with smooth stroke dasharray animations on load. Daily Revenue: Bar chart with rounded top corners, highlighting the 'Top Day' in Primary color, rest in Text Tertiary.",
+      "insights": "Insight cards styled like 'Control Room' grid—actionable text like 'Trendyol sales are up 14% vs last week' with an upward trend icon.",
+      "top_products": "Dense, list-based view with product thumbnails (radius 8px) and a horizontal progress bar indicating share of total sales."
+    },
+    "hepsijet": {
+      "layout": "Step-based form for manual shipment creation. Floating labels, wide full-width CTA button sticky at the bottom."
+    }
+  },
+  "media": {
+    "avatars": [
+      {
+        "url": "https://images.pexels.com/photos/35839966/pexels-photo-35839966.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Professional black and white portrait of a user",
+        "category": "user_profile_avatar"
+      }
+    ],
+    "empty_states": [
+      {
+        "url": "https://images.unsplash.com/photo-1575833948662-cc99178abbb8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTV8MHwxfHNlYXJjaHwyfHxlbXB0eSUyMGNhcmRib2FyZCUyMGJveCUyMG1pbmltYWxpc3R8ZW58MHx8fHwxNzc4MzQzNzE4fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Minimalist cardboard box for empty orders/inventory states",
+        "category": "empty_state_orders"
+      }
+    ]
+  },
+  "testing_attributes": {
+    "rule": "All interactive elements MUST include testID (React Native equivalent of data-testid).",
+    "convention": "kebab-case, role-based",
+    "examples": [
+      "login-form-submit-button",
+      "dashboard-revenue-card",
+      "reports-period-selector-7d",
+      "integrations-sync-trendyol-button"
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Use StyleSheet.create for all styling. Avoid inline styles.",
+    "Implement the Theme Toggle via React Context and conditionally swap between 'light' and 'dark' objects in colors.",
+    "For the Reports screen sparkline and donut charts, strictly use react-native-svg and animate paths using react-native-reanimated (e.g. interpolate strokeDashoffset).",
+    "Do NOT use NativeWind. Map the spacing and typography scales exactly as provided in the token JSON.",
+    "For shadows in Android (elevation) vs iOS (shadowOffset/Opacity), use the provided shadow tokens which cover both platforms.",
+    "Ensure the hero section of the Reports tab has a completely different surface feel (darker, elevated) compared to standard cards to create visual hierarchy.",
+    "Use testID property on all Touchables, Buttons, and major View containers for testing."
+  ]
+}
