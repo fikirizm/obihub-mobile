@@ -7,7 +7,7 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { AppTopBar } from "../../src/components/AppTopBar";
 import { fontWeight, radius, spacing } from "../../src/theme/tokens";
-import { getOrders, getSalesReportsOverview } from "../../src/api";
+import { getInvoices, getOrders, getSalesReportsOverview } from "../../src/api";
 import { formatCompact, formatTry, providerColor, providerLabel, PLATFORM_LOGOS, providerKey } from "../../src/utils";
 import { DonutChart, Sparkline, AnimatedNumber } from "../../src/components/Charts";
 import { PressableScale } from "../../src/components/KPICard";
@@ -26,15 +26,69 @@ export default function ReportsScreen() {
   const [reports, setReports] = useState<ReportsOverview | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
 
+  const buildFromInvoices = async (periodDays: number) => {
+    if (!token) return null;
+    const inv = await getInvoices(token, { page: 1, perPage: 600 }).catch(() => ({ invoices: [] as any[] }));
+    const list: any[] = Array.isArray((inv as any)?.invoices) ? (inv as any).invoices : [];
+    const now = new Date();
+    const periodStart = new Date(now);
+    periodStart.setDate(now.getDate() - (periodDays - 1));
+    periodStart.setHours(0, 0, 0, 0);
+    const dayKeys: string[] = [];
+    for (let i = periodDays - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      dayKeys.push(d.toISOString().slice(0, 10));
+    }
+    const dayMap: Record<string, { revenue: number; orders: number }> = {};
+    dayKeys.forEach((k) => (dayMap[k] = { revenue: 0, orders: 0 }));
+    const channelMap: Record<string, { provider: string; label: string; revenue: number; orders: number }> = {};
+    let totalRevenue = 0;
+    let totalOrders = 0;
+    for (const i of list) {
+      const dKey = String(i?.issue_date || "").slice(0, 10);
+      if (!dayMap[dKey]) continue;
+      const amt = Number(i?.display_gross_total || i?.gross_total || i?.net_total || 0) || 0;
+      dayMap[dKey].revenue += amt;
+      dayMap[dKey].orders += 1;
+      const provider = String(i?.platform_provider || i?.platform || "other").toLowerCase() || "other";
+      const label = String(i?.platform || provider || "Diğer");
+      if (!channelMap[provider]) channelMap[provider] = { provider, label, revenue: 0, orders: 0 };
+      channelMap[provider].revenue += amt;
+      channelMap[provider].orders += 1;
+      totalRevenue += amt;
+      totalOrders += 1;
+    }
+    return {
+      period_days: periodDays,
+      total_revenue: totalRevenue,
+      total_orders: totalOrders,
+      average_order_value: totalOrders > 0 ? totalRevenue / totalOrders : 0,
+      daily_sales: dayKeys.map((k) => ({ date: k, revenue: dayMap[k].revenue, orders: dayMap[k].orders })),
+      channel_breakdown: Object.values(channelMap).sort((a, b) => b.revenue - a.revenue),
+    } as ReportsOverview;
+  };
+
   const load = async (silent = false) => {
     if (!token) return;
     if (!silent) setLoading(true);
     try {
       const [r, o] = await Promise.all([
-        getSalesReportsOverview(token, period),
+        getSalesReportsOverview(token, period).catch(() => null),
         getOrders(token, undefined, { page: 1, perPage: 200, sortBy: "-created_at" }).catch(() => [] as Order[]),
       ]);
-      setReports(r);
+      const hasData =
+        r &&
+        (Number(r.total_revenue || 0) > 0 ||
+          Number(r.total_orders || 0) > 0 ||
+          (r.daily_sales || []).length > 0 ||
+          (r.channel_breakdown || []).length > 0);
+      if (hasData) {
+        setReports(r);
+      } else {
+        const fallback = await buildFromInvoices(period).catch(() => null);
+        setReports(fallback || r);
+      }
       setOrders(Array.isArray(o) ? o : []);
     } catch {}
     finally {

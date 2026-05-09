@@ -1,23 +1,25 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
-import Animated, { FadeInDown } from "react-native-reanimated";
+import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
+import { FadeInDown } from "react-native-reanimated";
 import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { AppTopBar } from "../../src/components/AppTopBar";
 import { fontWeight, radius, spacing } from "../../src/theme/tokens";
-import { getIntegrations } from "../../src/api";
+import { getIntegrations, getOrders } from "../../src/api";
 import { providerKey, providerLabel, providerColor } from "../../src/utils";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
 import { PressableScale } from "../../src/components/KPICard";
-import { ArrowRightIcon, PlugIcon } from "../../src/components/Icons";
-import type { Integration } from "../../src/types";
+import { ArrowRightIcon, PlugIcon, SparkleIcon } from "../../src/components/Icons";
+import type { Integration, Order } from "../../src/types";
 
 export default function IntegrationsScreen() {
   const { token } = useAuth();
   const { colors, mode, shadows } = useTheme();
   const [list, setList] = useState<Integration[]>([]);
+  const [orderCounts, setOrderCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -25,8 +27,18 @@ export default function IntegrationsScreen() {
     if (!token) return;
     if (!silent) setLoading(true);
     try {
-      const data = await getIntegrations(token);
+      const [data, orders] = await Promise.all([
+        getIntegrations(token),
+        getOrders(token, undefined, { page: 1, perPage: 200, sortBy: "-created_at" }).catch(() => [] as Order[]),
+      ]);
       setList(Array.isArray(data) ? data : []);
+      // Count orders per integration
+      const counts: Record<string, number> = {};
+      for (const o of (orders || [])) {
+        const intId = String((o as any)?.integration_id || "");
+        if (intId) counts[intId] = (counts[intId] || 0) + 1;
+      }
+      setOrderCounts(counts);
     } catch {}
     finally {
       setLoading(false);
@@ -38,41 +50,52 @@ export default function IntegrationsScreen() {
     load();
   }, [token]);
 
-  const grouped = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const it of list) {
-      const k = providerKey(it.provider || it.name);
-      counts[k] = (counts[k] || 0) + 1;
-    }
-    return counts;
-  }, [list]);
+  const totalConnected = list.length;
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="integrations-screen">
       <AppTopBar />
-      <View style={{ paddingHorizontal: spacing.lg, paddingTop: 4, marginBottom: 4 }}>
+      <View style={{ paddingHorizontal: spacing.lg, paddingTop: 4 }}>
         <Text style={[styles.eyebrow, { color: colors.primary }]}>BAĞLI MAĞAZALAR</Text>
         <Text style={[styles.title, { color: colors.textPrimary }]}>Entegrasyonlar</Text>
-        <Text style={[styles.sub, { color: colors.textSecondary }]}>
-          Sipariş yönetimi yapmak için bir mağaza seç.
-        </Text>
       </View>
 
-      <View style={styles.statsRow}>
-        {(["trendyol", "hepsiburada", "n11", "woo"] as const).map((p, i) => (
-          <SafeAnimatedView
-            key={p}
-            entering={FadeInDown.delay(i * 60).duration(400)}
-            style={[styles.statCell, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}
-          >
-            <View style={[styles.statDot, { backgroundColor: providerColor(p, colors.primary) }]} />
-            <Text style={[styles.statValue, { color: colors.textPrimary }]}>{grouped[p] || 0}</Text>
-            <Text style={[styles.statLabel, { color: colors.textTertiary }]} numberOfLines={1}>
-              {providerLabel(p)}
-            </Text>
-          </SafeAnimatedView>
-        ))}
-      </View>
+      {/* Premium hero overview */}
+      <SafeAnimatedView entering={FadeInDown.duration(400)} style={[styles.heroCard, shadows.lg]}>
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <Svg width="100%" height="100%" viewBox="0 0 360 140" preserveAspectRatio="xMidYMid slice">
+            <Defs>
+              <LinearGradient id="intHero" x1="0" y1="0" x2="1" y2="1">
+                <Stop offset="0" stopColor="#0F172A" stopOpacity="1" />
+                <Stop offset="1" stopColor="#1E3A8A" stopOpacity="0.95" />
+              </LinearGradient>
+              <LinearGradient id="intGlow" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor="#60A5FA" stopOpacity="0.3" />
+                <Stop offset="1" stopColor="#60A5FA" stopOpacity="0" />
+              </LinearGradient>
+            </Defs>
+            <Path d="M0,0 L360,0 L360,140 L0,140Z" fill="url(#intHero)" />
+            <Path d="M0,0 L360,0 L360,90 L0,140 Z" fill="url(#intGlow)" />
+          </Svg>
+        </View>
+        <View style={styles.heroContent}>
+          <View style={styles.heroLeft}>
+            <View style={styles.heroChip}>
+              <SparkleIcon size={11} color="#93C5FD" />
+              <Text style={styles.heroChipText}>HEPSİ TEK PANELDE</Text>
+            </View>
+            <Text style={styles.heroTitle}>{totalConnected} Aktif Mağaza</Text>
+            <Text style={styles.heroSub}>Sipariş yönetmek için bir mağaza seç ve detaya in.</Text>
+          </View>
+          <View style={styles.heroLogos}>
+            {(["trendyol", "hepsiburada", "n11", "woo"] as const).slice(0, 4).map((p, i) => (
+              <View key={p} style={[styles.heroLogoWrap, { transform: [{ translateX: i * -10 }] }]}>
+                <PlatformLogo provider={p} size="sm" />
+              </View>
+            ))}
+          </View>
+        </View>
+      </SafeAnimatedView>
 
       {loading ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
@@ -106,6 +129,7 @@ export default function IntegrationsScreen() {
           renderItem={({ item, index }) => {
             const provider = String(item.provider || item.name || "");
             const accent = providerColor(provider, colors.primary);
+            const count = orderCounts[item.id] || 0;
             return (
               <SafeAnimatedView entering={FadeInDown.delay(index * 50).springify().damping(18)}>
                 <PressableScale
@@ -132,6 +156,11 @@ export default function IntegrationsScreen() {
                       </View>
                     </View>
                   </View>
+                  {count > 0 ? (
+                    <View style={[styles.countBadge, { backgroundColor: colors.primarySoft }]}>
+                      <Text style={[styles.countBadgeText, { color: colors.primary }]}>{count}</Text>
+                    </View>
+                  ) : null}
                   <ArrowRightIcon size={18} color={colors.textTertiary} />
                 </PressableScale>
               </SafeAnimatedView>
@@ -146,20 +175,43 @@ export default function IntegrationsScreen() {
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
   eyebrow: { fontSize: 11, fontWeight: fontWeight.bold, letterSpacing: 0.6, textTransform: "uppercase" },
-  title: { fontSize: 26, fontWeight: fontWeight.bold, letterSpacing: -0.6, marginTop: 2 },
-  sub: { fontSize: 13, fontWeight: fontWeight.medium, marginTop: 4, marginBottom: spacing.sm },
-  statsRow: { flexDirection: "row", gap: 8, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
-  statCell: {
-    flex: 1,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
+  title: { fontSize: 28, fontWeight: fontWeight.bold, letterSpacing: -0.7, marginTop: 2, marginBottom: spacing.sm },
+  heroCard: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    borderRadius: radius.xl,
+    overflow: "hidden",
+    minHeight: 130,
+  },
+  heroContent: {
+    padding: spacing.md,
+    paddingVertical: spacing.lg,
+    flexDirection: "row",
     alignItems: "center",
   },
-  statDot: { width: 8, height: 8, borderRadius: 4, marginBottom: 6 },
-  statValue: { fontSize: 18, fontWeight: "800" },
-  statLabel: { fontSize: 10.5, fontWeight: "600", letterSpacing: 0.3, marginTop: 2 },
+  heroLeft: { flex: 1 },
+  heroChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 9999,
+    backgroundColor: "rgba(96,165,250,0.18)",
+    alignSelf: "flex-start",
+    marginBottom: 8,
+  },
+  heroChipText: { color: "#BFDBFE", fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
+  heroTitle: { color: "#FFFFFF", fontSize: 26, fontWeight: "800", letterSpacing: -0.7 },
+  heroSub: { color: "#94A3B8", fontSize: 12, fontWeight: "500", marginTop: 4 },
+  heroLogos: { flexDirection: "row", alignItems: "center", paddingLeft: 30 },
+  heroLogoWrap: {
+    borderWidth: 2,
+    borderColor: "#0F172A",
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "#FFFFFF",
+  },
   card: {
     borderRadius: radius.lg,
     borderWidth: 1,
@@ -167,6 +219,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     overflow: "hidden",
+    gap: 8,
   },
   cardAccent: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4 },
   cardLeft: { flex: 1, flexDirection: "row", alignItems: "center" },
@@ -174,6 +227,8 @@ const styles = StyleSheet.create({
   cardMetaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
   statusDot: { width: 6, height: 6, borderRadius: 3 },
   cardMeta: { fontSize: 12, fontWeight: "500" },
+  countBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 9999, minWidth: 32, alignItems: "center" },
+  countBadgeText: { fontSize: 12, fontWeight: "800", letterSpacing: -0.1 },
   emptyWrap: { alignItems: "center", padding: spacing.xl, marginTop: spacing.lg },
   emptyIcon: { width: 64, height: 64, borderRadius: 18, alignItems: "center", justifyContent: "center", borderWidth: 1, marginBottom: spacing.sm },
   emptyTitle: { fontSize: 16, fontWeight: "700", marginBottom: 6 },
