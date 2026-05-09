@@ -1,43 +1,118 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Dimensions, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import Animated, { FadeIn, FadeInDown, FadeInUp } from "react-native-reanimated";
-import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
+import {
+  ActivityIndicator,
+  Dimensions,
+  Image,
+  Modal,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
+import { FadeIn, FadeInDown, FadeInUp } from "react-native-reanimated";
+import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { AppTopBar } from "../../src/components/AppTopBar";
 import { fontWeight, radius, spacing } from "../../src/theme/tokens";
 import { getInvoices, getOrders, getSalesReportsOverview } from "../../src/api";
-import { formatCompact, formatTry, providerColor, providerLabel, PLATFORM_LOGOS, providerKey } from "../../src/utils";
+import { formatCompact, formatTry, providerColor, providerLabel, orderTimestamp } from "../../src/utils";
 import { DonutChart, Sparkline, AnimatedNumber } from "../../src/components/Charts";
 import { PressableScale } from "../../src/components/KPICard";
-import { CheckIcon, ClockIcon, SparkleIcon, TrendDownIcon, TrendUpIcon, ZapIcon, PackageIcon, WalletIcon, InboxIcon } from "../../src/components/Icons";
-import type { Order, ReportsOverview } from "../../src/types";
+import {
+  CheckIcon,
+  CloseIcon,
+  FilterIcon,
+  InboxIcon,
+  PackageIcon,
+  SparkleIcon,
+  TrendDownIcon,
+  TrendUpIcon,
+  WalletIcon,
+  ZapIcon,
+} from "../../src/components/Icons";
+import type { Invoice, Order, ReportsOverview } from "../../src/types";
 
-type Period = 1 | 7 | 30;
 const SCREEN_W = Dimensions.get("window").width;
+
+type RangeT = { start: Date; end: Date; key: string; label: string };
+
+function startOfDay(d: Date) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+function endOfDay(d: Date) {
+  const x = new Date(d);
+  x.setHours(23, 59, 59, 999);
+  return x;
+}
+function daysAgo(n: number) {
+  const x = new Date();
+  x.setDate(x.getDate() - n);
+  return startOfDay(x);
+}
+function presetRanges(): RangeT[] {
+  const today = startOfDay(new Date());
+  const end = endOfDay(new Date());
+  const yest = startOfDay(new Date(Date.now() - 86400000));
+  const thisMonthStart = startOfDay(new Date(today.getFullYear(), today.getMonth(), 1));
+  const lastMonthEnd = endOfDay(new Date(today.getFullYear(), today.getMonth(), 0));
+  const lastMonthStart = startOfDay(new Date(lastMonthEnd.getFullYear(), lastMonthEnd.getMonth(), 1));
+  const yearStart = startOfDay(new Date(today.getFullYear(), 0, 1));
+  return [
+    { key: "today", label: "Bugün", start: today, end },
+    { key: "yesterday", label: "Dün", start: yest, end: endOfDay(yest) },
+    { key: "7d", label: "Son 7 gün", start: daysAgo(6), end },
+    { key: "14d", label: "Son 14 gün", start: daysAgo(13), end },
+    { key: "30d", label: "Son 30 gün", start: daysAgo(29), end },
+    { key: "90d", label: "Son 90 gün", start: daysAgo(89), end },
+    { key: "thisMonth", label: "Bu ay", start: thisMonthStart, end },
+    { key: "lastMonth", label: "Geçen ay", start: lastMonthStart, end: lastMonthEnd },
+    { key: "ytd", label: "Yıl başından", start: yearStart, end },
+  ];
+}
+
+function formatDateTr(d: Date) {
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dd}.${mm}.${d.getFullYear()}`;
+}
+
+function rangeDays(r: RangeT) {
+  return Math.max(1, Math.round((r.end.getTime() - r.start.getTime()) / 86400000) + 1);
+}
+
+function rangeLabel(r: RangeT) {
+  if (r.key !== "custom") return r.label;
+  return `${formatDateTr(r.start)} – ${formatDateTr(r.end)}`;
+}
 
 export default function ReportsScreen() {
   const { token } = useAuth();
   const { colors, mode, shadows } = useTheme();
-  const [period, setPeriod] = useState<Period>(30);
+  const [range, setRange] = useState<RangeT>(() => presetRanges().find((p) => p.key === "30d")!);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [reports, setReports] = useState<ReportsOverview | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [previousRevenue, setPreviousRevenue] = useState(0);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
-  const buildFromInvoices = async (periodDays: number) => {
+  const buildFromInvoices = async (start: Date, end: Date): Promise<ReportsOverview | null> => {
     if (!token) return null;
-    const inv = await getInvoices(token, { page: 1, perPage: 600 }).catch(() => ({ invoices: [] as any[] }));
+    const inv = await getInvoices(token, { page: 1, perPage: 600 }).catch(() => ({ invoices: [] as Invoice[] }));
     const list: any[] = Array.isArray((inv as any)?.invoices) ? (inv as any).invoices : [];
-    const now = new Date();
-    const periodStart = new Date(now);
-    periodStart.setDate(now.getDate() - (periodDays - 1));
-    periodStart.setHours(0, 0, 0, 0);
+
+    const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
     const dayKeys: string[] = [];
-    for (let i = periodDays - 1; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(now.getDate() - i);
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(end);
+      d.setDate(end.getDate() - i);
       dayKeys.push(d.toISOString().slice(0, 10));
     }
     const dayMap: Record<string, { revenue: number; orders: number }> = {};
@@ -45,8 +120,10 @@ export default function ReportsScreen() {
     const channelMap: Record<string, { provider: string; label: string; revenue: number; orders: number }> = {};
     let totalRevenue = 0;
     let totalOrders = 0;
+
     for (const i of list) {
-      const dKey = String(i?.issue_date || "").slice(0, 10);
+      const issueRaw = String(i?.issue_date || "");
+      const dKey = issueRaw.slice(0, 10);
       if (!dayMap[dKey]) continue;
       const amt = Number(i?.display_gross_total || i?.gross_total || i?.net_total || 0) || 0;
       dayMap[dKey].revenue += amt;
@@ -60,7 +137,7 @@ export default function ReportsScreen() {
       totalOrders += 1;
     }
     return {
-      period_days: periodDays,
+      period_days: days,
       total_revenue: totalRevenue,
       total_orders: totalOrders,
       average_order_value: totalOrders > 0 ? totalRevenue / totalOrders : 0,
@@ -69,27 +146,110 @@ export default function ReportsScreen() {
     } as ReportsOverview;
   };
 
+  const buildFromOrders = (orderList: Order[], start: Date, end: Date): ReportsOverview => {
+    const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
+    const dayKeys: string[] = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(end);
+      d.setDate(end.getDate() - i);
+      dayKeys.push(d.toISOString().slice(0, 10));
+    }
+    const dayMap: Record<string, { revenue: number; orders: number }> = {};
+    dayKeys.forEach((k) => (dayMap[k] = { revenue: 0, orders: 0 }));
+    const channelMap: Record<string, { provider: string; label: string; revenue: number; orders: number }> = {};
+    let totalRevenue = 0;
+    let totalOrders = 0;
+    for (const o of orderList) {
+      const ts = orderTimestamp(o);
+      if (!ts) continue;
+      const d = new Date(ts);
+      if (d < start || d > end) continue;
+      const dKey = d.toISOString().slice(0, 10);
+      if (!dayMap[dKey]) continue;
+      const amt = Number(o.total_amount || 0);
+      dayMap[dKey].revenue += amt;
+      dayMap[dKey].orders += 1;
+      const provider = String((o as any)?.integration_provider || (o as any)?.provider || o.channel || "other").toLowerCase();
+      const label = providerLabel(provider);
+      if (!channelMap[provider]) channelMap[provider] = { provider, label, revenue: 0, orders: 0 };
+      channelMap[provider].revenue += amt;
+      channelMap[provider].orders += 1;
+      totalRevenue += amt;
+      totalOrders += 1;
+    }
+    return {
+      period_days: days,
+      total_revenue: totalRevenue,
+      total_orders: totalOrders,
+      average_order_value: totalOrders > 0 ? totalRevenue / totalOrders : 0,
+      daily_sales: dayKeys.map((k) => ({ date: k, revenue: dayMap[k].revenue, orders: dayMap[k].orders })),
+      channel_breakdown: Object.values(channelMap).sort((a, b) => b.revenue - a.revenue),
+    } as ReportsOverview;
+  };
+
+  const computePreviousRevenue = (orderList: Order[], allInvoices: any[], r: RangeT) => {
+    const days = rangeDays(r);
+    const prevEnd = new Date(r.start.getTime() - 1);
+    const prevStart = new Date(prevEnd);
+    prevStart.setDate(prevEnd.getDate() - (days - 1));
+    let prev = 0;
+    for (const inv of allInvoices) {
+      const dStr = String(inv?.issue_date || "").slice(0, 10);
+      const d = new Date(dStr);
+      if (Number.isNaN(d.getTime())) continue;
+      if (d >= prevStart && d <= prevEnd) {
+        prev += Number(inv?.display_gross_total || inv?.gross_total || inv?.net_total || 0);
+      }
+    }
+    if (prev === 0) {
+      // fallback to orders
+      for (const o of orderList) {
+        const ts = orderTimestamp(o);
+        if (!ts) continue;
+        const d = new Date(ts);
+        if (d >= prevStart && d <= prevEnd) prev += Number(o.total_amount || 0);
+      }
+    }
+    return prev;
+  };
+
   const load = async (silent = false) => {
     if (!token) return;
     if (!silent) setLoading(true);
     try {
-      const [r, o] = await Promise.all([
-        getSalesReportsOverview(token, period).catch(() => null),
-        getOrders(token, undefined, { page: 1, perPage: 200, sortBy: "-created_at" }).catch(() => [] as Order[]),
+      const days = rangeDays(range);
+      const [apiResp, ordersRaw, invResp] = await Promise.all([
+        getSalesReportsOverview(token, days).catch(() => null),
+        getOrders(token, undefined, { page: 1, perPage: 300, sortBy: "-created_at" }).catch(() => [] as Order[]),
+        getInvoices(token, { page: 1, perPage: 600 }).catch(() => ({ invoices: [] as Invoice[] })),
       ]);
-      const hasData =
-        r &&
-        (Number(r.total_revenue || 0) > 0 ||
-          Number(r.total_orders || 0) > 0 ||
-          (r.daily_sales || []).length > 0 ||
-          (r.channel_breakdown || []).length > 0);
-      if (hasData) {
-        setReports(r);
+      const orderList = Array.isArray(ordersRaw) ? ordersRaw : [];
+      setOrders(orderList);
+
+      const apiHasData =
+        apiResp &&
+        (Number(apiResp.total_revenue || 0) > 0 ||
+          Number(apiResp.total_orders || 0) > 0 ||
+          (apiResp.daily_sales || []).length > 0 ||
+          (apiResp.channel_breakdown || []).length > 0);
+
+      let result: ReportsOverview | null = null;
+      if (apiHasData) {
+        result = apiResp;
       } else {
-        const fallback = await buildFromInvoices(period).catch(() => null);
-        setReports(fallback || r);
+        const fromInv = await buildFromInvoices(range.start, range.end).catch(() => null);
+        if (fromInv && (fromInv.total_revenue ?? 0) > 0) {
+          result = fromInv;
+        } else {
+          // fallback to orders
+          const fromOrders = buildFromOrders(orderList, range.start, range.end);
+          result = fromOrders.total_revenue > 0 ? fromOrders : (fromInv || apiResp || null);
+        }
       }
-      setOrders(Array.isArray(o) ? o : []);
+      setReports(result);
+
+      const allInvoices: any[] = Array.isArray((invResp as any)?.invoices) ? (invResp as any).invoices : [];
+      setPreviousRevenue(computePreviousRevenue(orderList, allInvoices, range));
     } catch {}
     finally {
       setLoading(false);
@@ -99,58 +259,53 @@ export default function ReportsScreen() {
 
   useEffect(() => {
     load();
-  }, [period, token]);
+  }, [range, token]);
 
-  const insights = useMemo(() => {
-    const channels = (reports?.channel_breakdown || []).slice().sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0));
-    const days = reports?.daily_sales || [];
-    const sortedDays = days.slice().sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0));
-    const half = Math.max(1, Math.floor(days.length / 2));
-    const first = days.slice(0, half).reduce((a, b) => a + Number(b.revenue || 0), 0);
-    const second = days.slice(half).reduce((a, b) => a + Number(b.revenue || 0), 0);
-    const trendPct = first > 0 ? ((second - first) / first) * 100 : second > 0 ? 100 : 0;
-    return {
-      topChannel: channels[0],
-      topDay: sortedDays[0],
-      trendPct,
-      sparkData: days.map((d) => Number(d.revenue || 0)),
-    };
-  }, [reports]);
+  const totalRevenue = Number(reports?.total_revenue || 0);
+  const totalOrders = Number(reports?.total_orders || 0);
+  const aov = Number(reports?.average_order_value || 0);
+  const channelBreakdown = (reports?.channel_breakdown || []).slice().sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0));
+  const dailyData = reports?.daily_sales || [];
 
-  // Top products from orders
+  const trendPct = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : totalRevenue > 0 ? 100 : 0;
+  const sparkData = dailyData.map((d) => Number(d.revenue || 0));
+  const maxDailyRev = Math.max(1, ...dailyData.map((d) => Number(d.revenue || 0)));
+  const topIdx = dailyData.findIndex((d) => Number(d.revenue || 0) === maxDailyRev);
+  const topDay = dailyData.slice().sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0))[0];
+  const topChannel = channelBreakdown[0];
+
+  // Top products from orders (within range)
   const topProducts = useMemo(() => {
     const map = new Map<string, { name: string; image: string; qty: number; revenue: number }>();
     for (const o of orders) {
+      const ts = orderTimestamp(o);
+      if (ts) {
+        const d = new Date(ts);
+        if (d < range.start || d > range.end) continue;
+      }
       for (const it of (o.items || []) as any[]) {
         const key = String(it?.product_name || it?.sku || "?").trim().toLowerCase();
         if (!key || key === "?") continue;
         const existing = map.get(key) || { name: it?.product_name || it?.sku || "Ürün", image: "", qty: 0, revenue: 0 };
         existing.qty += Number(it?.quantity || 0);
-        existing.revenue += Number(it?.total_price ?? (Number(it?.unit_price || 0) * Number(it?.quantity || 0)) ?? 0);
+        existing.revenue += Number(it?.total_price ?? Number(it?.unit_price || 0) * Number(it?.quantity || 0));
         if (!existing.image) {
-          const url = String(
-            it?.image_url || it?.image || it?.images?.[0]?.url || it?.images?.[0]?.src || it?.images?.[0] || ""
-          ).trim();
+          const url = String(it?.image_url || it?.image || it?.images?.[0]?.url || it?.images?.[0]?.src || it?.images?.[0] || "").trim();
           if (/^https?:\/\//i.test(url)) existing.image = url;
         }
         map.set(key, existing);
       }
     }
-    return Array.from(map.values())
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 5);
-  }, [orders]);
+    return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
+  }, [orders, range]);
 
-  const channelBreakdown = (reports?.channel_breakdown || []).slice().sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0));
-  const totalRevenue = Number(reports?.total_revenue || 0);
-  const totalOrders = Number(reports?.total_orders || 0);
-  const aov = Number(reports?.average_order_value || 0);
+  const quickPills: RangeT[] = useMemo(() => {
+    const all = presetRanges();
+    return [all.find((r) => r.key === "today")!, all.find((r) => r.key === "7d")!, all.find((r) => r.key === "30d")!];
+  }, []);
 
-  const dailyData = (reports?.daily_sales || []).slice(-14);
-  const maxDailyRev = Math.max(1, ...dailyData.map((d) => Number(d.revenue || 0)));
-  const topIdx = dailyData.findIndex((d) => Number(d.revenue || 0) === maxDailyRev);
-
-  const periodLabel = period === 1 ? "Bugün" : period === 7 ? "7 günlük" : "30 günlük";
+  const isCustomMatch = (r: RangeT) => range.key === r.key;
+  const isCustomActive = !quickPills.find((p) => p.key === range.key);
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="reports-screen">
@@ -177,51 +332,63 @@ export default function ReportsScreen() {
           </View>
         </SafeAnimatedView>
 
-        {/* HERO REVENUE CARD */}
-        <SafeAnimatedView
-          entering={FadeIn.delay(100).duration(450)}
-          style={[styles.heroCard, { backgroundColor: "#0B1220" }, shadows.lg]}
-        >
+        {/* HERO CARD */}
+        <SafeAnimatedView entering={FadeIn.delay(100).duration(450)} style={[styles.heroCard, shadows.lg]}>
           <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-            <Svg width="100%" height="100%" viewBox="0 0 360 220" preserveAspectRatio="xMidYMid slice">
+            <Svg width="100%" height="100%" viewBox="0 0 360 240" preserveAspectRatio="xMidYMid slice">
               <Defs>
-                <LinearGradient id="heroGrad" x1="0" y1="0" x2="1" y2="1">
-                  <Stop offset="0" stopColor="#1E40AF" stopOpacity="0.4" />
-                  <Stop offset="1" stopColor="#0B1220" stopOpacity="0" />
+                <LinearGradient id="rpHero" x1="0" y1="0" x2="1" y2="1">
+                  <Stop offset="0" stopColor="#0F172A" stopOpacity="1" />
+                  <Stop offset="1" stopColor="#1E3A8A" stopOpacity="1" />
+                </LinearGradient>
+                <LinearGradient id="rpGlow" x1="0" y1="0" x2="1" y2="1">
+                  <Stop offset="0" stopColor="#A78BFA" stopOpacity="0.35" />
+                  <Stop offset="1" stopColor="#60A5FA" stopOpacity="0" />
+                </LinearGradient>
+                <LinearGradient id="rpGlow2" x1="1" y1="1" x2="0" y2="0">
+                  <Stop offset="0" stopColor="#22D3EE" stopOpacity="0.25" />
+                  <Stop offset="1" stopColor="#0F172A" stopOpacity="0" />
                 </LinearGradient>
               </Defs>
-              <Path d="M0,0 L360,0 L360,220 L0,220 Z" fill="url(#heroGrad)" />
+              <Path d="M0,0 L360,0 L360,240 L0,240Z" fill="url(#rpHero)" />
+              <Path d="M0,0 L360,0 L360,140 L0,200 Z" fill="url(#rpGlow)" />
+              <Path d="M0,240 L360,240 L360,80 L0,180 Z" fill="url(#rpGlow2)" />
             </Svg>
           </View>
           <View style={styles.heroTopRow}>
             <View style={styles.heroChip}>
-              <SparkleIcon size={11} color="#60A5FA" />
-              <Text style={styles.heroChipText}>{periodLabel.toUpperCase()}</Text>
+              <SparkleIcon size={11} color="#93C5FD" />
+              <Text style={styles.heroChipText}>{rangeLabel(range).toUpperCase()}</Text>
             </View>
-            <View style={[styles.heroTrendPill, { backgroundColor: insights.trendPct >= 0 ? "rgba(34,197,94,0.18)" : "rgba(239,68,68,0.18)" }]}>
-              {insights.trendPct >= 0 ? (
-                <TrendUpIcon size={11} color="#22C55E" />
-              ) : (
-                <TrendDownIcon size={11} color="#F87171" />
-              )}
-              <Text style={[styles.heroTrendText, { color: insights.trendPct >= 0 ? "#22C55E" : "#F87171" }]}>
-                {`${insights.trendPct >= 0 ? "+" : ""}${insights.trendPct.toFixed(1)}% vs önceki dönem`}
+            <View
+              style={[
+                styles.heroTrendPill,
+                { backgroundColor: trendPct >= 0 ? "rgba(34,197,94,0.18)" : "rgba(239,68,68,0.18)" },
+              ]}
+            >
+              {trendPct >= 0 ? <TrendUpIcon size={11} color="#22C55E" /> : <TrendDownIcon size={11} color="#F87171" />}
+              <Text style={[styles.heroTrendText, { color: trendPct >= 0 ? "#22C55E" : "#F87171" }]}>
+                {`${trendPct >= 0 ? "+" : ""}${trendPct.toFixed(1)}% vs önceki dönem`}
               </Text>
             </View>
           </View>
 
           <Text style={styles.heroLabel}>Toplam Ciro</Text>
-          <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 6 }}>
-            <AnimatedNumber
-              testID="reports-total-revenue"
-              value={totalRevenue}
-              format={(n) => formatTry(n)}
-              style={styles.heroValue}
-            />
-          </View>
+          <AnimatedNumber
+            testID="reports-total-revenue"
+            value={totalRevenue}
+            format={(n) => formatTry(n)}
+            style={styles.heroValue}
+          />
 
           <View style={styles.heroSparkWrap}>
-            <Sparkline data={insights.sparkData.length ? insights.sparkData : [0, 0]} width={SCREEN_W - 56} height={70} color="#60A5FA" fillOpacity={0.25} />
+            <Sparkline
+              data={sparkData.length ? sparkData : [0, 0]}
+              width={SCREEN_W - 56}
+              height={70}
+              color="#60A5FA"
+              fillOpacity={0.3}
+            />
           </View>
 
           <View style={styles.heroFooter}>
@@ -242,34 +409,46 @@ export default function ReportsScreen() {
           </View>
         </SafeAnimatedView>
 
-        {/* PERIOD PILL SELECTOR (overlapping hero) */}
+        {/* PERIOD PILLS */}
         <View style={styles.periodWrap}>
           <View style={[styles.periodTrack, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.md]}>
-            {[1, 7, 30].map((p) => {
-              const active = period === (p as Period);
+            {quickPills.map((p) => {
+              const active = isCustomMatch(p);
               return (
                 <PressableScale
-                  key={p}
-                  testID={`reports-period-${p}`}
-                  onPress={() => setPeriod(p as Period)}
-                  style={[
-                    styles.periodPill,
-                    active && { backgroundColor: colors.primary },
-                  ]}
+                  key={p.key}
+                  testID={`reports-period-${p.key}`}
+                  onPress={() => setRange(p)}
+                  style={[styles.periodPill, active && { backgroundColor: colors.primary }]}
                 >
-                  <Text
-                    style={[
-                      styles.periodPillText,
-                      { color: active ? "#FFFFFF" : colors.textSecondary, fontWeight: active ? "700" : "600" },
-                    ]}
-                  >
-                    {p === 1 ? "Bugün" : `${p} Gün`}
+                  <Text style={[styles.periodPillText, { color: active ? "#FFFFFF" : colors.textSecondary, fontWeight: active ? "700" : "600" }]}>
+                    {p.label.replace("Son ", "").replace("Bugün", "Bugün")}
                   </Text>
                 </PressableScale>
               );
             })}
+            <PressableScale
+              testID="reports-period-custom"
+              onPress={() => setPickerOpen(true)}
+              style={[styles.periodPill, isCustomActive && { backgroundColor: colors.primary }, { flexDirection: "row", gap: 6, alignItems: "center" }]}
+            >
+              <FilterIcon size={13} color={isCustomActive ? "#FFFFFF" : colors.textSecondary} strokeWidth={2.4} />
+              <Text style={[styles.periodPillText, { color: isCustomActive ? "#FFFFFF" : colors.textSecondary, fontWeight: isCustomActive ? "700" : "600" }]}>
+                {isCustomActive ? rangeLabel(range) : "Özel"}
+              </Text>
+            </PressableScale>
           </View>
         </View>
+
+        {/* No data fallback notice */}
+        {!loading && totalRevenue === 0 && totalOrders === 0 ? (
+          <SafeAnimatedView entering={FadeInUp.delay(140).duration(400)} style={[styles.notice, { backgroundColor: colors.warningBg, borderColor: colors.warning }]}>
+            <ZapIcon size={14} color={colors.warning} />
+            <Text style={[styles.noticeText, { color: colors.textPrimary }]} numberOfLines={2}>
+              Bu dönem için veri bulunamadı. Tarih aralığını genişletmeyi dene.
+            </Text>
+          </SafeAnimatedView>
+        ) : null}
 
         {/* KPI grid */}
         <SafeAnimatedView entering={FadeInUp.delay(180).duration(450)} style={styles.kpiGrid}>
@@ -302,28 +481,28 @@ export default function ReportsScreen() {
           </View>
         </SafeAnimatedView>
 
-        {/* INSIGHT cards */}
+        {/* Insights */}
         <SafeAnimatedView entering={FadeInUp.delay(240).duration(450)} style={[styles.insightCard, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
           <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Akıllı İçgörüler</Text>
           <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
             <InsightRow
               icon={<TrendUpIcon size={14} color={colors.success} />}
               label="En güçlü kanal"
-              value={insights.topChannel ? `${insights.topChannel.label || insights.topChannel.provider}` : "Veri yok"}
-              hint={insights.topChannel ? `${formatTry(insights.topChannel.revenue)} • ${insights.topChannel.orders} sipariş` : undefined}
+              value={topChannel ? `${topChannel.label || topChannel.provider}` : "Veri yok"}
+              hint={topChannel ? `${formatTry(topChannel.revenue)} • ${topChannel.orders} sipariş` : undefined}
             />
             <InsightRow
               icon={<CheckIcon size={14} color={colors.primary} />}
               label="En verimli gün"
-              value={insights.topDay ? formatTry(insights.topDay.revenue) : "-"}
-              hint={insights.topDay ? formatDayLabel(insights.topDay.date) : undefined}
+              value={topDay ? formatTry(topDay.revenue) : "-"}
+              hint={topDay ? formatDayLabelFull(topDay.date) : undefined}
             />
             <InsightRow
-              icon={insights.trendPct >= 0 ? <TrendUpIcon size={14} color={colors.success} /> : <TrendDownIcon size={14} color={colors.error} />}
-              label="Trend"
-              value={`${insights.trendPct >= 0 ? "+" : ""}${insights.trendPct.toFixed(1)}%`}
-              hint={`İlk yarıya göre değişim`}
-              valueColor={insights.trendPct >= 0 ? colors.success : colors.error}
+              icon={trendPct >= 0 ? <TrendUpIcon size={14} color={colors.success} /> : <TrendDownIcon size={14} color={colors.error} />}
+              label="Trend (önceki döneme göre)"
+              value={`${trendPct >= 0 ? "+" : ""}${trendPct.toFixed(1)}%`}
+              hint={previousRevenue > 0 ? `Önceki: ${formatTry(previousRevenue)}` : "Önceki dönem veri yok"}
+              valueColor={trendPct >= 0 ? colors.success : colors.error}
             />
           </View>
         </SafeAnimatedView>
@@ -373,16 +552,16 @@ export default function ReportsScreen() {
           )}
         </SafeAnimatedView>
 
-        {/* Daily revenue bar chart */}
+        {/* Daily revenue */}
         <SafeAnimatedView entering={FadeInUp.delay(360).duration(450)} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
           <View style={styles.cardHeadRow}>
             <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Günlük Ciro</Text>
-            <Text style={[styles.cardHint, { color: colors.textTertiary }]}>Son {dailyData.length} gün</Text>
+            <Text style={[styles.cardHint, { color: colors.textTertiary }]}>Son {dailyData.slice(-14).length} gün</Text>
           </View>
           {dailyData.length === 0 ? (
             <Text style={[styles.empty, { color: colors.textTertiary }]}>Seçili dönem için veri yok.</Text>
           ) : (
-            <DailyBars data={dailyData} topIndex={topIdx} colors={colors} />
+            <DailyBars data={dailyData.slice(-14)} topIndex={dailyData.slice(-14).findIndex((d) => Number(d.revenue || 0) === maxDailyRev)} colors={colors} />
           )}
         </SafeAnimatedView>
 
@@ -425,7 +604,6 @@ export default function ReportsScreen() {
           )}
         </SafeAnimatedView>
 
-        {/* Status breakdown */}
         {Array.isArray(reports?.status_breakdown) && (reports?.status_breakdown?.length ?? 0) > 0 ? (
           <SafeAnimatedView entering={FadeInUp.delay(480).duration(450)} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
             <View style={styles.cardHeadRow}>
@@ -450,23 +628,21 @@ export default function ReportsScreen() {
           </View>
         ) : null}
       </ScrollView>
+
+      <DateRangeModal
+        visible={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        currentRange={range}
+        onSelect={(r) => {
+          setRange(r);
+          setPickerOpen(false);
+        }}
+      />
     </View>
   );
 }
 
-function InsightRow({
-  icon,
-  label,
-  value,
-  hint,
-  valueColor,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  hint?: string;
-  valueColor?: string;
-}) {
+function InsightRow({ icon, label, value, hint, valueColor }: { icon: React.ReactNode; label: string; value: string; hint?: string; valueColor?: string }) {
   const { colors } = useTheme();
   return (
     <View style={styles.insightRow}>
@@ -480,7 +656,7 @@ function InsightRow({
         </Text>
       </View>
       {hint ? (
-        <Text style={[styles.insightHint, { color: colors.textTertiary }]} numberOfLines={1}>
+        <Text style={[styles.insightHint, { color: colors.textTertiary }]} numberOfLines={2}>
           {hint}
         </Text>
       ) : null}
@@ -488,15 +664,7 @@ function InsightRow({
   );
 }
 
-function DailyBars({
-  data,
-  topIndex,
-  colors,
-}: {
-  data: { date: string; revenue: number; orders: number }[];
-  topIndex: number;
-  colors: ReturnType<typeof useTheme>["colors"];
-}) {
+function DailyBars({ data, topIndex, colors }: { data: { date: string; revenue: number; orders: number }[]; topIndex: number; colors: any }) {
   const max = Math.max(1, ...data.map((d) => Number(d.revenue || 0)));
   const total = data.reduce((a, b) => a + Number(b.revenue || 0), 0);
   return (
@@ -507,25 +675,14 @@ function DailyBars({
           const isTop = i === topIndex && Number(d.revenue || 0) > 0;
           return (
             <View key={`${d.date}-${i}`} style={styles.dailyCol}>
-              <View
-                style={[
-                  styles.dailyBar,
-                  {
-                    height: Math.max(2, h),
-                    backgroundColor: isTop ? colors.primary : colors.borderSubtle,
-                  },
-                ]}
-              />
+              <View style={[styles.dailyBar, { height: Math.max(2, h), backgroundColor: isTop ? colors.primary : colors.borderSubtle }]} />
             </View>
           );
         })}
       </View>
       <View style={styles.dailyLabels}>
         {data.map((d, i) => (
-          <Text
-            key={`l-${i}`}
-            style={[styles.dailyLabel, { color: colors.textTertiary }]}
-          >
+          <Text key={`l-${i}`} style={[styles.dailyLabel, { color: colors.textTertiary }]}>
             {formatDayShort(d.date)}
           </Text>
         ))}
@@ -540,13 +697,152 @@ function DailyBars({
   );
 }
 
+function DateRangeModal({
+  visible,
+  onClose,
+  currentRange,
+  onSelect,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  currentRange: RangeT;
+  onSelect: (r: RangeT) => void;
+}) {
+  const { colors, shadows } = useTheme();
+  const [startStr, setStartStr] = useState("");
+  const [endStr, setEndStr] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (visible) {
+      setStartStr(formatDateInput(currentRange.start));
+      setEndStr(formatDateInput(currentRange.end));
+      setError(null);
+    }
+  }, [visible, currentRange]);
+
+  const presets = useMemo(() => presetRanges(), []);
+
+  const applyCustom = () => {
+    const s = parseDateInput(startStr);
+    const e = parseDateInput(endStr);
+    if (!s || !e) {
+      setError("Tarihler GG.AA.YYYY formatında olmalı.");
+      return;
+    }
+    if (s > e) {
+      setError("Başlangıç tarihi bitişten sonra olamaz.");
+      return;
+    }
+    onSelect({ key: "custom", label: "Özel", start: startOfDay(s), end: endOfDay(e) });
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <PressableScale onPress={onClose} style={StyleSheet.absoluteFill as any}>
+          <View style={{ flex: 1 }} />
+        </PressableScale>
+        <View style={[styles.modalSheet, { backgroundColor: colors.surface }, shadows.lg]}>
+          <View style={styles.modalGrabber} />
+          <View style={styles.modalHeader}>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Tarih Aralığı</Text>
+            <PressableScale onPress={onClose} style={[styles.modalClose, { backgroundColor: colors.surfaceMuted }]}>
+              <CloseIcon size={16} color={colors.textSecondary} />
+            </PressableScale>
+          </View>
+
+          <ScrollView style={{ maxHeight: 480 }} contentContainerStyle={{ paddingBottom: spacing.md }}>
+            <Text style={[styles.modalSection, { color: colors.textTertiary }]}>HIZLI SEÇİMLER</Text>
+            <View style={styles.presetGrid}>
+              {presets.map((p) => {
+                const active = currentRange.key === p.key;
+                return (
+                  <PressableScale
+                    key={p.key}
+                    testID={`preset-${p.key}`}
+                    onPress={() => onSelect(p)}
+                    style={[
+                      styles.presetCell,
+                      {
+                        backgroundColor: active ? colors.primary : colors.surfaceMuted,
+                        borderColor: active ? colors.primary : colors.borderSubtle,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.presetText, { color: active ? "#FFFFFF" : colors.textPrimary }]}>
+                      {p.label}
+                    </Text>
+                  </PressableScale>
+                );
+              })}
+            </View>
+
+            <Text style={[styles.modalSection, { color: colors.textTertiary, marginTop: spacing.md }]}>ÖZEL ARALIK</Text>
+            <View style={{ flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg }}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>BAŞLANGIÇ</Text>
+                <TextInput
+                  testID="date-start-input"
+                  value={startStr}
+                  onChangeText={setStartStr}
+                  placeholder="GG.AA.YYYY"
+                  placeholderTextColor={colors.textTertiary}
+                  style={[styles.dateInput, { backgroundColor: colors.surfaceMuted, color: colors.textPrimary, borderColor: colors.borderSubtle }]}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>BİTİŞ</Text>
+                <TextInput
+                  testID="date-end-input"
+                  value={endStr}
+                  onChangeText={setEndStr}
+                  placeholder="GG.AA.YYYY"
+                  placeholderTextColor={colors.textTertiary}
+                  style={[styles.dateInput, { backgroundColor: colors.surfaceMuted, color: colors.textPrimary, borderColor: colors.borderSubtle }]}
+                />
+              </View>
+            </View>
+            {error ? (
+              <Text style={[styles.modalError, { color: colors.error }]}>{error}</Text>
+            ) : null}
+            <View style={{ paddingHorizontal: spacing.lg, marginTop: spacing.md }}>
+              <PressableScale
+                testID="apply-custom-range"
+                onPress={applyCustom}
+                style={[styles.applyBtn, { backgroundColor: colors.primary }, shadows.primary]}
+              >
+                <Text style={styles.applyBtnText}>Uygula</Text>
+              </PressableScale>
+            </View>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function formatDateInput(d: Date) {
+  return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
+}
+function parseDateInput(s: string): Date | null {
+  const m = s.trim().match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  if (!m) return null;
+  const dd = Number(m[1]);
+  const mm = Number(m[2]);
+  const yy = Number(m[3]);
+  const d = new Date(yy, mm - 1, dd);
+  if (Number.isNaN(d.getTime()) || d.getDate() !== dd || d.getMonth() + 1 !== mm) return null;
+  return d;
+}
+
 function formatDayShort(dateStr: string) {
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return String(dateStr).slice(5);
   return `${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function formatDayLabel(dateStr?: string) {
+function formatDayLabelFull(dateStr?: string) {
   if (!dateStr) return "-";
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return String(dateStr);
@@ -558,42 +854,35 @@ const styles = StyleSheet.create({
   wrap: { flex: 1 },
   titleRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
   eyebrow: { fontSize: 11, fontWeight: fontWeight.bold, letterSpacing: 0.6, textTransform: "uppercase" },
-  title: { fontSize: 26, fontWeight: fontWeight.bold, letterSpacing: -0.6, marginTop: 2 },
+  title: { fontSize: 28, fontWeight: fontWeight.bold, letterSpacing: -0.7, marginTop: 2 },
   heroCard: {
     marginHorizontal: spacing.lg,
     marginTop: spacing.xs,
     borderRadius: radius.xl,
     padding: spacing.lg,
     overflow: "hidden",
+    minHeight: 220,
   },
   heroTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
-  heroChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 9999,
-    backgroundColor: "rgba(96,165,250,0.15)",
-  },
-  heroChipText: { color: "#93C5FD", fontSize: 10.5, fontWeight: "800", letterSpacing: 0.5 },
+  heroChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 9999, backgroundColor: "rgba(96,165,250,0.18)", maxWidth: "70%" },
+  heroChipText: { color: "#BFDBFE", fontSize: 10.5, fontWeight: "800", letterSpacing: 0.5 },
   heroTrendPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 9999 },
   heroTrendText: { fontSize: 10.5, fontWeight: "700" },
-  heroLabel: { color: "#94A3B8", fontSize: 12, fontWeight: "600", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 4 },
-  heroValue: { color: "#FFFFFF", fontSize: 38, fontWeight: "800", letterSpacing: -1.4 },
+  heroLabel: { color: "#94A3B8", fontSize: 11, fontWeight: "700", letterSpacing: 0.5, textTransform: "uppercase" },
+  heroValue: { color: "#FFFFFF", fontSize: 38, fontWeight: "800", letterSpacing: -1.4, marginTop: 2 },
   heroSparkWrap: { marginTop: spacing.sm, marginBottom: spacing.sm, alignItems: "center" },
   heroFooter: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(255,255,255,0.07)",
     borderRadius: radius.md,
     paddingVertical: spacing.sm,
     marginTop: 4,
   },
   heroFootCell: { flex: 1, alignItems: "center" },
-  heroFootDivider: { width: 1, height: 24, backgroundColor: "rgba(255,255,255,0.1)" },
-  heroFootLabel: { color: "#94A3B8", fontSize: 10.5, fontWeight: "600", letterSpacing: 0.4, textTransform: "uppercase" },
-  heroFootValue: { color: "#FFFFFF", fontSize: 15, fontWeight: "700", marginTop: 2 },
+  heroFootDivider: { width: 1, height: 24, backgroundColor: "rgba(255,255,255,0.12)" },
+  heroFootLabel: { color: "#94A3B8", fontSize: 10.5, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase" },
+  heroFootValue: { color: "#FFFFFF", fontSize: 15, fontWeight: "800", marginTop: 2, letterSpacing: -0.3 },
   periodWrap: { paddingHorizontal: spacing.lg, marginTop: -22, marginBottom: spacing.sm, alignItems: "center" },
   periodTrack: {
     flexDirection: "row",
@@ -602,33 +891,28 @@ const styles = StyleSheet.create({
     borderRadius: 9999,
     borderWidth: 1,
     gap: 4,
+    flexWrap: "nowrap",
   },
-  periodPill: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 9999 },
-  periodPillText: { fontSize: 12.5 },
-  kpiGrid: {
+  periodPill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 9999 },
+  periodPillText: { fontSize: 12, letterSpacing: -0.1 },
+  notice: {
+    marginHorizontal: spacing.lg,
     flexDirection: "row",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    marginTop: spacing.xs,
+    alignItems: "center",
+    gap: 8,
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    marginBottom: spacing.xs,
   },
+  noticeText: { fontSize: 12, fontWeight: "600", flex: 1 },
+  kpiGrid: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginTop: spacing.xs },
   kpiCell: { flex: 1, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1, gap: 4 },
   kpiIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", marginBottom: 4 },
   kpiLabel: { fontSize: 10.5, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase" },
   kpiValue: { fontSize: 18, fontWeight: "800", letterSpacing: -0.4, marginTop: 2 },
-  card: {
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.md,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    padding: spacing.md,
-  },
-  insightCard: {
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.md,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    padding: spacing.md,
-  },
+  card: { marginHorizontal: spacing.lg, marginTop: spacing.md, borderRadius: radius.lg, borderWidth: 1, padding: spacing.md },
+  insightCard: { marginHorizontal: spacing.lg, marginTop: spacing.md, borderRadius: radius.lg, borderWidth: 1, padding: spacing.md },
   cardHeadRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.xs },
   cardTitle: { fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
   cardHint: { fontSize: 11, fontWeight: "600", letterSpacing: 0.3, textTransform: "uppercase" },
@@ -648,24 +932,9 @@ const styles = StyleSheet.create({
   dailyBar: { width: "100%", borderTopLeftRadius: 4, borderTopRightRadius: 4 },
   dailyLabels: { flexDirection: "row", marginTop: 6, gap: 6 },
   dailyLabel: { flex: 1, textAlign: "center", fontSize: 9.5, fontWeight: "600" },
-  dailyFooter: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: spacing.sm,
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
-  },
+  dailyFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1 },
   productRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 8 },
-  productImgWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 10,
-    borderWidth: 1,
-    overflow: "hidden",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  productImgWrap: { width: 42, height: 42, borderRadius: 10, borderWidth: 1, overflow: "hidden", alignItems: "center", justifyContent: "center" },
   productName: { fontSize: 13, fontWeight: "700" },
   productBarTrack: { height: 6, borderRadius: 3, marginTop: 6, overflow: "hidden" },
   productBarFill: { height: "100%", borderRadius: 3 },
@@ -675,4 +944,20 @@ const styles = StyleSheet.create({
   statusCell: { paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, minWidth: 100 },
   statusValue: { fontSize: 18, fontWeight: "800" },
   statusLabel: { fontSize: 11, fontWeight: "600", marginTop: 2, textTransform: "capitalize" },
+  // Modal
+  modalOverlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(11,17,32,0.55)" },
+  modalSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 8, paddingBottom: Platform.OS === "ios" ? 32 : 16 },
+  modalGrabber: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: "#CBD5E1", marginBottom: 12 },
+  modalHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.lg, marginBottom: 8 },
+  modalTitle: { fontSize: 18, fontWeight: "800", letterSpacing: -0.4, flex: 1 },
+  modalClose: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  modalSection: { fontSize: 11, fontWeight: "800", letterSpacing: 0.6, textTransform: "uppercase", paddingHorizontal: spacing.lg, marginTop: spacing.sm, marginBottom: 8 },
+  presetGrid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: spacing.lg, gap: 8 },
+  presetCell: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5 },
+  presetText: { fontSize: 13, fontWeight: "700", letterSpacing: -0.1 },
+  dateLabel: { fontSize: 10.5, fontWeight: "800", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 6 },
+  dateInput: { height: 46, borderRadius: 12, paddingHorizontal: 12, fontSize: 14, fontWeight: "600", borderWidth: 1.5, letterSpacing: 0.5 },
+  modalError: { fontSize: 12, fontWeight: "600", paddingHorizontal: spacing.lg, marginTop: spacing.xs },
+  applyBtn: { height: 50, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  applyBtnText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
 });
