@@ -14,7 +14,13 @@ export function RowCard({
   badge,
   onPress,
   testID,
+  accent,
+  leading,
 }: {
+  // Sol kenarda ince renkli şerit (durum ya da kanal rengi).
+  accent?: string;
+  // Başlığın solunda gösterilen öğe (logo, simge kutusu, görsel).
+  leading?: React.ReactNode;
   title: string;
   subtitle?: string;
   meta?: string;
@@ -27,6 +33,8 @@ export function RowCard({
   const { colors, shadows } = useTheme();
   const body = (
     <View style={[styles.card, shadows.sm, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+      {accent ? <View style={[styles.accent, { backgroundColor: accent }]} /> : null}
+      {leading}
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={1}>
           {title}
@@ -73,5 +81,6 @@ export function StatCard({ label, value, tone }: { label: string; value: string;
 
 const styles = StyleSheet.create({
   card: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1, minHeight: 64 },
+  accent: { position: "absolute", left: 0, top: 12, bottom: 12, width: 4, borderTopRightRadius: 4, borderBottomRightRadius: 4 },
   stat: { flex: 1, borderRadius: radius.lg, borderWidth: 1, padding: spacing.md },
 });

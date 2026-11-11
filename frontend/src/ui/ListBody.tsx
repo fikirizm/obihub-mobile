@@ -5,6 +5,8 @@ import { spacing } from "../theme/tokens";
 import { InboxIcon } from "../components/Icons";
 import { EmptyState } from "../components/EmptyState";
 import { OrderCardSkeleton } from "../components/Skeleton";
+import { SafeAnimatedView } from "../components/SafeAnimatedView";
+import { FadeInDown } from "react-native-reanimated";
 
 type ListState<T> = {
   items: T[];
@@ -54,7 +56,14 @@ export function ListBody<T extends { id: string }>({
       ListHeaderComponent={header}
       ItemSeparatorComponent={() => <View style={{ height: spacing.xs }} />}
       refreshControl={<RefreshControl refreshing={state.refreshing} onRefresh={state.refresh} tintColor={colors.primary} />}
-      renderItem={({ item, index }) => renderItem(item, index)}
+      renderItem={({ item, index }) =>
+        // İlk ekrandaki satırlar sırayla kayarak gelir; sonradan yüklenenler beklemeden görünür.
+        index < 10 ? (
+          <SafeAnimatedView entering={FadeInDown.delay(index * 35).duration(320)}>{renderItem(item, index)}</SafeAnimatedView>
+        ) : (
+          renderItem(item, index)
+        )
+      }
       ListEmptyComponent={
         <EmptyState
           icon={icon || <InboxIcon size={30} color={colors.textTertiary} />}

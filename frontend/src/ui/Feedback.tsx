@@ -77,6 +77,8 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
   const numberResolver = useRef<((v: number | null) => void) | null>(null);
   const [noteText, setNoteText] = useState("");
   const noteRef = useRef("");
+  const freshRef = useRef(true);
+  const [noteFocused, setNoteFocused] = useState(false);
   const [methodValue, setMethodValue] = useState("");
   const methodRef = useRef("");
   const [chooseState, setChooseState] = useState<ChooseOptions<string> | null>(null);
@@ -103,6 +105,8 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
       setNumberText(options.decimal ? (options.initial ? options.initial.toFixed(2).replace(".", ",") : "") : String(Math.round(options.initial)));
       setNoteText("");
       noteRef.current = "";
+      freshRef.current = true;
+      setNoteFocused(false);
       const firstMethod = options.methods?.[0]?.value || "";
       setMethodValue(firstMethod);
       methodRef.current = firstMethod;
@@ -120,6 +124,39 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
   );
 
   const parsedNumber = numberState ? parseAmount(numberText, Boolean(numberState.decimal)) : null;
+
+  // Gömülü tuş takımı. İlk tuş, açılışta gösterilen değerin üzerine yazar.
+  const pressKey = useCallback(
+    (key: string) => {
+      Haptics.selectionAsync().catch(() => {});
+      const decimal = Boolean(numberState?.decimal);
+      setNumberText((prev) => {
+        // Silme tuşu açılıştaki değeri de birer hane siler; rakam tuşları ise üzerine yazar.
+        if (key === "back") {
+          freshRef.current = false;
+          return prev.slice(0, -1);
+        }
+        const base = freshRef.current ? "" : prev;
+        freshRef.current = false;
+        if (key === ",") {
+          if (!decimal || base.includes(",")) return base;
+          return base === "" ? "0," : `${base},`;
+        }
+        const next = base === "0" ? key : base + key;
+        const [whole, frac] = next.split(",");
+        if (whole.length > 9 || (frac !== undefined && frac.length > 2)) return base;
+        return next;
+      });
+    },
+    [numberState?.decimal]
+  );
+
+  // Hızlı artır/azalt (yalnızca tam sayı girişlerinde).
+  const stepBy = useCallback((delta: number) => {
+    Haptics.selectionAsync().catch(() => {});
+    freshRef.current = false;
+    setNumberText((prev) => String(Math.max(0, (parseAmount(prev, false) ?? 0) + delta)));
+  }, []);
 
   const settleNumber = useCallback((value: number | null) => {
     numberResolver.current?.(value);
@@ -227,19 +264,34 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
               {numberState.message ? (
                 <Text style={[type.body, { color: colors.textSecondary, textAlign: "center", marginTop: spacing.xs }]}>{numberState.message}</Text>
               ) : null}
-              <View style={[styles.numberWrap, { borderColor: colors.primary, backgroundColor: colors.surfaceMuted }]}>
-                <TextInput
-                  testID="number-input"
-                  value={numberText}
-                  onChangeText={(t) => setNumberText(t.replace(numberState.decimal ? /[^0-9.,]/g : /[^0-9]/g, ""))}
-                  keyboardType={numberState.decimal ? "decimal-pad" : "number-pad"}
-                  autoFocus
-                  selectTextOnFocus
-                  accessibilityLabel={numberState.title}
-                  style={[styles.numberInput, { color: colors.textPrimary }]}
-                />
-                {numberState.suffix ? <Text style={[type.headline, { color: colors.textTertiary }]}>{numberState.suffix}</Text> : null}
+              <View
+                testID="number-display"
+                accessible
+                accessibilityRole="text"
+                accessibilityLabel={`${numberState.title}: ${numberText || "0"} ${numberState.suffix || ""}`}
+                style={[styles.numberWrap, { borderColor: colors.primary, backgroundColor: colors.primarySoft }]}
+              >
+                <Text testID="number-input" style={[styles.numberValue, { color: numberText ? colors.textPrimary : colors.textTertiary }]} numberOfLines={1} adjustsFontSizeToFit>
+                  {numberText || "0"}
+                </Text>
+                {numberState.suffix ? <Text style={[type.headline, { color: colors.textSecondary }]}>{numberState.suffix}</Text> : null}
               </View>
+              {!numberState.decimal ? (
+                <View style={styles.stepRow}>
+                  {[-10, -1, 1, 10].map((d) => (
+                    <Pressable
+                      key={d}
+                      testID={`number-step-${d}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={d > 0 ? `${d} artır` : `${Math.abs(d)} azalt`}
+                      onPress={() => stepBy(d)}
+                      style={({ pressed }) => [styles.stepBtn, { borderColor: colors.border, backgroundColor: pressed ? colors.backgroundElevated : colors.surface }]}
+                    >
+                      <Text style={[type.bodyStrong, { color: d > 0 ? colors.success : colors.error, fontVariant: ["tabular-nums"] }]}>{d > 0 ? `+${d}` : d}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
               {numberState.methods && numberState.methods.length > 0 ? (
                 <View style={styles.methodRow} accessibilityRole="radiogroup">
                   {numberState.methods.map((m) => {
@@ -278,11 +330,37 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
                   placeholder={numberState.noteLabel}
                   placeholderTextColor={colors.textTertiary}
                   accessibilityLabel={numberState.noteLabel}
+                  onFocus={() => setNoteFocused(true)}
+                  onBlur={() => setNoteFocused(false)}
+                  returnKeyType="done"
                   maxLength={140}
                   style={[styles.noteInput, { color: colors.textPrimary, borderColor: colors.border, backgroundColor: colors.surfaceMuted }]}
                 />
               ) : null}
-              {/* Düğmeler yan yana: klavye açıkken küçük ekranlarda da sayfa sığar. */}
+              {/* Not yazılırken sistem klavyesi açılır; yer açmak için tuş takımı gizlenir. */}
+              {!noteFocused ? (
+                <View style={styles.keypad}>
+                  {["1", "2", "3", "4", "5", "6", "7", "8", "9", numberState.decimal ? "," : "", "0", "back"].map((k, idx) =>
+                    k === "" ? (
+                      <View key={`empty-${idx}`} style={styles.keyCell} />
+                    ) : (
+                      <View key={k} style={styles.keyCell}>
+                        <Pressable
+                          testID={`key-${k === "," ? "comma" : k}`}
+                          accessibilityRole="button"
+                          accessibilityLabel={k === "back" ? "Sil" : k === "," ? "Virgül" : k}
+                          onPress={() => pressKey(k)}
+                          onLongPress={k === "back" ? () => { freshRef.current = false; setNumberText(""); } : undefined}
+                          style={({ pressed }) => [styles.key, { backgroundColor: pressed ? colors.border : colors.backgroundElevated }]}
+                        >
+                          <Text style={[styles.keyText, { color: colors.textPrimary }]}>{k === "back" ? "⌫" : k}</Text>
+                        </Pressable>
+                      </View>
+                    )
+                  )}
+                </View>
+              ) : null}
+              {/* Düğmeler yan yana: küçük ekranlarda da sayfa sığar. */}
               <View style={styles.numberActions}>
                 <Button testID="number-cancel" label="Vazgeç" variant="secondary" onPress={() => settleNumber(null)} style={{ flex: 1 }} />
                 <Button
@@ -348,7 +426,7 @@ const styles = StyleSheet.create({
   },
   toastDot: { width: 8, height: 8, borderRadius: 4 },
   backdrop: { ...StyleSheet.absoluteFillObject },
-  numberActions: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg },
+  numberActions: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
   keyboardWrap: { flex: 1, justifyContent: "flex-end" },
   sheetInFlow: {
     borderTopLeftRadius: radius.xxl,
@@ -374,9 +452,15 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     marginTop: spacing.md,
-    height: 60,
+    height: 64,
   },
-  numberInput: { flex: 1, fontSize: 26, fontWeight: "700", fontVariant: ["tabular-nums"], paddingVertical: 0, height: 60 },
+  numberValue: { flex: 1, fontSize: 32, fontWeight: "800", fontVariant: ["tabular-nums"], letterSpacing: -0.5 },
+  stepRow: { flexDirection: "row", gap: spacing.xs, marginTop: spacing.sm },
+  stepBtn: { flex: 1, height: 44, borderRadius: radius.md, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  keypad: { flexDirection: "row", flexWrap: "wrap", marginTop: spacing.sm, marginHorizontal: -4 },
+  keyCell: { width: "33.3333%", padding: 4 },
+  key: { height: 52, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
+  keyText: { fontSize: 24, fontWeight: "600", fontVariant: ["tabular-nums"] },
   methodRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: spacing.sm },
   methodChip: { height: 40, paddingHorizontal: 14, borderRadius: 9999, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   noteInput: { borderWidth: 1, borderRadius: radius.md, paddingHorizontal: spacing.md, height: 48, fontSize: 15, marginTop: spacing.sm },
