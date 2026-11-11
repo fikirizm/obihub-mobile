@@ -1,63 +1,99 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
+import { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthProvider";
 import { useNotifications } from "../notifications/store";
 import { useTheme } from "../theme/ThemeProvider";
-import { spacing, type } from "../theme/tokens";
-import { ArrowLeftIcon, BellIcon } from "../components/Icons";
+import { radius, spacing, type } from "../theme/tokens";
+import { ArrowLeftIcon, BellIcon, LogoutIcon, MoonIcon, SunIcon } from "../components/Icons";
 import { PressableScale } from "../components/KPICard";
+import { SafeAnimatedView } from "../components/SafeAnimatedView";
 import { DESTRUCTIVE_BG } from "./Button";
+import { useFeedback } from "./Feedback";
 
-function initials(name?: string | null) {
-  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toLocaleUpperCase("tr-TR");
-}
+const ICO = require("../../assets/obihub/obihub-ico.png");
 
-// Sekme ekranlarının başlığı: büyük başlık, bildirim zili ve profil.
-export function TabHeader({ title, subtitle }: { title: string; subtitle?: string }) {
+// Sekme ekranlarının üst çubuğu: logo ve karşılama solda; bildirim, tema ve çıkış sağda.
+// Altında ekranın büyük başlığı yer alır.
+export function TabHeader({ title, eyebrow, subtitle }: { title: string; eyebrow?: string; subtitle?: string }) {
   const insets = useSafeAreaInsets();
-  const { colors } = useTheme();
-  const { user } = useAuth();
+  const { colors, mode, toggle, shadows } = useTheme();
+  const { user, logout } = useAuth();
   const { unread } = useNotifications();
+  const { confirm } = useFeedback();
+  const lead = eyebrow || subtitle;
+
+  const onLogout = async () => {
+    const ok = await confirm({ title: "Çıkış yapılsın mı?", message: "Hesabınıza tekrar giriş yapmanız gerekir.", confirmLabel: "Çıkış yap", destructive: true });
+    if (ok) await logout();
+  };
+
+  const btn = [styles.iconBtn, shadows.sm, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }];
 
   return (
     <View style={[styles.tabWrap, { paddingTop: Math.max(insets.top, 12) + 4, backgroundColor: colors.background }]}>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        {subtitle ? (
-          <Text style={[type.caption, { color: colors.textTertiary }]} numberOfLines={1}>
-            {subtitle}
+      <View style={styles.barRow}>
+        <PressableScale
+          testID="header-profile"
+          onPress={() => router.push("/settings")}
+          accessibilityRole="button"
+          accessibilityLabel={`Profil ve ayarlar, ${user?.full_name || "kullanıcı"}`}
+          style={styles.identity}
+        >
+          <View style={[styles.logoTile, shadows.sm, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+            <Image source={ICO} style={styles.logo} resizeMode="contain" accessibilityIgnoresInvertColors />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[type.caption, { color: colors.textTertiary }]} numberOfLines={1}>
+              Hoş geldiniz
+            </Text>
+            <Text style={[type.bodyStrong, { color: colors.textPrimary, fontWeight: "700" }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+              {user?.full_name || "Kullanıcı"}
+            </Text>
+          </View>
+        </PressableScale>
+
+        <PressableScale
+          testID="header-notifications"
+          onPress={() => router.push("/notifications")}
+          accessibilityRole="button"
+          accessibilityLabel={unread > 0 ? `Bildirimler, ${unread} okunmamış` : "Bildirimler"}
+          hitSlop={2}
+          style={btn}
+        >
+          <BellIcon size={20} color={colors.textPrimary} />
+          {unread > 0 ? (
+            <View style={[styles.badge, { backgroundColor: DESTRUCTIVE_BG, borderColor: colors.background }]}>
+              <Text style={styles.badgeText}>{unread > 9 ? "9+" : String(unread)}</Text>
+            </View>
+          ) : null}
+        </PressableScale>
+        <PressableScale
+          testID="header-theme-toggle"
+          onPress={toggle}
+          accessibilityRole="button"
+          accessibilityLabel={mode === "dark" ? "Açık temaya geç" : "Koyu temaya geç"}
+          style={btn}
+        >
+          {mode === "dark" ? <SunIcon size={20} color={colors.amber} /> : <MoonIcon size={20} color={colors.textPrimary} />}
+        </PressableScale>
+        <PressableScale testID="header-logout" onPress={onLogout} accessibilityRole="button" accessibilityLabel="Çıkış yap" style={btn}>
+          <LogoutIcon size={20} color={colors.textPrimary} />
+        </PressableScale>
+      </View>
+
+      <SafeAnimatedView entering={FadeInDown.duration(350)} style={styles.titleBlock}>
+        {lead ? (
+          <Text style={[type.caption, styles.eyebrow, { color: colors.primary }]} numberOfLines={1}>
+            {lead}
           </Text>
         ) : null}
         <Text accessibilityRole="header" style={[type.largeTitle, { color: colors.textPrimary }]} numberOfLines={1}>
           {title}
         </Text>
-      </View>
-      <PressableScale
-        testID="header-notifications"
-        onPress={() => router.push("/notifications")}
-        accessibilityRole="button"
-        accessibilityLabel={unread > 0 ? `Bildirimler, ${unread} okunmamış` : "Bildirimler"}
-        style={[styles.iconBtn, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}
-      >
-        <BellIcon size={20} color={colors.textPrimary} />
-        {unread > 0 ? (
-          <View style={[styles.badge, { backgroundColor: DESTRUCTIVE_BG, borderColor: colors.background }]}>
-            <Text style={styles.badgeText}>{unread > 9 ? "9+" : String(unread)}</Text>
-          </View>
-        ) : null}
-      </PressableScale>
-      <PressableScale
-        testID="header-profile"
-        onPress={() => router.push("/settings")}
-        accessibilityRole="button"
-        accessibilityLabel="Profil ve ayarlar"
-        style={[styles.avatar, { backgroundColor: colors.primary }]}
-      >
-        <Text style={styles.avatarText}>{initials(user?.full_name)}</Text>
-      </PressableScale>
+      </SafeAnimatedView>
     </View>
   );
 }
@@ -65,7 +101,7 @@ export function TabHeader({ title, subtitle }: { title: string; subtitle?: strin
 // İçeri girilen ekranların başlığı: geri düğmesi ve ortalanmış başlık.
 export function StackHeader({ title, subtitle, right }: { title: string; subtitle?: string; right?: React.ReactNode }) {
   const insets = useSafeAreaInsets();
-  const { colors } = useTheme();
+  const { colors, shadows } = useTheme();
   return (
     <View style={[styles.stackWrap, { paddingTop: Math.max(insets.top, 12), backgroundColor: colors.background }]}>
       <PressableScale
@@ -73,7 +109,7 @@ export function StackHeader({ title, subtitle, right }: { title: string; subtitl
         onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/dashboard"))}
         accessibilityRole="button"
         accessibilityLabel="Geri"
-        style={[styles.iconBtn, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}
+        style={[styles.iconBtn, shadows.sm, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}
       >
         <ArrowLeftIcon size={20} color={colors.textPrimary} />
       </PressableScale>
@@ -93,23 +129,27 @@ export function StackHeader({ title, subtitle, right }: { title: string; subtitl
 }
 
 const styles = StyleSheet.create({
-  tabWrap: { flexDirection: "row", alignItems: "flex-end", gap: spacing.xs, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
+  tabWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
+  barRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  identity: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  logoTile: { width: 42, height: 42, borderRadius: radius.md, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  logo: { width: 28, height: 28 },
+  titleBlock: { marginTop: spacing.md },
+  eyebrow: { fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 2 },
   stackWrap: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
-  iconBtn: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", borderWidth: 1 },
+  iconBtn: { width: 42, height: 42, borderRadius: radius.md, alignItems: "center", justifyContent: "center", borderWidth: 1 },
   rightSlot: { minWidth: 44, alignItems: "flex-end" },
   badge: {
     position: "absolute",
-    top: -2,
+    top: -4,
     right: -4,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
     borderWidth: 2,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 3,
   },
-  badgeText: { color: "#FFFFFF", fontSize: 11, fontWeight: "700", lineHeight: 12 },
-  avatar: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
-  avatarText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700", letterSpacing: 0.2 },
+  badgeText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700", lineHeight: 14 },
 });

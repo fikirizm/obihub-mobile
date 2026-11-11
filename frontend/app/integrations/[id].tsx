@@ -1,12 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated, { FadeInDown } from "react-native-reanimated";
-import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
+import React, { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, FlatList, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
-import { fontWeight, radius, spacing } from "../../src/theme/tokens";
+import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { getIntegrations, getOrders, syncIntegrationOrders } from "../../src/api";
 import {
   displayOrderNo,
@@ -14,17 +11,20 @@ import {
   formatTry,
   getOrderTrackingNo,
   orderTimestamp,
-  providerKey,
   providerLabel,
-  providerColor,
   relativeDateLabel,
   statusKindFromOrder,
 } from "../../src/utils";
 import { PressableScale } from "../../src/components/KPICard";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
-import { ArrowLeftIcon, RefreshIcon, SearchIcon } from "../../src/components/Icons";
+import { EmptyState } from "../../src/components/EmptyState";
+import { InboxIcon, RefreshIcon } from "../../src/components/Icons";
 import { NetworkErrorBanner } from "../../src/components/NetworkErrorBanner";
+import { Button } from "../../src/ui/Button";
+import { useFeedback } from "../../src/ui/Feedback";
+import { StackHeader } from "../../src/ui/Header";
+import { SearchField } from "../../src/ui/SearchField";
 import { saveCache, loadCache } from "../../src/offlineCache";
 import type { Integration, Order } from "../../src/types";
 
@@ -37,8 +37,8 @@ export default function IntegrationOrders() {
   const integrationId = String(params.id || "");
   const providerHint = String(params.provider || "");
   const { token } = useAuth();
-  const { colors, mode, shadows } = useTheme();
-  const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const { toast } = useFeedback();
 
   const [integration, setIntegration] = useState<Integration | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -46,7 +46,6 @@ export default function IntegrationOrders() {
   const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [search, setSearch] = useState("");
-  const [searchFocus, setSearchFocus] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
   const [cooldownEnd, setCooldownEnd] = useState(0);
   const [tickNow, setTickNow] = useState(Date.now());
@@ -81,8 +80,9 @@ export default function IntegrationOrders() {
       setIntegration(found);
       setIsOffline(false);
       await saveCache(cacheKey, { orders: fetchedOrders, integration: found });
-    } catch {}
-    finally {
+    } catch {
+      // Yüklenemezse eldeki (önbellekteki) kayıtlar kalır.
+    } finally {
       setLoading(false);
       setRefreshing(false);
     }
@@ -90,6 +90,7 @@ export default function IntegrationOrders() {
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, integrationId]);
 
   const filtered = useMemo(() => {
@@ -105,7 +106,6 @@ export default function IntegrationOrders() {
   }, [orders, search]);
 
   const provider = providerHint || integration?.provider || integration?.name || "";
-  const accent = providerColor(provider, colors.primary);
   const remainingMs = Math.max(0, cooldownEnd - tickNow);
   const cooldownText = useMemo(() => {
     if (remainingMs <= 0) return "";
@@ -120,78 +120,56 @@ export default function IntegrationOrders() {
       await syncIntegrationOrders(token, integration.id, integration.provider || integration.name || "", 7);
       setCooldownEnd(Date.now() + SYNC_COOLDOWN_MS);
       await load(true);
-      Alert.alert("Senkronizasyon", "Yeni siparişler güncellendi.");
+      toast("Yeni siparişler güncellendi.", "success");
     } catch (e: any) {
-      Alert.alert("Hata", e?.message || "Senkronizasyon başarısız.");
+      toast(e?.message || "Senkronizasyon başarısız oldu.", "error");
     } finally {
       setSyncBusy(false);
     }
   };
 
+  const onRefresh = () => {
+    setRefreshing(true);
+    load(true);
+  };
+
+  const storeName = integration?.name || providerLabel(provider) || "Mağaza";
+  const lastIndex = filtered.length - 1;
+
   return (
-    <View style={[styles.wrap, { backgroundColor: colors.background, paddingTop: insets.top }]}>
-      <Stack.Screen options={{ headerShown: false }} />
+    <View style={[styles.wrap, { backgroundColor: colors.background }]}>
+      <StackHeader title={storeName} subtitle={`${filtered.length} sipariş`} />
       <NetworkErrorBanner visible={isOffline} offline />
 
-      <View style={styles.headerRow}>
-        <PressableScale
-          testID="back-btn"
-          onPress={() => router.back()}
-          style={[styles.iconBtn, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}
-        >
-          <ArrowLeftIcon size={18} color={colors.textPrimary} />
-        </PressableScale>
-        <View style={styles.headerCenter}>
-          <PlatformLogo provider={provider} size="sm" />
-          <View style={{ marginLeft: 8, flex: 1 }}>
-            <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-              {integration?.name || providerLabel(provider) || "Mağaza"}
-            </Text>
-            <Text style={[styles.headerSub, { color: colors.textTertiary }]} numberOfLines={1}>
-              {filtered.length} sipariş
-            </Text>
-          </View>
+      <View style={styles.storeRow}>
+        <PlatformLogo provider={provider} size="sm" />
+        <View style={styles.storeText}>
+          <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={1}>
+            {providerLabel(provider) || storeName}
+          </Text>
         </View>
-        <PressableScale
+        <Button
           testID="sync-btn"
+          label="Senkronize et"
+          size="sm"
           onPress={handleSync}
-          disabled={syncBusy || remainingMs > 0}
-          style={[
-            styles.syncBtn,
-            { backgroundColor: accent },
-            shadows.primary,
-            (syncBusy || remainingMs > 0) ? { opacity: 0.6 } : undefined,
-          ]}
-        >
-          {syncBusy ? (
-            <ActivityIndicator color="#FFFFFF" size="small" />
-          ) : (
-            <>
-              <RefreshIcon size={14} color="#FFFFFF" />
-              <Text style={styles.syncBtnText}>{cooldownText || "Senkron"}</Text>
-            </>
-          )}
-        </PressableScale>
-      </View>
-
-      <View style={[styles.searchWrap, { backgroundColor: colors.surface, borderColor: searchFocus ? colors.primary : colors.borderSubtle }]}>
-        <SearchIcon size={18} color={colors.textTertiary} />
-        <TextInput
-          testID="orders-search"
-          value={search}
-          onChangeText={setSearch}
-          onFocus={() => setSearchFocus(true)}
-          onBlur={() => setSearchFocus(false)}
-          placeholder="Sipariş no veya müşteri ara..."
-          placeholderTextColor={colors.textTertiary}
-          style={[styles.searchInput, { color: colors.textPrimary }]}
+          busy={syncBusy}
+          disabled={remainingMs > 0}
+          icon={<RefreshIcon size={16} color="#FFFFFF" />}
+          style={remainingMs > 0 ? styles.syncDisabled : undefined}
         />
       </View>
+      {/* Tam genişlikte: düğmenin yanında dar kalıp süre kesilmesin. */}
+      <Text style={[type.caption, tabular, styles.syncNote, { color: colors.textTertiary }]} accessibilityLiveRegion="none">
+        {cooldownText ? `Yeniden senkronizasyon: ${cooldownText}` : "Son 7 günün siparişleri çekilir."}
+      </Text>
+
+      <SearchField testID="orders-search" value={search} onChangeText={setSearch} placeholder="Sipariş no veya müşteri ara" />
 
       {loading ? (
         <ScrollView
-          contentContainerStyle={{ flex: 1, alignItems: "center", justifyContent: "center" }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={colors.primary} />}
+          contentContainerStyle={styles.loading}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         >
           <ActivityIndicator color={colors.primary} />
         </ScrollView>
@@ -199,55 +177,56 @@ export default function IntegrationOrders() {
         <FlatList
           data={filtered}
           keyExtractor={(o) => o.id}
-          contentContainerStyle={{ padding: spacing.lg, gap: spacing.sm, paddingBottom: 40 }}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                load(true);
-              }}
-              tintColor={colors.primary}
+          contentContainerStyle={styles.list}
+          keyboardDismissMode="on-drag"
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+          ListEmptyComponent={
+            <EmptyState
+              icon={<InboxIcon size={30} color={colors.textTertiary} />}
+              title="Sipariş bulunamadı"
+              description="Arama ifadesini değiştirin veya senkronize ederek güncel siparişleri çekin."
             />
           }
-          ListEmptyComponent={
-            <View style={styles.emptyWrap}>
-              <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>Sipariş bulunamadı</Text>
-              <Text style={[styles.emptyDesc, { color: colors.textTertiary }]}>
-                Arama veya senkronize işlemiyle güncel siparişleri çek.
-              </Text>
-            </View>
-          }
           renderItem={({ item, index }) => {
-            const kind = statusKindFromOrder(item, provider);
+            const status = displayOrderStatus(item, provider);
+            const amount = formatTry(item.total_amount || 0);
             const trackingNo = getOrderTrackingNo(item);
             return (
-              <SafeAnimatedView entering={FadeInDown.delay(index * 30).springify().damping(18)}>
+              <View
+                style={[
+                  styles.rowShell,
+                  { backgroundColor: colors.surface, borderColor: colors.borderSubtle },
+                  index === 0 && styles.first,
+                  index === lastIndex && styles.last,
+                ]}
+              >
                 <PressableScale
                   testID={`order-${item.id}`}
                   onPress={() => router.push({ pathname: "/orders/[id]", params: { id: item.id, provider } })}
-                  style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Sipariş ${displayOrderNo(item)}, ${item.customer_name || "müşteri"}, ${amount}, ${status}`}
                 >
-                  <View style={styles.cardTop}>
-                    <Text style={[styles.orderNo, { color: colors.textPrimary }]} numberOfLines={1}>
-                      #{displayOrderNo(item)}
-                    </Text>
-                    <StatusBadge label={displayOrderStatus(item, provider)} kind={kind} size="sm" />
+                  <View style={[styles.row, index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
+                    <View style={styles.rowMain}>
+                      <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={1}>
+                        {item.customer_name || "Müşteri"}
+                      </Text>
+                      <Text style={[type.footnote, { color: colors.textSecondary }]} numberOfLines={1}>
+                        #{displayOrderNo(item)} · {relativeDateLabel(item)}
+                      </Text>
+                      {trackingNo ? (
+                        <Text style={[type.caption, tabular, { color: colors.textTertiary }]} numberOfLines={1}>
+                          Kargo takip: {trackingNo}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <View style={styles.trailing}>
+                      <Text style={[type.bodyStrong, tabular, { color: colors.textPrimary }]}>{amount}</Text>
+                      <StatusBadge label={status} kind={statusKindFromOrder(item, provider)} size="sm" />
+                    </View>
                   </View>
-                  <Text style={[styles.dateLine, { color: colors.textTertiary }]}>{relativeDateLabel(item)}</Text>
-                  <View style={styles.bottomRow}>
-                    <Text style={[styles.customer, { color: colors.textSecondary }]} numberOfLines={1}>
-                      {item.customer_name || "Müşteri"}
-                    </Text>
-                    <Text style={[styles.amount, { color: colors.textPrimary }]}>{formatTry(item.total_amount || 0)}</Text>
-                  </View>
-                  {trackingNo ? (
-                    <Text style={[styles.trackingLine, { color: colors.textTertiary }]} numberOfLines={1}>
-                      Kargo Takip: {trackingNo}
-                    </Text>
-                  ) : null}
                 </PressableScale>
-              </SafeAnimatedView>
+              </View>
             );
           }}
         />
@@ -258,48 +237,29 @@ export default function IntegrationOrders() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
-  headerRow: {
+  storeRow: {
     flexDirection: "row",
     alignItems: "center",
+    gap: spacing.sm,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.sm,
-    gap: 10,
+    paddingBottom: spacing.xs,
   },
-  iconBtn: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 1 },
-  headerCenter: { flex: 1, flexDirection: "row", alignItems: "center" },
-  headerTitle: { fontSize: 16, fontWeight: "700", letterSpacing: -0.2 },
-  headerSub: { fontSize: 11, fontWeight: "600", letterSpacing: 0.3, textTransform: "uppercase", marginTop: 2 },
-  syncBtn: {
-    paddingHorizontal: 14,
-    height: 40,
-    borderRadius: 12,
+  storeText: { flex: 1, minWidth: 0 },
+  syncNote: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
+  syncDisabled: { opacity: 0.6 },
+  loading: { flex: 1, alignItems: "center", justifyContent: "center" },
+  list: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.huge },
+  rowShell: { borderLeftWidth: 1, borderRightWidth: 1, overflow: "hidden" },
+  first: { borderTopWidth: 1, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg },
+  last: { borderBottomWidth: 1, borderBottomLeftRadius: radius.lg, borderBottomRightRadius: radius.lg },
+  row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    minHeight: 68,
   },
-  syncBtnText: { color: "#FFFFFF", fontSize: 12.5, fontWeight: "700", letterSpacing: -0.1 },
-  searchWrap: {
-    marginHorizontal: spacing.lg,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
-    height: 44,
-    marginBottom: spacing.xs,
-  },
-  searchInput: { flex: 1, fontSize: 14, fontWeight: "500" },
-  card: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.md, gap: 4 },
-  cardTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  orderNo: { fontSize: 15, fontWeight: "800", letterSpacing: -0.2 },
-  dateLine: { fontSize: 11.5, fontWeight: "600", letterSpacing: 0.2 },
-  bottomRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
-  customer: { fontSize: 13, fontWeight: "600", flex: 1, paddingRight: 8 },
-  amount: { fontSize: 14, fontWeight: "800" },
-  trackingLine: { fontSize: 11.5, fontWeight: "600", marginTop: 5 },
-  emptyWrap: { alignItems: "center", padding: spacing.xl, marginTop: spacing.lg, gap: 6 },
-  emptyTitle: { fontSize: 15, fontWeight: "700" },
-  emptyDesc: { fontSize: 12.5, textAlign: "center", paddingHorizontal: 28, fontWeight: "500" },
+  rowMain: { flex: 1, minWidth: 0, gap: 1 },
+  trailing: { alignItems: "flex-end", gap: 4 },
 });

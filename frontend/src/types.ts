@@ -304,6 +304,8 @@ export type FinanceOverview = {
   overdue_payable: number;
   month_cash_in: number;
   month_cash_out: number;
+  // TL dışında para biriminde alacak/borç var mı.
+  multiCurrency?: boolean;
   today?: string;
   upcoming: { kind: "receivable" | "payable"; date?: string; amount: number; currency?: string; title?: string; reference?: string }[];
 };

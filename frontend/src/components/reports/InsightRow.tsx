@@ -1,7 +1,8 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useTheme } from "../../theme/ThemeProvider";
-import { spacing } from "../../theme/tokens";
+import { spacing, tabular, type } from "../../theme/tokens";
+import { IconTile } from "../../ui/ListRow";
 
 type Props = {
   icon: React.ReactNode;
@@ -9,23 +10,29 @@ type Props = {
   value: string;
   hint?: string;
   valueColor?: string;
+  divider?: boolean;
 };
 
-export function InsightRow({ icon, label, value, hint, valueColor }: Props) {
+// Rapor özetindeki tek satır: solda simge ve başlık, altında değer, sağda açıklama.
+export function InsightRow({ icon, label, value, hint, valueColor, divider }: Props) {
   const { colors } = useTheme();
   return (
-    <View style={styles.row}>
-      <View style={[styles.icon, { backgroundColor: colors.surfaceMuted }]}>{icon}</View>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.label, { color: colors.textTertiary }]} numberOfLines={1}>
+    <View
+      accessible
+      accessibilityLabel={[label, value, hint].filter(Boolean).join(", ")}
+      style={[styles.row, divider && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+    >
+      <IconTile tint={colors.surfaceMuted}>{icon}</IconTile>
+      <View style={styles.main}>
+        <Text style={[type.caption, { color: colors.textTertiary }]} numberOfLines={1}>
           {label}
         </Text>
-        <Text style={[styles.value, { color: valueColor || colors.textPrimary }]} numberOfLines={1}>
+        <Text style={[type.bodyStrong, tabular, { color: valueColor || colors.textPrimary, marginTop: 1 }]} numberOfLines={1}>
           {value}
         </Text>
       </View>
       {hint ? (
-        <Text style={[styles.hint, { color: colors.textTertiary }]} numberOfLines={2}>
+        <Text style={[type.caption, tabular, styles.hint, { color: colors.textSecondary }]} numberOfLines={2}>
           {hint}
         </Text>
       ) : null}
@@ -34,9 +41,7 @@ export function InsightRow({ icon, label, value, hint, valueColor }: Props) {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  icon: { width: 30, height: 30, borderRadius: 9, alignItems: "center", justifyContent: "center" },
-  label: { fontSize: 11, fontWeight: "600", letterSpacing: 0.3, textTransform: "uppercase" },
-  value: { fontSize: 14, fontWeight: "700", marginTop: 2 },
-  hint: { fontSize: 11, fontWeight: "500", maxWidth: 140, textAlign: "right" },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 60, paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
+  main: { flex: 1, minWidth: 0 },
+  hint: { maxWidth: "42%", textAlign: "right" },
 });

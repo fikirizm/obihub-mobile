@@ -1,6 +1,7 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useTheme } from "../theme/ThemeProvider";
+import { radius, type } from "../theme/tokens";
 import type { StatusKind } from "../utils";
 
 export function StatusBadge({
@@ -23,7 +24,7 @@ export function StatusBadge({
   };
 
   const c = colorMap[kind];
-  const pad = size === "sm" ? { px: 8, py: 3, fs: 11 } : { px: 10, py: 5, fs: 12 };
+  const pad = size === "sm" ? { px: 8, py: 3 } : { px: 10, py: 5 };
 
   return (
     <View
@@ -37,7 +38,7 @@ export function StatusBadge({
       ]}
     >
       <View style={[styles.dot, { backgroundColor: c.dot }]} />
-      <Text style={{ color: c.fg, fontWeight: "600", fontSize: pad.fs, letterSpacing: 0.1 }}>
+      <Text style={[type.caption, { color: c.fg, fontWeight: "600", letterSpacing: 0.1 }]}>
         {label}
       </Text>
     </View>
@@ -48,7 +49,7 @@ const styles = StyleSheet.create({
   badge: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 9999,
+    borderRadius: radius.pill,
     gap: 6,
     alignSelf: "flex-start",
   },

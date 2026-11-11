@@ -24,9 +24,9 @@ export function RowCard({
   onPress?: () => void;
   testID?: string;
 }) {
-  const { colors } = useTheme();
+  const { colors, shadows } = useTheme();
   const body = (
-    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+    <View style={[styles.card, shadows.sm, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={1}>
           {title}
@@ -57,10 +57,10 @@ export function RowCard({
 }
 
 export function StatCard({ label, value, tone }: { label: string; value: string; tone?: "error" | "success" }) {
-  const { colors } = useTheme();
+  const { colors, shadows } = useTheme();
   const color = tone === "error" ? colors.error : tone === "success" ? colors.success : colors.textPrimary;
   return (
-    <View style={[styles.stat, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+    <View style={[styles.stat, shadows.sm, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
       <Text style={[type.caption, { color: colors.textTertiary }]} numberOfLines={1}>
         {label}
       </Text>

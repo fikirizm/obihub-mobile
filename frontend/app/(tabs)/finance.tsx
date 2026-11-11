@@ -13,6 +13,7 @@ import { useFocusLoad } from "../../src/hooks/useFocusLoad";
 import { TabHeader } from "../../src/ui/Header";
 import { Card, IconTile, ListRow, SectionTitle } from "../../src/ui/ListRow";
 import { StatCard } from "../../src/ui/RowCard";
+import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
 import type { FinanceOverview } from "../../src/types";
 
 export default function FinanceScreen() {
@@ -39,7 +40,7 @@ export default function FinanceScreen() {
   if (!billing && !customers) {
     return (
       <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="finance-screen">
-        <TabHeader title="Finans" />
+        <TabHeader title="Finans" eyebrow="Nakit, alacak ve borç" />
         <EmptyState
           icon={<WalletIcon size={30} color={colors.textTertiary} />}
           title="Finans ekranlarına yetkiniz yok"
@@ -54,16 +55,34 @@ export default function FinanceScreen() {
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="finance-screen">
-      <TabHeader title="Finans" />
+      <TabHeader title="Finans" eyebrow="Nakit, alacak ve borç" />
       <ScrollView
         contentContainerStyle={{ paddingBottom: spacing.xxl }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
       >
         {billing && data ? (
           <>
-            <View style={styles.stats}>
-              <StatCard label="Kasa ve banka" value={formatTry(data.cash_balance)} />
-            </View>
+            <HeroCard tone="emerald" style={{ marginTop: spacing.xs }}>
+              <Text style={{ color: ON_HERO.soft, fontSize: 13, fontWeight: "600" }}>Kasa ve banka toplamı</Text>
+              <Text
+                testID="finance-cash-balance"
+                style={[tabular, { color: ON_HERO.text, fontSize: 36, lineHeight: 42, fontWeight: "800", letterSpacing: -1, marginTop: 2 }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
+                {formatTry(data.cash_balance)}
+              </Text>
+              <View style={styles.heroFoot}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: ON_HERO.soft, fontSize: 12, fontWeight: "500" }}>Bu ay giren</Text>
+                  <Text style={[tabular, { color: ON_HERO.live, fontSize: 16, fontWeight: "700", marginTop: 2 }]}>+{formatTry(data.month_cash_in)}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: ON_HERO.soft, fontSize: 12, fontWeight: "500" }}>Bu ay çıkan</Text>
+                  <Text style={[tabular, { color: ON_HERO.text, fontSize: 16, fontWeight: "700", marginTop: 2 }]}>-{formatTry(data.month_cash_out)}</Text>
+                </View>
+              </View>
+            </HeroCard>
             <View style={styles.stats}>
               <StatCard label="Alacak" value={formatTry(data.receivable)} tone="success" />
               <StatCard label="Borç" value={formatTry(data.payable)} />
@@ -73,6 +92,11 @@ export default function FinanceScreen() {
                 <StatCard label="Vadesi geçen alacak" value={formatTry(data.overdue_receivable)} tone={data.overdue_receivable > 0 ? "error" : undefined} />
                 <StatCard label="Vadesi geçen borç" value={formatTry(data.overdue_payable)} tone={data.overdue_payable > 0 ? "error" : undefined} />
               </View>
+            ) : null}
+            {data.multiCurrency ? (
+              <Text style={[type.caption, { color: colors.textTertiary, marginHorizontal: spacing.lg, marginTop: spacing.xs }]}>
+                Alacak ve borç toplamları yalnızca TL tutarları gösterir; dövizli kayıtlar web panelinde ayrı listelenir.
+              </Text>
             ) : null}
             {upcoming.length > 0 ? (
               <>
@@ -105,7 +129,7 @@ export default function FinanceScreen() {
           {billing ? (
             <ListRow
               testID="finance-local-invoices"
-              leading={<IconTile><ReceiptIcon size={18} color={colors.primary} /></IconTile>}
+              leading={<IconTile tint={colors.primarySoft}><ReceiptIcon size={18} color={colors.primary} /></IconTile>}
               title="Satış faturaları"
               subtitle="ObiHub'da oluşturulan faturalar"
               chevron
@@ -116,7 +140,7 @@ export default function FinanceScreen() {
             <ListRow
               testID="finance-accounting-invoices"
               divider
-              leading={<IconTile><FileTextIcon size={18} color={colors.primary} /></IconTile>}
+              leading={<IconTile tint={colors.violetSoft}><FileTextIcon size={18} color={colors.violet} /></IconTile>}
               title={`${invoiceSource} faturaları`}
               subtitle="Muhasebe programındaki satış faturaları"
               chevron
@@ -127,7 +151,7 @@ export default function FinanceScreen() {
             <ListRow
               testID="finance-offers"
               divider
-              leading={<IconTile><TagIcon size={18} color={colors.primary} /></IconTile>}
+              leading={<IconTile tint={colors.amberSoft}><TagIcon size={18} color={colors.amber} /></IconTile>}
               title="Teklifler"
               subtitle="Paraşüt satış teklifleri"
               chevron
@@ -138,7 +162,7 @@ export default function FinanceScreen() {
             <ListRow
               testID="finance-customers"
               divider={billing}
-              leading={<IconTile><UserIcon size={18} color={colors.primary} /></IconTile>}
+              leading={<IconTile tint={colors.emeraldSoft}><UserIcon size={18} color={colors.emerald} /></IconTile>}
               title="Cari hesaplar"
               subtitle="Bakiye, ekstre ve tahsilat"
               chevron
@@ -149,7 +173,7 @@ export default function FinanceScreen() {
             <ListRow
               testID="finance-cash"
               divider
-              leading={<IconTile><WalletIcon size={18} color={colors.primary} /></IconTile>}
+              leading={<IconTile tint={colors.infoBg}><WalletIcon size={18} color={colors.info} /></IconTile>}
               title="Kasa ve bankalar"
               subtitle="Hesap bakiyeleri ve hareketler"
               chevron
@@ -164,7 +188,7 @@ export default function FinanceScreen() {
             <Card style={styles.block}>
               <ListRow
                 testID="finance-incoming"
-                leading={<IconTile><InboxIcon size={18} color={colors.primary} /></IconTile>}
+                leading={<IconTile tint={colors.amberSoft}><InboxIcon size={18} color={colors.amber} /></IconTile>}
                 title="Gelen e-faturalar"
                 subtitle="Tedarikçilerden gelen faturalar"
                 chevron
@@ -174,7 +198,7 @@ export default function FinanceScreen() {
                 <ListRow
                   testID="finance-expenses"
                   divider
-                  leading={<IconTile><DownloadIcon size={18} color={colors.primary} /></IconTile>}
+                  leading={<IconTile tint={colors.errorBg}><DownloadIcon size={18} color={colors.error} /></IconTile>}
                   title="Gider faturaları"
                   subtitle="Paraşüt'e işlenmiş giderler"
                   chevron
@@ -192,5 +216,6 @@ export default function FinanceScreen() {
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },
-  stats: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginTop: spacing.xs },
+  stats: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginTop: spacing.sm },
+  heroFoot: { flexDirection: "row", marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: ON_HERO.faint },
 });

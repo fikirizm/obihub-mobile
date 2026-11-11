@@ -2,7 +2,7 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useTheme } from "../theme/ThemeProvider";
 import { PressableScale } from "./KPICard";
-import { spacing, radius } from "../theme/tokens";
+import { hitTarget, radius, spacing, type } from "../theme/tokens";
 
 type EmptyStateProps = {
   icon: React.ReactNode;
@@ -19,14 +19,17 @@ export function EmptyState({ icon, title, description, actionLabel, onAction }: 
       <View style={[styles.iconWrap, { backgroundColor: colors.surfaceMuted, borderColor: colors.borderSubtle }]}>
         {icon}
       </View>
-      <Text style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>
-      <Text style={[styles.desc, { color: colors.textTertiary }]}>{description}</Text>
+      <Text accessibilityRole="header" style={[styles.title, { color: colors.textPrimary }]}>{title}</Text>
+      <Text style={[styles.desc, { color: colors.textSecondary }]}>{description}</Text>
       {actionLabel && onAction ? (
         <PressableScale
           onPress={onAction}
+          accessibilityRole="button"
           style={[styles.actionBtn, { backgroundColor: colors.primary }, shadows.primary]}
         >
-          <Text style={styles.actionText}>{actionLabel}</Text>
+          <Text style={styles.actionText} numberOfLines={1}>
+            {actionLabel}
+          </Text>
         </PressableScale>
       ) : null}
     </View>
@@ -34,24 +37,27 @@ export function EmptyState({ icon, title, description, actionLabel, onAction }: 
 }
 
 const styles = StyleSheet.create({
-  wrap: { alignItems: "center", paddingVertical: 48, paddingHorizontal: 32 },
+  wrap: { alignItems: "center", paddingVertical: spacing.xxxl + spacing.xs, paddingHorizontal: spacing.xxl },
   iconWrap: {
     width: 72,
     height: 72,
-    borderRadius: 20,
+    borderRadius: radius.xl,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    marginBottom: 16,
+    marginBottom: spacing.md,
   },
-  title: { fontSize: 17, fontWeight: "800", marginBottom: 8, textAlign: "center", letterSpacing: -0.3 },
-  desc: { fontSize: 13.5, textAlign: "center", lineHeight: 20, fontWeight: "500", maxWidth: 280 },
+  title: { ...type.headline, marginBottom: spacing.xs, textAlign: "center" },
+  desc: { ...type.footnote, textAlign: "center", maxWidth: 280 },
   actionBtn: {
-    marginTop: 20,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+    marginTop: spacing.lg,
+    minHeight: hitTarget,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.sm,
     borderRadius: radius.md,
     alignItems: "center",
+    justifyContent: "center",
   },
-  actionText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
+  // colors.primary zemin üzerinde beyaz metin (tasarım sistemi istisnası).
+  actionText: { ...type.bodyStrong, color: "#FFFFFF" },
 });

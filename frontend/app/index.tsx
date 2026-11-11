@@ -10,13 +10,14 @@ import {
   TextInput,
   View,
 } from "react-native";
-import Animated, { FadeIn, FadeInDown, FadeInUp } from "react-native-reanimated";
+import { FadeIn, FadeInDown, FadeInUp } from "react-native-reanimated";
 import { SafeAnimatedView } from "../src/components/SafeAnimatedView";
 import { router } from "expo-router";
-import Svg, { Defs, LinearGradient, Path, Stop, Circle as SvgCircle } from "react-native-svg";
+import Svg, { Defs, LinearGradient, Stop, Circle as SvgCircle } from "react-native-svg";
 import { useAuth } from "../src/auth/AuthProvider";
 import { useTheme } from "../src/theme/ThemeProvider";
-import { fontWeight, radius, spacing } from "../src/theme/tokens";
+import { hitTarget, radius, spacing, type } from "../src/theme/tokens";
+import { Button } from "../src/ui/Button";
 import { PressableScale } from "../src/components/KPICard";
 import { MoonIcon, SunIcon, SparkleIcon } from "../src/components/Icons";
 
@@ -26,6 +27,7 @@ const ICO = require("../assets/obihub/obihub-ico.png");
 export default function Index() {
   const { token, bootLoading, login } = useAuth();
   const { colors, mode, toggle, shadows } = useTheme();
+  const glow = mode === "dark" ? colors.primarySoft : colors.heroAccent;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -63,18 +65,27 @@ export default function Index() {
     }
   };
 
+  const inputStyle = (focused: boolean) => [
+    styles.input,
+    {
+      backgroundColor: colors.surfaceMuted,
+      color: colors.textPrimary,
+      borderColor: focused ? colors.primary : colors.borderSubtle,
+    },
+  ];
+
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="login-screen">
       <View style={styles.bgWrap} pointerEvents="none">
         <Svg width="100%" height="100%" viewBox="0 0 400 800" preserveAspectRatio="xMidYMid slice">
           <Defs>
             <LinearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
-              <Stop offset="0" stopColor={mode === "dark" ? "#1E40AF" : "#60A5FA"} stopOpacity="0.55" />
-              <Stop offset="1" stopColor={mode === "dark" ? "#0B1220" : "#F8FBFF"} stopOpacity="0" />
+              <Stop offset="0" stopColor={glow} stopOpacity="0.55" />
+              <Stop offset="1" stopColor={colors.background} stopOpacity="0" />
             </LinearGradient>
             <LinearGradient id="g2" x1="0" y1="1" x2="1" y2="0">
-              <Stop offset="0" stopColor={mode === "dark" ? "#312E81" : "#A78BFA"} stopOpacity="0.4" />
-              <Stop offset="1" stopColor={mode === "dark" ? "#0B1220" : "#F8FBFF"} stopOpacity="0" />
+              <Stop offset="0" stopColor={glow} stopOpacity="0.35" />
+              <Stop offset="1" stopColor={colors.background} stopOpacity="0" />
             </LinearGradient>
           </Defs>
           <SvgCircle cx={70} cy={120} r={180} fill="url(#g1)" />
@@ -82,72 +93,66 @@ export default function Index() {
         </Svg>
       </View>
 
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           <SafeAnimatedView entering={FadeIn.duration(500)} style={styles.topBar}>
             <View style={[styles.brandPill, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
-              <Image source={ICO} style={styles.brandIcoSmall} resizeMode="contain" />
-              <Text style={[styles.brandText, { color: colors.textPrimary }]}>obihub</Text>
+              <Image source={ICO} style={styles.brandIcoSmall} resizeMode="contain" accessible={false} />
+              <Text style={[type.footnote, styles.brandText, { color: colors.textPrimary }]}>obihub</Text>
             </View>
 
             <PressableScale
               onPress={toggle}
               testID="theme-toggle"
-              style={[
-                styles.themeBtn,
-                { backgroundColor: colors.surface, borderColor: colors.borderSubtle },
-                shadows.sm,
-              ]}
+              accessibilityRole="button"
+              accessibilityLabel={mode === "dark" ? "Açık temaya geç" : "Koyu temaya geç"}
+              style={[styles.themeBtn, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}
             >
-              {mode === "dark" ? <SunIcon size={18} /> : <MoonIcon size={18} />}
+              {mode === "dark" ? (
+                <SunIcon size={20} color={colors.warning} />
+              ) : (
+                <MoonIcon size={20} color={colors.textSecondary} />
+              )}
             </PressableScale>
           </SafeAnimatedView>
 
           <SafeAnimatedView entering={FadeInDown.delay(80).duration(500)} style={styles.heroBlock}>
-            <View style={[styles.heroChip, { backgroundColor: colors.primarySoft, borderColor: colors.primarySoft }]}>
+            <View style={[styles.heroChip, { backgroundColor: colors.primarySoft }]}>
               <SparkleIcon size={12} color={colors.primary} />
-              <Text style={[styles.heroChipText, { color: colors.primary }]}>Connect. Sync. Scale.</Text>
+              <Text style={[type.caption, { color: colors.primary }]}>Bağlayın, eşitleyin, büyütün</Text>
             </View>
-            <Image source={LOGOMAIN} style={styles.heroLogo} resizeMode="contain" />
-            <Text style={[styles.heroTitle, { color: colors.textPrimary }]}>Tüm pazaryerlerin tek panelde</Text>
-            <Text style={[styles.heroSub, { color: colors.textSecondary }]}>
-              Trendyol, Hepsiburada, n11 ve WooCommerce siparişlerini, faturalarını ve raporlarını tek yerden yönet.
+            <Image source={LOGOMAIN} style={styles.heroLogo} resizeMode="contain" accessibilityLabel="ObiHub" />
+            <Text accessibilityRole="header" style={[type.largeTitle, { color: colors.textPrimary }]}>
+              Tüm pazaryerleriniz tek panelde
+            </Text>
+            <Text style={[type.callout, styles.heroSub, { color: colors.textSecondary }]}>
+              Trendyol, Hepsiburada, n11 ve WooCommerce siparişlerinizi, faturalarınızı ve raporlarınızı tek yerden yönetin.
             </Text>
           </SafeAnimatedView>
 
           <SafeAnimatedView
             entering={FadeInUp.delay(160).duration(550)}
-            style={[
-              styles.card,
-              { backgroundColor: colors.surface, borderColor: colors.borderSubtle },
-              shadows.lg,
-            ]}
+            style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.lg]}
           >
-            <Text style={[styles.formLabel, { color: colors.textSecondary }]}>E-POSTA</Text>
+            <Text style={[type.caption, styles.formLabel, { color: colors.textSecondary }]}>E-posta</Text>
             <TextInput
               testID="login-email-input"
               value={email}
               onChangeText={setEmail}
               autoCapitalize="none"
+              autoCorrect={false}
               keyboardType="email-address"
+              textContentType="username"
+              autoComplete="email"
+              accessibilityLabel="E-posta"
               placeholder="ornek@firma.com"
               placeholderTextColor={colors.textTertiary}
               onFocus={() => setEmailFocused(true)}
               onBlur={() => setEmailFocused(false)}
-              style={[
-                styles.input,
-                {
-                  backgroundColor: colors.surfaceMuted,
-                  color: colors.textPrimary,
-                  borderColor: emailFocused ? colors.primary : colors.borderSubtle,
-                },
-              ]}
+              style={inputStyle(emailFocused)}
             />
 
-            <Text style={[styles.formLabel, { color: colors.textSecondary, marginTop: spacing.sm }]}>ŞİFRE</Text>
+            <Text style={[type.caption, styles.formLabel, { color: colors.textSecondary, marginTop: spacing.sm }]}>Şifre</Text>
             <TextInput
               testID="login-password-input"
               value={password}
@@ -155,53 +160,47 @@ export default function Index() {
               placeholder="••••••••"
               placeholderTextColor={colors.textTertiary}
               secureTextEntry
+              textContentType="password"
+              autoComplete="current-password"
+              accessibilityLabel="Şifre"
               onFocus={() => setPasswordFocused(true)}
               onBlur={() => setPasswordFocused(false)}
-              style={[
-                styles.input,
-                {
-                  backgroundColor: colors.surfaceMuted,
-                  color: colors.textPrimary,
-                  borderColor: passwordFocused ? colors.primary : colors.borderSubtle,
-                },
-              ]}
+              style={inputStyle(passwordFocused)}
             />
 
             {error ? (
-              <View style={[styles.errorBox, { backgroundColor: colors.errorBg }]}>
-                <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
+              <View
+                accessibilityRole="alert"
+                accessibilityLiveRegion="polite"
+                style={[styles.errorBox, { backgroundColor: colors.errorBg }]}
+              >
+                <Text style={[type.footnote, styles.errorText, { color: colors.error }]}>{error}</Text>
               </View>
             ) : null}
 
-            <PressableScale
+            <Button
+              label="Giriş yap"
               onPress={handleSubmit}
               testID="login-submit-button"
-              disabled={submitting}
-              style={[styles.submitBtn, { backgroundColor: colors.primary }, shadows.primary]}
-            >
-              {submitting ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.submitText}>Giriş Yap</Text>
-              )}
-            </PressableScale>
+              busy={submitting}
+              style={[styles.submitBtn, shadows.primary]}
+            />
 
             <PressableScale
               onPress={() => router.push("/forgot-password")}
-              style={{ alignItems: "center", paddingVertical: spacing.xs, marginTop: spacing.xs }}
+              accessibilityRole="link"
+              style={styles.forgotBtn}
             >
-              <Text style={[styles.forgotText, { color: colors.primary }]}>Şifremi unuttum</Text>
+              <Text style={[type.callout, styles.forgotText, { color: colors.primary }]}>Şifremi unuttum</Text>
             </PressableScale>
 
-            <Text style={[styles.legal, { color: colors.textTertiary }]}>
-              Devam ederek ObiHub Hizmet Şartlarını kabul etmiş olursun.
+            <Text style={[type.caption, styles.legal, { color: colors.textTertiary }]}>
+              Devam ederek ObiHub Hizmet Şartlarını kabul etmiş olursunuz.
             </Text>
           </SafeAnimatedView>
 
           <SafeAnimatedView entering={FadeIn.delay(360).duration(500)} style={styles.footer}>
-            <Text style={[styles.footerText, { color: colors.textTertiary }]}>
-              © {new Date().getFullYear()} ObiHub · Premium SaaS
-            </Text>
+            <Text style={[type.caption, { color: colors.textTertiary }]}>© {new Date().getFullYear()} ObiHub</Text>
           </SafeAnimatedView>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -211,13 +210,14 @@ export default function Index() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
+  flex: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   bgWrap: { ...StyleSheet.absoluteFillObject },
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: spacing.lg,
     paddingTop: Platform.OS === "ios" ? spacing.huge : spacing.xxl,
-    paddingBottom: spacing.xl,
+    paddingBottom: spacing.huge,
   },
   topBar: {
     flexDirection: "row",
@@ -228,18 +228,18 @@ const styles = StyleSheet.create({
   brandPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: spacing.xs,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 6,
-    borderRadius: 9999,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
     borderWidth: 1,
   },
   brandIcoSmall: { width: 22, height: 22 },
-  brandText: { fontSize: 13, fontWeight: fontWeight.bold, letterSpacing: -0.2 },
+  brandText: { fontWeight: "700", letterSpacing: -0.2 },
   themeBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: hitTarget,
+    height: hitTarget,
+    borderRadius: hitTarget / 2,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
@@ -251,52 +251,32 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 9999,
-    borderWidth: 1,
+    borderRadius: radius.pill,
     alignSelf: "flex-start",
     marginBottom: spacing.xs,
   },
-  heroChipText: { fontSize: 11, fontWeight: fontWeight.bold, letterSpacing: 0.4, textTransform: "uppercase" },
-  heroLogo: { width: 200, height: 44, marginBottom: spacing.xs, marginTop: 4 },
-  heroTitle: { fontSize: 32, fontWeight: fontWeight.bold, letterSpacing: -1 },
-  heroSub: { fontSize: 14, lineHeight: 20, marginTop: 4, fontWeight: fontWeight.medium },
+  heroLogo: { width: 200, height: 44, marginBottom: spacing.xs, marginTop: spacing.xxs },
+  heroSub: { marginTop: spacing.xxs },
   card: {
     borderRadius: radius.xl,
     padding: spacing.lg,
     borderWidth: 1,
     marginTop: spacing.md,
   },
-  formLabel: {
-    fontSize: 11,
-    letterSpacing: 0.6,
-    fontWeight: fontWeight.bold,
-    textTransform: "uppercase",
-    marginBottom: 6,
-  },
+  formLabel: { marginBottom: 6 },
   input: {
     height: 50,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
-    fontSize: 15,
-    fontWeight: fontWeight.medium,
+    fontSize: type.body.fontSize,
+    fontWeight: "500",
     borderWidth: 1.5,
   },
-  errorBox: {
-    marginTop: spacing.sm,
-    padding: spacing.sm,
-    borderRadius: radius.sm,
-  },
-  errorText: { fontSize: 13, fontWeight: fontWeight.semibold },
-  submitBtn: {
-    height: 54,
-    borderRadius: radius.md,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: spacing.md,
-  },
-  submitText: { color: "#fff", fontSize: 16, fontWeight: fontWeight.bold, letterSpacing: -0.2 },
-  forgotText: { fontSize: 14, fontWeight: fontWeight.semibold },
-  legal: { fontSize: 11, textAlign: "center", marginTop: spacing.sm, fontWeight: fontWeight.medium },
-  footer: { alignItems: "center", marginTop: spacing.xl, paddingBottom: spacing.lg },
-  footerText: { fontSize: 11, fontWeight: fontWeight.medium },
+  errorBox: { marginTop: spacing.sm, padding: spacing.sm, borderRadius: radius.sm },
+  errorText: { fontWeight: "600" },
+  submitBtn: { marginTop: spacing.md },
+  forgotBtn: { alignItems: "center", justifyContent: "center", minHeight: hitTarget, marginTop: spacing.xs },
+  forgotText: { fontWeight: "600" },
+  legal: { textAlign: "center", marginTop: spacing.xs },
+  footer: { alignItems: "center", marginTop: spacing.xl },
 });

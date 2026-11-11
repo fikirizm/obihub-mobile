@@ -7,11 +7,12 @@ import { PressableScale } from "../components/KPICard";
 
 // Kart: ilişkili satırları tek yüzeyde toplar.
 export function Card({ children, style, padded }: { children: React.ReactNode; style?: StyleProp<ViewStyle>; padded?: boolean }) {
-  const { colors } = useTheme();
+  const { colors, shadows } = useTheme();
   return (
     <View
       style={[
         styles.card,
+        shadows.sm,
         { backgroundColor: colors.surface, borderColor: colors.borderSubtle },
         padded && { padding: spacing.md },
         style,
@@ -102,7 +103,7 @@ export function IconTile({ children, tint }: { children: React.ReactNode; tint?:
 }
 
 const styles = StyleSheet.create({
-  card: { borderRadius: radius.lg, borderWidth: 1, overflow: "hidden" },
+  card: { borderRadius: radius.lg, borderWidth: 1 },
   sectionHead: {
     flexDirection: "row",
     alignItems: "center",

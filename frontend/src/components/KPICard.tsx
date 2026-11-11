@@ -4,7 +4,7 @@ import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withTiming } fr
 import { SafeAnimatedView } from "./SafeAnimatedView";
 import { useTheme } from "../theme/ThemeProvider";
 import { TrendDownIcon, TrendUpIcon } from "./Icons";
-import { fontWeight, radius, spacing } from "../theme/tokens";
+import { fontWeight, radius, spacing, tabular, type } from "../theme/tokens";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -94,13 +94,13 @@ export function KPICard({
               ]}
             >
               {trendUp ? <TrendUpIcon size={12} color={colors.success} /> : <TrendDownIcon size={12} color={colors.error} />}
-              <Text style={{ color: trendUp ? colors.success : colors.error, fontSize: 11, fontWeight: "700" }}>
+              <Text style={[type.caption, tabular, { color: trendUp ? colors.success : colors.error, fontWeight: "700" }]}>
                 {`${trendUp ? "+" : ""}${(trendPct ?? 0).toFixed(1)}%`}
               </Text>
             </View>
           ) : null}
         </View>
-        <Text style={[styles.value, { color: colors.textPrimary }]} numberOfLines={1}>
+        <Text style={[styles.value, tabular, { color: colors.textPrimary }]} numberOfLines={1}>
           {value}
         </Text>
         {hint ? (
@@ -132,11 +132,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   label: {
-    fontSize: 12,
-    fontWeight: fontWeight.medium,
-    letterSpacing: 0.2,
-    textTransform: "uppercase",
+    ...type.caption,
     flex: 1,
+    minWidth: 0,
     paddingRight: spacing.xs,
   },
   trendPill: {
@@ -145,7 +143,7 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 9999,
+    borderRadius: radius.pill,
   },
   value: {
     fontSize: 24,
@@ -154,9 +152,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   hint: {
-    fontSize: 11,
+    ...type.caption,
     marginTop: 4,
-    fontWeight: fontWeight.medium,
   },
   accentBar: {
     position: "absolute",

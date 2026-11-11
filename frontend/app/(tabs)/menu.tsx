@@ -5,7 +5,7 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { useNotifications } from "../../src/notifications/store";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing, type } from "../../src/theme/tokens";
-import { BellIcon, LogoutIcon, MailIcon, PackageIcon, PlugIcon, RefreshIcon, SettingsIcon, TruckIcon, WalletIcon } from "../../src/components/Icons";
+import { BellIcon, ChartIcon, LogoutIcon, MailIcon, PackageIcon, RefreshIcon, SettingsIcon, WalletIcon } from "../../src/components/Icons";
 import { canAccess } from "../../src/auth/permissions";
 import { TabHeader } from "../../src/ui/Header";
 import { useFeedback } from "../../src/ui/Feedback";
@@ -29,45 +29,36 @@ export default function MenuScreen() {
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="menu-screen">
-      <TabHeader title="Menü" subtitle={user?.company_name || undefined} />
+      <TabHeader title="Menü" eyebrow={user?.company_name || undefined} />
       <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl }}>
         <SectionTitle title="Operasyon" />
         <Card style={styles.block}>
           {canAccess(user, "catalog") || canAccess(user, "inventory") ? (
             <ListRow
               testID="menu-products"
-              leading={<IconTile><PackageIcon size={18} color={colors.primary} /></IconTile>}
+              leading={<IconTile tint={colors.primarySoft}><PackageIcon size={18} color={colors.primary} /></IconTile>}
               title="Ürünler ve stok"
               subtitle="Arama, barkod, stok ve fiyat"
               chevron
               onPress={() => router.push("/products")}
             />
           ) : null}
-          {canAccess(user, "integrations") ? (
-          <ListRow
-            testID="menu-integrations"
-            divider
-            leading={<IconTile><PlugIcon size={18} color={colors.primary} /></IconTile>}
-            title="Mağazalar"
-            subtitle="Bağlı kanallar ve sipariş eşitleme"
-            chevron
-            onPress={() => router.push("/integrations")}
-          />
+          {canAccess(user, "reports") ? (
+            <ListRow
+              testID="menu-reports"
+              divider
+              leading={<IconTile tint={colors.violetSoft}><ChartIcon size={18} color={colors.violet} /></IconTile>}
+              title="Raporlar"
+              subtitle="Satış, kanal ve ürün analizi"
+              chevron
+              onPress={() => router.push("/reports")}
+            />
           ) : null}
-          <ListRow
-            testID="menu-hepsijet"
-            divider
-            leading={<IconTile><TruckIcon size={18} color={colors.primary} /></IconTile>}
-            title="HepsiJet Kargo"
-            subtitle="Manuel gönderi ve etiket"
-            chevron
-            onPress={() => router.push("/hepsijet")}
-          />
           {canAccess(user, "catalog") ? (
             <ListRow
               testID="menu-jobs"
               divider
-              leading={<IconTile><RefreshIcon size={18} color={colors.primary} /></IconTile>}
+              leading={<IconTile tint={colors.infoBg}><RefreshIcon size={18} color={colors.info} /></IconTile>}
               title="Senkron işleri"
               subtitle="Ürün eşitleme sonuçları"
               chevron
@@ -80,7 +71,7 @@ export default function MenuScreen() {
         <Card style={styles.block}>
           <ListRow
             testID="menu-notifications"
-            leading={<IconTile><BellIcon size={18} color={colors.primary} /></IconTile>}
+            leading={<IconTile tint={colors.amberSoft}><BellIcon size={18} color={colors.amber} /></IconTile>}
             title="Bildirimler"
             subtitle={unread > 0 ? `${unread} okunmamış` : "Okunmamış bildirim yok"}
             chevron
@@ -89,7 +80,7 @@ export default function MenuScreen() {
           <ListRow
             testID="menu-support"
             divider
-            leading={<IconTile><MailIcon size={18} color={colors.primary} /></IconTile>}
+            leading={<IconTile tint={colors.emeraldSoft}><MailIcon size={18} color={colors.emerald} /></IconTile>}
             title="Destek"
             subtitle="Talepleriniz ve yanıtlar"
             chevron
@@ -98,7 +89,7 @@ export default function MenuScreen() {
           <ListRow
             testID="menu-subscription"
             divider
-            leading={<IconTile><WalletIcon size={18} color={colors.primary} /></IconTile>}
+            leading={<IconTile tint={colors.violetSoft}><WalletIcon size={18} color={colors.violet} /></IconTile>}
             title="Abonelik"
             subtitle="Paket ve kullanım"
             chevron

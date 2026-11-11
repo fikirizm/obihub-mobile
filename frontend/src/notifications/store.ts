@@ -5,11 +5,12 @@ import { loadCache, saveCache } from "../offlineCache";
 
 export type AppNotification = {
   id: string;
-  kind: "order";
+  kind: "order" | "support";
   title: string;
   body: string;
   orderId?: string;
   provider?: string;
+  ticketId?: string;
   ts: number;
   read: boolean;
 };

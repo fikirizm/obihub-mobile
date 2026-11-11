@@ -30,7 +30,7 @@ const FILTERS: { key: FilterKey; label: string; statuses: string[] }[] = [
 const PER_PAGE = 30;
 
 export default function OrdersScreen() {
-  const params = useLocalSearchParams<{ filter?: string }>();
+  const params = useLocalSearchParams<{ filter?: string; t?: string }>();
   const { token } = useAuth();
   const { colors } = useTheme();
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -52,7 +52,8 @@ export default function OrdersScreen() {
   useEffect(() => {
     const f = String(params.filter || "");
     if (FILTERS.some((x) => x.key === f)) setFilter(f as FilterKey);
-  }, [params.filter]);
+    // `t` her gelişte değişir; aynı süzgeçle ikinci kez gelindiğinde de uygulanır.
+  }, [params.filter, params.t]);
 
   useEffect(() => {
     if (!token) return;

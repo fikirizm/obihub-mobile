@@ -26,7 +26,7 @@ export function Skeleton({ width = "100%", height = 16, borderRadius = 8, style 
   }, [shimmer]);
 
   const opacity = shimmer.interpolate({ inputRange: [0, 1], outputRange: [1, 0.4] });
-  const base = mode === "dark" ? "#1E293B" : "#E2E8F0";
+  const base = mode === "dark" ? colors.surfaceElevated : colors.border;
 
   return (
     <Animated.View
@@ -56,7 +56,6 @@ export function OrderCardSkeleton() {
 }
 
 export function DashboardSkeleton() {
-  const { colors, shadows } = useTheme();
   return (
     <View style={{ paddingHorizontal: spacing.lg, gap: spacing.md }}>
       {/* Hero card placeholder */}

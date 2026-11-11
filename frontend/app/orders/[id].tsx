@@ -1,21 +1,17 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, RefreshControl, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
-import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Stack, useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import * as FileSystem from "expo-file-system/legacy";
-import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
-import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
-import { fontWeight, radius, spacing } from "../../src/theme/tokens";
+import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import {
   createHepsiJetShipment,
   enqueueOrderCloudPrint,
-  getHepsiJetLabel,
   getHepsiJetLabelWithProducts,
   getHepsiburadaOrderLabel,
   getOrderDetail,
@@ -33,12 +29,14 @@ import {
   relativeDateLabel,
   statusKindFromOrder,
 } from "../../src/utils";
-import { PressableScale } from "../../src/components/KPICard";
+import { EmptyState } from "../../src/components/EmptyState";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
-import { ArrowLeftIcon, CloudIcon, PackageIcon, PrinterIcon, TruckIcon } from "../../src/components/Icons";
+import { CloudIcon, PackageIcon, PrinterIcon, TruckIcon } from "../../src/components/Icons";
 import { Button } from "../../src/ui/Button";
 import { useFeedback } from "../../src/ui/Feedback";
+import { StackHeader } from "../../src/ui/Header";
+import { Card, ListRow, SectionTitle } from "../../src/ui/ListRow";
 import { saveCache, loadCache } from "../../src/offlineCache";
 import type { Order } from "../../src/types";
 
@@ -47,8 +45,7 @@ export default function OrderDetail() {
   const orderId = String(params.id || "");
   const providerHint = String(params.provider || "");
   const { token } = useAuth();
-  const { colors, mode, shadows } = useTheme();
-  const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [isOffline, setIsOffline] = useState(false);
@@ -138,7 +135,7 @@ export default function OrderDetail() {
       try {
         path = await fetchLabelFile();
       } catch (e: any) {
-        Alert.alert("Etiket alınamadı", e?.message || "Bu sipariş için etiket alınamadı.");
+        toast(e?.message || "Bu sipariş için etiket alınamadı.", "error");
         setPrintStatus(null);
         return;
       }
@@ -152,7 +149,7 @@ export default function OrderDetail() {
       }
       setPrintStatus(null);
     } catch (e: any) {
-      Alert.alert("Hata", e?.message || "Yazdırma başarısız.");
+      toast(e?.message || "Yazdırma başarısız.", "error");
       setPrintStatus(null);
     } finally {
       setPrintBusy(false);
@@ -200,9 +197,9 @@ export default function OrderDetail() {
     setCloudBusy(true);
     try {
       const r = await enqueueOrderCloudPrint(token, order.id);
-      Alert.alert("Bulut Yazıcı", r?.message || "Yazdırma kuyruğa eklendi.");
+      toast(r?.message || "Yazdırma kuyruğa eklendi.", "success");
     } catch (e: any) {
-      Alert.alert("Hata", e?.message || "Bulut yazdırma başarısız.");
+      toast(e?.message || "Bulut yazdırma başarısız.", "error");
     } finally {
       setCloudBusy(false);
     }
@@ -210,16 +207,24 @@ export default function OrderDetail() {
 
   if (loading) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
-        <ActivityIndicator color={colors.primary} />
+      <View style={[styles.wrap, { backgroundColor: colors.background }]}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <StackHeader title="Sipariş" />
+        <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.xxl }} />
       </View>
     );
   }
 
   if (!order) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
-        <Text style={{ color: colors.textPrimary }}>Sipariş bulunamadı.</Text>
+      <View style={[styles.wrap, { backgroundColor: colors.background }]}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <StackHeader title="Sipariş" />
+        <EmptyState
+          icon={<PackageIcon size={30} color={colors.textTertiary} />}
+          title="Sipariş bulunamadı"
+          description="Sipariş silinmiş olabilir veya bağlantı kurulamadı."
+        />
       </View>
     );
   }
@@ -228,32 +233,27 @@ export default function OrderDetail() {
   const trackingNo = getOrderTrackingNo(order);
   const items = order.items || [];
   const subtotal = items.reduce((a, b) => a + Number(b.total_price ?? Number(b.unit_price || 0) * Number(b.quantity || 0)), 0);
+  const totalQty = items.reduce((a, b) => a + Number(b.quantity || 0), 0);
+  const totalText = formatTry(order.total_amount || subtotal);
+
+  const shareTracking = async () => {
+    try {
+      await Share.share({ message: trackingNo });
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {}
+  };
 
   return (
-    <View style={[styles.wrap, { backgroundColor: colors.background, paddingTop: insets.top }]}>
+    <View style={[styles.wrap, { backgroundColor: colors.background }]}>
       <Stack.Screen options={{ headerShown: false }} />
-
-      <View style={styles.header}>
-        <PressableScale
-          testID="back-btn"
-          onPress={() => router.back()}
-          style={[styles.iconBtn, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}
-        >
-          <ArrowLeftIcon size={18} color={colors.textPrimary} />
-        </PressableScale>
-        <View style={{ flex: 1, alignItems: "center" }}>
-          <Text style={[styles.headerLabel, { color: isOffline ? colors.warning : colors.textTertiary }]}>
-            {isOffline ? "ÇEVRİMDIŞI · ÖNBELLEK" : "SİPARİŞ"}
-          </Text>
-          <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-            #{displayOrderNo(order)}
-          </Text>
-        </View>
-        <PlatformLogo provider={provider} size="sm" />
-      </View>
+      <StackHeader
+        title={`#${displayOrderNo(order)}`}
+        subtitle={isOffline ? "Çevrimdışı · önbellekten gösteriliyor" : "Sipariş"}
+        right={<PlatformLogo provider={provider} size="sm" />}
+      />
 
       <ScrollView
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: 60 }}
+        contentContainerStyle={{ paddingBottom: spacing.huge }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -262,89 +262,57 @@ export default function OrderDetail() {
           />
         }
       >
-        {/* Top summary */}
-        <SafeAnimatedView
-          entering={FadeIn.duration(400)}
-          style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.md]}
-        >
-          <View style={styles.summaryTop}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.customerLabel, { color: colors.textTertiary }]}>MÜŞTERİ</Text>
-              <Text style={[styles.customerName, { color: colors.textPrimary }]} numberOfLines={1}>
-                {order.customer_name || "-"}
-              </Text>
-              <Text style={[styles.dateText, { color: colors.textSecondary }]} numberOfLines={1}>
-                {relativeDateLabel(order)} · {providerLabel(provider)}
-              </Text>
-              <Text style={[styles.dateText, { color: colors.textTertiary }]}>
-                Sipariş Tarihi: {formatOrderDateTime(order)}
-              </Text>
-            </View>
-            <StatusBadge label={displayOrderStatus(order, provider)} kind={kind} />
-          </View>
-          <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
-          <View style={styles.summaryFoot}>
-            <View style={styles.summaryFootCell}>
-              <Text style={[styles.fcLabel, { color: colors.textTertiary }]}>Adet</Text>
-              <Text style={[styles.fcValue, { color: colors.textPrimary }]}>{items.reduce((a, b) => a + Number(b.quantity || 0), 0)}</Text>
-            </View>
-            <View style={[styles.fcDivider, { backgroundColor: colors.borderSubtle }]} />
-            <View style={styles.summaryFootCell}>
-              <Text style={[styles.fcLabel, { color: colors.textTertiary }]}>Toplam</Text>
-              <Text style={[styles.fcValue, { color: colors.textPrimary }]}>{formatTry(order.total_amount || subtotal)}</Text>
-            </View>
-          </View>
-          {trackingNo ? (
-            <>
-              <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
-              <TouchableOpacity
-                activeOpacity={0.7}
-                style={[styles.summaryFootCell, styles.trackingRow, { backgroundColor: colors.primarySoft, borderRadius: 10, padding: spacing.sm }]}
-                onPress={async () => {
-                  try {
-                    await Share.share({ message: trackingNo });
-                    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                  } catch {}
-                }}
-              >
-                <Text style={[styles.fcLabel, { color: colors.primary }]}>KARGO TAKİP · KOPYALA</Text>
-                <Text style={[styles.fcValue, { color: colors.primary }]} numberOfLines={1}>
-                  {trackingNo}
+        <Card style={styles.block}>
+          <View style={styles.summaryHead}>
+            <View style={styles.headRow}>
+              <View style={styles.flexText}>
+                <Text style={[type.caption, { color: colors.textTertiary }]}>Müşteri</Text>
+                <Text style={[type.headline, { color: colors.textPrimary, marginTop: 2 }]} numberOfLines={2}>
+                  {order.customer_name || "-"}
                 </Text>
-              </TouchableOpacity>
-            </>
+              </View>
+              <StatusBadge label={displayOrderStatus(order, provider)} kind={kind} />
+            </View>
+            <Text style={[type.footnote, { color: colors.textSecondary, marginTop: spacing.xs }]} numberOfLines={1}>
+              {relativeDateLabel(order)} · {providerLabel(provider)}
+            </Text>
+            <Text style={[type.footnote, tabular, { color: colors.textTertiary, marginTop: 2 }]}>
+              Sipariş tarihi: {formatOrderDateTime(order)}
+            </Text>
+          </View>
+          <ListRow divider title="Adet" trailing={<Text style={[type.callout, tabular, { color: colors.textPrimary }]}>{totalQty}</Text>} />
+          <ListRow divider title="Toplam" trailing={<Text style={[type.bodyStrong, tabular, { color: colors.textPrimary }]}>{totalText}</Text>} />
+          {trackingNo ? (
+            <ListRow
+              divider
+              title="Kargo takip numarası"
+              subtitle={trackingNo}
+              onPress={shareTracking}
+              accessibilityLabel={`Kargo takip numarası ${trackingNo}, kopyalamak için dokunun`}
+              trailing={<Text style={[type.callout, { color: colors.primary }]}>Kopyala</Text>}
+            />
           ) : null}
-        </SafeAnimatedView>
+        </Card>
 
-        {/* Action buttons */}
-        <SafeAnimatedView entering={FadeInDown.delay(80).duration(400)} style={styles.actionRow}>
-          <PressableScale
+        <View style={styles.actions}>
+          <Button
             testID="print-btn"
+            label="Yazdır"
+            icon={<PrinterIcon size={18} color="#FFFFFF" />}
+            busy={printBusy}
             onPress={handlePrint}
-            disabled={printBusy}
-            style={[styles.actionBtn, { backgroundColor: colors.primary }, shadows.primary]}
-          >
-            {printBusy ? <ActivityIndicator color="#FFF" /> : (
-              <>
-                <PrinterIcon size={18} color="#FFFFFF" />
-                <Text style={styles.actionBtnText}>Yazdır</Text>
-              </>
-            )}
-          </PressableScale>
-          <PressableScale
+            style={styles.flexBtn}
+          />
+          <Button
             testID="cloud-btn"
+            label="Bulut yazıcı"
+            variant="secondary"
+            icon={<CloudIcon size={18} color={colors.textPrimary} />}
+            busy={cloudBusy}
             onPress={handleCloud}
-            disabled={cloudBusy}
-            style={[styles.actionBtnSecondary, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}
-          >
-            {cloudBusy ? <ActivityIndicator color={colors.primary} /> : (
-              <>
-                <CloudIcon size={18} color={colors.primary} />
-                <Text style={[styles.actionBtnSecondaryText, { color: colors.primary }]}>Bulut Yaz.</Text>
-              </>
-            )}
-          </PressableScale>
-        </SafeAnimatedView>
+            style={styles.flexBtn}
+          />
+        </View>
 
         {canCreateShipment ? (
           <Button
@@ -354,33 +322,30 @@ export default function OrderDetail() {
             icon={<TruckIcon size={18} color={colors.textPrimary} />}
             busy={shipBusy}
             onPress={handleCreateShipment}
-            style={{ marginBottom: spacing.sm }}
+            style={styles.fullBtn}
           />
         ) : null}
         {order.cargo_error_message && String(order.cargo_status || "") === "error" ? (
-          <Text style={{ color: colors.error, fontSize: 13, marginBottom: spacing.sm }}>Son kargo denemesi: {order.cargo_error_message}</Text>
+          <Text style={[type.footnote, styles.note, { color: colors.error }]}>Son kargo denemesi: {order.cargo_error_message}</Text>
         ) : null}
 
-        {/* Print status indicator */}
         {printStatus ? (
-          <View style={[styles.printStatusRow, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+          <View
+            accessibilityLiveRegion="polite"
+            style={[styles.printStatusRow, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}
+          >
             <ActivityIndicator size="small" color={colors.primary} />
-            <Text style={[styles.printStatusText, { color: colors.textSecondary }]}>{printStatus}</Text>
+            <Text style={[type.footnote, { color: colors.textSecondary, flex: 1 }]}>{printStatus}</Text>
           </View>
         ) : null}
 
-        {/* Items */}
-        <SafeAnimatedView
-          entering={FadeInDown.delay(140).duration(400)}
-          style={[styles.itemsCard, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}
-        >
-          <View style={styles.cardHead}>
-            <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Sipariş İçeriği</Text>
-            <Text style={[styles.cardHint, { color: colors.textTertiary }]}>{items.length} ürün</Text>
-          </View>
-
+        <SectionTitle
+          title="Sipariş içeriği"
+          action={<Text style={[type.caption, tabular, { color: colors.textTertiary }]}>{items.length} ürün</Text>}
+        />
+        <Card style={styles.block}>
           {items.length === 0 ? (
-            <Text style={[styles.empty, { color: colors.textTertiary }]}>Bu siparişte ürün detayı yok.</Text>
+            <Text style={[type.footnote, styles.empty, { color: colors.textTertiary }]}>Bu siparişte ürün detayı yok.</Text>
           ) : (
             items.map((it, idx) => {
               const img0 = it?.images?.[0];
@@ -398,48 +363,37 @@ export default function OrderDetail() {
               const isGenericName = genericNames.includes(displayName.toLowerCase());
               const unitPrice = Number(it?.unit_price || it?.price || (it?.total_price && it?.quantity ? Number(it.total_price) / Math.max(1, Number(it.quantity)) : 0) || 0);
               return (
-                <SafeAnimatedView key={`${it.sku || it.product_name || idx}-${idx}`} entering={FadeInDown.delay(idx * 40)}>
-                  <View style={[styles.itemRow, idx > 0 && { borderTopWidth: 1, borderColor: colors.borderSubtle }]}>
-                    <View style={[styles.itemImg, { backgroundColor: colors.surfaceMuted, borderColor: colors.borderSubtle }]}>
-                      {valid ? (
-                        <ExpoImage
-                          source={{ uri: img }}
-                          style={{ width: "100%", height: "100%", borderRadius: 9 }}
-                          contentFit="cover"
-                          transition={200}
-                        />
-                      ) : (
-                        <PackageIcon size={20} color={colors.textTertiary} />
-                      )}
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={[styles.itemName, { color: isGenericName ? colors.textSecondary : colors.textPrimary }]}
-                        numberOfLines={2}
-                      >
-                        {displayName}
-                      </Text>
-                      <Text style={[styles.itemSku, { color: colors.textTertiary }]} numberOfLines={1}>
-                        {it.sku || it.barcode ? `SKU: ${it.sku || it.barcode}` : "SKU: -"}
-                      </Text>
-                      <Text style={[styles.itemPrice, { color: colors.textSecondary }]}>
-                        Birim: {formatTry(unitPrice)}
-                      </Text>
-                    </View>
-                    <View style={[styles.qtyBadge, { backgroundColor: colors.primarySoft }]}>
-                      <Text style={{ color: colors.primary, fontWeight: "800", fontSize: 13 }}>x{it.quantity || 1}</Text>
-                    </View>
+                <View
+                  key={`${it.sku || it.product_name || idx}-${idx}`}
+                  style={[styles.itemRow, idx > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+                >
+                  <View style={[styles.itemImg, { backgroundColor: colors.surfaceMuted, borderColor: colors.borderSubtle }]}>
+                    {valid ? (
+                      <ExpoImage source={{ uri: img }} style={styles.itemImgFill} contentFit="cover" transition={200} />
+                    ) : (
+                      <PackageIcon size={20} color={colors.textTertiary} />
+                    )}
                   </View>
-                </SafeAnimatedView>
+                  <View style={styles.flexText}>
+                    <Text style={[type.bodyStrong, { color: isGenericName ? colors.textSecondary : colors.textPrimary }]} numberOfLines={2}>
+                      {displayName}
+                    </Text>
+                    <Text style={[type.caption, { color: colors.textTertiary, marginTop: 2 }]} numberOfLines={1}>
+                      {it.sku || it.barcode ? `SKU: ${it.sku || it.barcode}` : "SKU: -"}
+                    </Text>
+                    <Text style={[type.footnote, tabular, { color: colors.textSecondary, marginTop: 2 }]}>
+                      Birim: {formatTry(unitPrice)}
+                    </Text>
+                  </View>
+                  <View style={[styles.qtyBadge, { backgroundColor: colors.primarySoft }]}>
+                    <Text style={[type.callout, tabular, { color: colors.primary, fontWeight: "700" }]}>x{it.quantity || 1}</Text>
+                  </View>
+                </View>
               );
             })
           )}
-
-          <View style={[styles.totalRow, { borderColor: colors.borderSubtle }]}>
-            <Text style={[styles.totalLabel, { color: colors.textTertiary }]}>Genel Toplam</Text>
-            <Text style={[styles.totalValue, { color: colors.textPrimary }]}>{formatTry(order.total_amount || subtotal)}</Text>
-          </View>
-        </SafeAnimatedView>
+          <ListRow divider title="Genel toplam" trailing={<Text style={[type.headline, tabular, { color: colors.textPrimary }]}>{totalText}</Text>} />
+        </Card>
       </ScrollView>
     </View>
   );
@@ -447,82 +401,28 @@ export default function OrderDetail() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  header: {
+  block: { marginHorizontal: spacing.lg },
+  summaryHead: { padding: spacing.md },
+  headRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm },
+  flexText: { flex: 1, minWidth: 0 },
+  actions: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginTop: spacing.md },
+  flexBtn: { flex: 1 },
+  fullBtn: { marginHorizontal: spacing.lg, marginTop: spacing.sm },
+  note: { marginHorizontal: spacing.lg, marginTop: spacing.sm },
+  printStatusRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.sm,
-    gap: 10,
-  },
-  iconBtn: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 1 },
-  headerLabel: { fontSize: 10, fontWeight: "700", letterSpacing: 0.5, textTransform: "uppercase" },
-  headerTitle: { fontSize: 16, fontWeight: "800", marginTop: 2 },
-  summaryCard: {
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    padding: spacing.md,
-  },
-  summaryTop: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
-  customerLabel: { fontSize: 10.5, fontWeight: "700", letterSpacing: 0.5, textTransform: "uppercase" },
-  customerName: { fontSize: 18, fontWeight: "800", marginTop: 2, letterSpacing: -0.3 },
-  dateText: { fontSize: 12.5, fontWeight: "600", marginTop: 4 },
-  divider: { height: 1, marginVertical: spacing.sm },
-  summaryFoot: { flexDirection: "row", alignItems: "center" },
-  trackingRow: {},
-  summaryFootCell: { flex: 1 },
-  fcDivider: { width: 1, height: 28 },
-  fcLabel: { fontSize: 10.5, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase" },
-  fcValue: { fontSize: 16, fontWeight: "800", letterSpacing: -0.3, marginTop: 2 },
-  actionRow: { flexDirection: "row", gap: 10, marginTop: spacing.md },
-  printStatusRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8, paddingHorizontal: spacing.md, paddingVertical: 10, borderRadius: radius.md, borderWidth: 1 },
-  printStatusText: { fontSize: 13, fontWeight: "600" },
-  actionBtn: {
-    flex: 1,
-    height: 50,
-    borderRadius: radius.md,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  actionBtnText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
-  actionBtnSecondary: {
-    flex: 1,
-    height: 50,
-    borderRadius: radius.md,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    borderWidth: 1,
-  },
-  actionBtnSecondaryText: { fontSize: 14, fontWeight: "700" },
-  itemsCard: {
-    marginTop: spacing.md,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    padding: spacing.md,
-  },
-  cardHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.xs },
-  cardTitle: { fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
-  cardHint: { fontSize: 11, fontWeight: "600", letterSpacing: 0.3, textTransform: "uppercase" },
-  empty: { fontSize: 13, fontWeight: "500", paddingVertical: 16 },
-  itemRow: { flexDirection: "row", alignItems: "center", paddingVertical: 12, gap: 12 },
-  itemImg: { width: 52, height: 52, borderRadius: 10, borderWidth: 1, overflow: "hidden", alignItems: "center", justifyContent: "center" },
-  itemName: { fontSize: 13.5, fontWeight: "700", letterSpacing: -0.1 },
-  itemSku: { fontSize: 11, fontWeight: "500", marginTop: 2 },
-  itemPrice: { fontSize: 12.5, fontWeight: "600", marginTop: 4 },
-  qtyBadge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9999 },
-  totalRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    gap: spacing.xs,
+    marginHorizontal: spacing.lg,
     marginTop: spacing.sm,
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
   },
-  totalLabel: { fontSize: 11, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase" },
-  totalValue: { fontSize: 18, fontWeight: "800", letterSpacing: -0.4 },
+  empty: { padding: spacing.md },
+  itemRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
+  itemImg: { width: 52, height: 52, borderRadius: radius.md, borderWidth: 1, overflow: "hidden", alignItems: "center", justifyContent: "center" },
+  itemImgFill: { width: "100%", height: "100%" },
+  qtyBadge: { paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: radius.pill },
 });

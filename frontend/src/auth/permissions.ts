@@ -49,6 +49,7 @@ const ROUTE_AREAS: Record<string, Area[]> = {
   expenses: ["billing"],
   incoming: ["billing"],
   customers: ["customers"],
+  reports: ["reports"],
 };
 
 export function canOpenRoute(user: User | null | undefined, firstSegment: string): boolean {

@@ -709,17 +709,35 @@ function paged<T>(payload: any, key: string, page: number, perPage: number): Pag
 
 export async function getFinanceOverview(token: string) {
   const d = await request<any>("/finance/overview", { method: "GET" }, token);
+  // Sunucunun üst düzey alacak/borç alanları tüm para birimlerinin toplamıdır; ekranda TL gösterildiği için
+  // para birimi kırılımı varsa yalnızca TL satırı kullanılır.
+  const byCur = d?.by_currency && typeof d.by_currency === "object" ? d.by_currency : null;
+  const tl = byCur ? byCur.TRY || byCur.TRL || null : null;
+  const multiCurrency = Boolean(byCur) && Object.keys(byCur).some((c) => c !== "TRY" && c !== "TRL");
+  const pick = (key: string) => Number((multiCurrency && tl ? tl[key] : d?.[key]) || 0);
   return {
     cash_balance: Number(d?.cash_balance || 0),
-    receivable: Number(d?.receivable || 0),
-    overdue_receivable: Number(d?.overdue_receivable || 0),
-    payable: Number(d?.payable || 0),
-    overdue_payable: Number(d?.overdue_payable || 0),
+    receivable: pick("receivable"),
+    overdue_receivable: pick("overdue_receivable"),
+    payable: pick("payable"),
+    overdue_payable: pick("overdue_payable"),
     month_cash_in: Number(d?.month_cash_in || 0),
     month_cash_out: Number(d?.month_cash_out || 0),
+    multiCurrency,
     today: d?.today,
     upcoming: Array.isArray(d?.upcoming) ? d.upcoming : [],
   } as FinanceOverview;
+}
+
+export async function getSupportNotifications(token: string) {
+  const d = await request<any>("/support/notifications?limit=20", { method: "GET" }, token);
+  return (Array.isArray(d?.items) ? d.items : []) as {
+    ticket_id: string;
+    ticket_code?: string;
+    subject?: string;
+    last_super_message_at?: string;
+    preview?: string;
+  }[];
 }
 
 export async function getCashAccounts(token: string) {

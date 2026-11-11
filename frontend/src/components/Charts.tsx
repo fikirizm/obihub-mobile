@@ -1,19 +1,19 @@
 import React, { useMemo } from "react";
 import { Text, View } from "react-native";
 import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop, G, Text as SvgText } from "react-native-svg";
-import Animated, { useAnimatedProps, useSharedValue, withTiming, Easing } from "react-native-reanimated";
+import { useSharedValue, withTiming, Easing } from "react-native-reanimated";
 import { useTheme } from "../theme/ThemeProvider";
+import { tabular, type } from "../theme/tokens";
 
-const AnimatedPath = Animated.createAnimatedComponent(Path);
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
-const AnimatedRect = Animated.createAnimatedComponent(Rect);
+// Eksen etiketleri için en küçük yazı boyutu.
+const AXIS_FONT = type.caption.fontSize;
 
 // ---------- Sparkline ----------
 export function Sparkline({
   data,
   width = 240,
   height = 64,
-  color = "#60A5FA",
+  color: colorProp,
   fillOpacity = 0.18,
   showDots = false,
   showAxis = false,
@@ -28,6 +28,8 @@ export function Sparkline({
   showAxis?: boolean;
   axisFormatter?: (n: number) => string;
 }) {
+  const { colors } = useTheme();
+  const color = colorProp ?? colors.heroAccent;
   const padX = 4;
   const padY = 6;
   const w = Math.max(1, width - padX * 2);
@@ -72,10 +74,10 @@ export function Sparkline({
         : null}
       {showAxis && line ? (
         <>
-          <SvgText x={width - 2} y={padY + 8} fill={color} fontSize={9} fontWeight="700" textAnchor="end" opacity={0.75}>
+          <SvgText x={width - 2} y={padY + AXIS_FONT - 2} fill={color} fontSize={AXIS_FONT} fontWeight="700" textAnchor="end" opacity={0.75}>
             {axisFormatter ? axisFormatter(maxVal) : maxVal >= 1000 ? `${(maxVal / 1000).toFixed(0)}k` : String(Math.round(maxVal))}
           </SvgText>
-          <SvgText x={width - 2} y={height - 2} fill={color} fontSize={9} fontWeight="700" textAnchor="end" opacity={0.55}>
+          <SvgText x={width - 2} y={height - 2} fill={color} fontSize={AXIS_FONT} fontWeight="700" textAnchor="end" opacity={0.55}>
             {axisFormatter ? axisFormatter(minVal) : minVal >= 1000 ? `${(minVal / 1000).toFixed(0)}k` : String(Math.round(minVal))}
           </SvgText>
         </>
@@ -89,11 +91,11 @@ export function BarChart({
   data,
   width = 320,
   height = 160,
-  color = "#2563EB",
+  color: colorProp,
   highlightIndex,
-  highlightColor = "#60A5FA",
-  axisColor = "#94A3B8",
-  gridColor = "#EEF2F7",
+  highlightColor: highlightColorProp,
+  axisColor: axisColorProp,
+  gridColor: gridColorProp,
   valueFormatter,
 }: {
   data: { label: string; value: number }[];
@@ -106,6 +108,11 @@ export function BarChart({
   gridColor?: string;
   valueFormatter?: (n: number) => string;
 }) {
+  const { colors } = useTheme();
+  const color = colorProp ?? colors.primary;
+  const highlightColor = highlightColorProp ?? colors.heroAccent;
+  const axisColor = axisColorProp ?? colors.textTertiary;
+  const gridColor = gridColorProp ?? colors.chartGrid;
   const padL = 8;
   const padR = 8;
   const padT = 12;
@@ -148,7 +155,7 @@ export function BarChart({
         const x = padL + i * (barW + barGap) + barW / 2;
         const y = height - 8;
         return (
-          <SvgText key={`lbl-${i}`} x={x} y={y} fill={axisColor} fontSize={9} textAnchor="middle">
+          <SvgText key={`lbl-${i}`} x={x} y={y} fill={axisColor} fontSize={AXIS_FONT} textAnchor="middle">
             {d.label}
           </SvgText>
         );
@@ -216,12 +223,12 @@ export function DonutChart({
       </Svg>
       <View style={{ position: "absolute", alignItems: "center" }}>
         {centerLabel ? (
-          <Text style={{ fontSize: 10, color: colors.textTertiary, fontWeight: "600", letterSpacing: 0.4, textTransform: "uppercase" }}>
+          <Text style={[type.caption, { color: colors.textTertiary }]} numberOfLines={1}>
             {centerLabel}
           </Text>
         ) : null}
         {centerValue ? (
-          <Text style={{ fontSize: 18, color: colors.textPrimary, fontWeight: "800", marginTop: 2 }}>{centerValue}</Text>
+          <Text style={[tabular, { fontSize: 18, color: colors.textPrimary, fontWeight: "800", marginTop: 2 }]} numberOfLines={1}>{centerValue}</Text>
         ) : null}
       </View>
     </View>

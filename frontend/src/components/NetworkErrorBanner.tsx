@@ -1,8 +1,8 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text } from "react-native";
 import Animated, { FadeInDown, FadeOutUp } from "react-native-reanimated";
 import { useTheme } from "../theme/ThemeProvider";
-import { spacing } from "../theme/tokens";
+import { radius, spacing, type } from "../theme/tokens";
 import { ZapIcon } from "./Icons";
 
 type Props = {
@@ -17,12 +17,13 @@ export function NetworkErrorBanner({ visible, message, offline }: Props) {
   const bg = offline ? colors.warningBg : colors.errorBg;
   const fg = offline ? colors.warning : colors.error;
   const defaultMsg = offline
-    ? "Çevrimdışı — önbellek verisi gösteriliyor."
-    : "Bağlantı hatası — veriler güncellenemiyor.";
+    ? "Çevrimdışısınız, önbellekteki veriler gösteriliyor."
+    : "Bağlantı hatası, veriler güncellenemiyor.";
   return (
     <Animated.View
       entering={FadeInDown.duration(300)}
       exiting={FadeOutUp.duration(200)}
+      accessibilityRole="alert"
       style={[styles.banner, { backgroundColor: bg, borderColor: fg }]}
     >
       <ZapIcon size={14} color={fg} />
@@ -37,13 +38,13 @@ const styles = StyleSheet.create({
   banner: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: spacing.xs,
     paddingHorizontal: spacing.md,
-    paddingVertical: 8,
+    paddingVertical: spacing.xs,
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: radius.md,
     marginHorizontal: spacing.lg,
     marginBottom: 6,
   },
-  text: { fontSize: 12, fontWeight: "600", flex: 1 },
+  text: { ...type.caption, fontWeight: "600", flex: 1, minWidth: 0 },
 });

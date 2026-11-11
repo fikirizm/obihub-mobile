@@ -5,12 +5,12 @@ import * as Notifications from "expo-notifications";
 import { markAllNotificationsRead, markNotificationRead, useNotifications } from "../src/notifications/store";
 import { useTheme } from "../src/theme/ThemeProvider";
 import { radius, spacing, type } from "../src/theme/tokens";
-import { BellIcon } from "../src/components/Icons";
+import { BellIcon, MailIcon } from "../src/components/Icons";
 import { EmptyState } from "../src/components/EmptyState";
 import { PlatformLogo } from "../src/components/PlatformLogo";
 import { Button } from "../src/ui/Button";
 import { StackHeader } from "../src/ui/Header";
-import { ListRow } from "../src/ui/ListRow";
+import { IconTile, ListRow } from "../src/ui/ListRow";
 
 function timeLabel(ts: number) {
   const diffMin = Math.max(0, Math.round((Date.now() - ts) / 60000));
@@ -45,7 +45,7 @@ export default function NotificationsScreen() {
           <EmptyState
             icon={<BellIcon size={30} color={colors.textTertiary} />}
             title="Bildirim yok"
-            description="Yeni sipariş geldiğinde burada görünür."
+            description="Yeni siparişler ve destek yanıtları burada görünür."
           />
         }
         renderItem={({ item, index }) => (
@@ -60,15 +60,22 @@ export default function NotificationsScreen() {
             <ListRow
               testID={`notification-${item.id}`}
               divider={index > 0}
-              leading={<PlatformLogo provider={item.provider || ""} size="sm" />}
+              leading={
+                item.kind === "support" ? (
+                  <IconTile><MailIcon size={18} color={colors.primary} /></IconTile>
+                ) : (
+                  <PlatformLogo provider={item.provider || ""} size="sm" />
+                )
+              }
               title={item.title}
               subtitle={item.body}
               meta={timeLabel(item.ts)}
               trailing={!item.read ? <View style={[styles.dot, { backgroundColor: colors.primary }]} accessibilityLabel="Okunmamış" /> : undefined}
-              chevron={Boolean(item.orderId)}
+              chevron={Boolean(item.orderId || item.ticketId)}
               onPress={() => {
                 markNotificationRead(item.id);
-                if (item.orderId) router.push({ pathname: "/orders/[id]", params: { id: item.orderId, provider: item.provider || "" } });
+                if (item.kind === "support" && item.ticketId) router.push({ pathname: "/support/[id]", params: { id: item.ticketId } });
+                else if (item.orderId) router.push({ pathname: "/orders/[id]", params: { id: item.orderId, provider: item.provider || "" } });
               }}
             />
           </View>

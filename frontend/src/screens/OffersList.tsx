@@ -1,64 +1,68 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { FlatList, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { router } from "expo-router";
-import Animated, { FadeInDown } from "react-native-reanimated";
-import { SafeAnimatedView } from "../components/SafeAnimatedView";
 import { useAuth } from "../auth/AuthProvider";
 import { useTheme } from "../theme/ThemeProvider";
-import { fontWeight, radius, spacing } from "../theme/tokens";
+import { spacing } from "../theme/tokens";
 import { getSalesOffers } from "../api";
-import { formatTry } from "../utils";
-import { PressableScale } from "../components/KPICard";
-import { FileTextIcon, SearchIcon } from "../components/Icons";
+import { formatDate, formatTry, type StatusKind } from "../utils";
+import { FileTextIcon } from "../components/Icons";
 import { InvoiceCardSkeleton } from "../components/Skeleton";
 import { EmptyState } from "../components/EmptyState";
 import { NetworkErrorBanner } from "../components/NetworkErrorBanner";
+import { StatusBadge } from "../components/StatusBadge";
 import { saveCache, loadCache } from "../offlineCache";
 import { useFocusLoad } from "../hooks/useFocusLoad";
 import { useDebounce } from "../hooks/useDebounce";
+import { Chip, ChipRow } from "../ui/Chip";
+import { RowCard, StatCard } from "../ui/RowCard";
+import { SearchField } from "../ui/SearchField";
 import type { SalesOffer } from "../types";
 
-const STATUS_COLORS: Record<string, { bg: string; text: string; label: string }> = {
-  accepted:  { bg: "#DCFCE7", text: "#16A34A", label: "Onaylı" },
-  approved:  { bg: "#DCFCE7", text: "#16A34A", label: "Onaylı" },
-  draft:     { bg: "#F1F5F9", text: "#64748B", label: "Taslak" },
-  waiting:   { bg: "#FEF3C7", text: "#D97706", label: "Beklemede" },
-  sent:      { bg: "#DBEAFE", text: "#2563EB", label: "Gönderildi" },
-  cancelled: { bg: "#FEE2E2", text: "#DC2626", label: "İptal" },
-  rejected:  { bg: "#FEE2E2", text: "#DC2626", label: "Reddedildi" },
+const STATUS: Record<string, { kind: StatusKind; label: string }> = {
+  accepted: { kind: "success", label: "Onaylı" },
+  approved: { kind: "success", label: "Onaylı" },
+  draft: { kind: "neutral", label: "Taslak" },
+  waiting: { kind: "warning", label: "Beklemede" },
+  sent: { kind: "info", label: "Gönderildi" },
+  cancelled: { kind: "error", label: "İptal" },
+  rejected: { kind: "error", label: "Reddedildi" },
 };
 
-function statusStyle(status?: string) {
-  return STATUS_COLORS[status || ""] ?? { bg: "#F1F5F9", text: "#64748B", label: status || "—" };
+const FILTERS = [
+  { key: "all", label: "Tümü" },
+  { key: "waiting", label: "Beklemede" },
+  { key: "accepted", label: "Onaylı" },
+  { key: "sent", label: "Gönderildi" },
+  { key: "draft", label: "Taslak" },
+  { key: "rejected", label: "Reddedildi" },
+];
+
+function offerStatus(status?: string) {
+  return STATUS[status || ""] ?? { kind: "neutral" as StatusKind, label: status || "—" };
 }
 
-// Finans sekmesine gömülen Paraşüt teklif listesi.
+// Paraşüt durum çeşitlerini süzgeç gruplarına indirger.
+function normalizeStatus(s?: string) {
+  if (!s) return "other";
+  if (s === "accepted" || s === "approved") return "accepted";
+  return s;
+}
+
+function offerTotal(o: SalesOffer) {
+  return Number(o.gross_total || o.net_total || 0);
+}
+
+// Teklifler ekranına gömülen Paraşüt teklif listesi.
 export function OffersList() {
   const { token } = useAuth();
-  const { colors, shadows } = useTheme();
+  const { colors } = useTheme();
   const [list, setList] = useState<SalesOffer[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [search, setSearch] = useState("");
-  const [searchFocus, setSearchFocus] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
-
-  // Normalize Paraşüt status variants to display groups
-  const normalizeStatus = (s?: string) => {
-    if (!s) return "other";
-    if (s === "accepted" || s === "approved") return "accepted";
-    return s;
-  };
 
   const load = useCallback(
     async (silent = false) => {
@@ -97,12 +101,16 @@ export function OffersList() {
         setRefreshing(false);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [token]
   );
 
   const debouncedSearch = useDebounce(search, 300);
   useFocusLoad(load, { hasData: list.length > 0 });
-  useEffect(() => { load(); }, [token]);
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   const filtered = useMemo(() => {
     const q = debouncedSearch.trim().toLowerCase();
@@ -119,161 +127,79 @@ export function OffersList() {
   const totals = useMemo(() => {
     let total = 0;
     filtered.forEach((o) => {
-      total += Number((o as any).gross_total || o.net_total || 0);
+      total += offerTotal(o);
     });
     return { total, count: filtered.length };
   }, [filtered]);
+
+  const refreshControl = (
+    <RefreshControl
+      refreshing={refreshing}
+      onRefresh={() => {
+        setRefreshing(true);
+        load(true);
+      }}
+      tintColor={colors.primary}
+    />
+  );
+  const query = search.trim();
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]}>
       <NetworkErrorBanner visible={isOffline} offline />
 
-
-      <View style={styles.summaryRow}>
-        <View style={[styles.sumCell, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
-          <Text style={[styles.sumLabel, { color: colors.textTertiary }]}>Toplam</Text>
-          <Text style={[styles.sumValue, { color: colors.textPrimary }]} numberOfLines={1}>
-            {formatTry(totals.total)}
-          </Text>
-        </View>
-        <View style={[styles.sumCell, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
-          <Text style={[styles.sumLabel, { color: colors.textTertiary }]}>Adet</Text>
-          <Text style={[styles.sumValue, { color: colors.textPrimary }]}>{totals.count}</Text>
-        </View>
+      <View style={styles.stats}>
+        <StatCard label="Toplam" value={formatTry(totals.total)} />
+        <StatCard label="Adet" value={String(totals.count)} />
       </View>
 
-      <View
-        style={[
-          styles.searchWrap,
-          { backgroundColor: colors.surface, borderColor: searchFocus ? colors.primary : colors.borderSubtle },
-        ]}
-      >
-        <SearchIcon size={18} color={colors.textTertiary} />
-        <TextInput
-          value={search}
-          onChangeText={setSearch}
-          onFocus={() => setSearchFocus(true)}
-          onBlur={() => setSearchFocus(false)}
-          placeholder="Teklif başlığı veya müşteri ara..."
-          placeholderTextColor={colors.textTertiary}
-          style={[styles.searchInput, { color: colors.textPrimary }]}
-        />
-      </View>
+      <SearchField value={search} onChangeText={setSearch} placeholder="Teklif başlığı veya müşteri ara" />
 
-      <View style={styles.filterScrollWrap}>
-        <FlatList
-          data={[
-            { key: "all",      label: "Tümü" },
-            { key: "waiting",  label: "Beklemede" },
-            { key: "accepted", label: "Onaylı" },
-            { key: "sent",     label: "Gönderildi" },
-            { key: "draft",    label: "Taslak" },
-            { key: "rejected", label: "Reddedildi" },
-          ]}
-          horizontal
-          keyExtractor={(f) => f.key}
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: spacing.lg, gap: 8 }}
-          renderItem={({ item: f }) => {
-            const active = statusFilter === f.key;
-            return (
-              <PressableScale
-                onPress={() => setStatusFilter(f.key)}
-                style={[
-                  styles.filterChip,
-                  {
-                    backgroundColor: active ? "#D97706" : colors.surface,
-                    borderColor: active ? "#D97706" : colors.borderSubtle,
-                  },
-                ]}
-              >
-                <Text style={{ fontSize: 12.5, fontWeight: "700", color: active ? "#FFF" : colors.textSecondary }}>
-                  {f.label}
-                </Text>
-              </PressableScale>
-            );
-          }}
-        />
-      </View>
+      <ChipRow>
+        {FILTERS.map((f) => (
+          <Chip key={f.key} label={f.label} selected={statusFilter === f.key} onPress={() => setStatusFilter(f.key)} />
+        ))}
+      </ChipRow>
 
       {loading ? (
-        <ScrollView
-          contentContainerStyle={{ padding: spacing.lg, gap: spacing.sm }}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor="#D97706" />
-          }
-        >
-          {[0, 1, 2, 3, 4].map((i) => <InvoiceCardSkeleton key={i} />)}
+        <ScrollView contentContainerStyle={styles.list} refreshControl={refreshControl}>
+          {[0, 1, 2, 3, 4].map((i) => (
+            <InvoiceCardSkeleton key={i} />
+          ))}
         </ScrollView>
       ) : (
         <FlatList
           data={filtered}
           keyExtractor={(o) => o.id}
-          contentContainerStyle={{ padding: spacing.lg, gap: spacing.sm, paddingBottom: 140 }}
+          contentContainerStyle={styles.list}
+          keyboardDismissMode="on-drag"
           initialNumToRender={12}
           maxToRenderPerBatch={10}
           windowSize={5}
           removeClippedSubviews
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => { setRefreshing(true); load(true); }}
-              tintColor="#D97706"
-            />
-          }
+          refreshControl={refreshControl}
           ListEmptyComponent={
             <EmptyState
               icon={<FileTextIcon size={30} color={colors.textTertiary} />}
-              title={search.trim() ? "Sonuç bulunamadı" : "Henüz teklif yok"}
+              title={query ? "Sonuç bulunamadı" : "Henüz teklif yok"}
               description={
-                search.trim()
-                  ? `"${search.trim()}" için eşleşen teklif bulunamadı.`
-                  : "Paraşüt'te oluşturulmuş teklif bulunmuyor."
+                query ? `"${query}" için eşleşen teklif bulunamadı.` : "Paraşüt'te oluşturulmuş teklif bulunmuyor."
               }
-              actionLabel={search.trim() ? "Aramayı Temizle" : undefined}
-              onAction={search.trim() ? () => setSearch("") : undefined}
+              actionLabel={query ? "Aramayı temizle" : undefined}
+              onAction={query ? () => setSearch("") : undefined}
             />
           }
-          renderItem={({ item, index }) => {
-            const st = statusStyle(item.status);
+          renderItem={({ item }) => {
+            const st = offerStatus(item.status);
             return (
-              <SafeAnimatedView entering={FadeInDown.delay(index * 35).springify().damping(18)}>
-                <PressableScale
-                  onPress={() =>
-                    router.push({ pathname: "/offers/[id]", params: { id: item.id } })
-                  }
-                  style={[
-                    styles.card,
-                    { backgroundColor: colors.surface, borderColor: colors.borderSubtle },
-                    shadows.sm,
-                  ]}
-                >
-                  <View style={[styles.iconBox, { backgroundColor: "#FEF3C7" }]}>
-                    <FileTextIcon size={18} color="#D97706" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.offerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-                      {item.description || `Teklif #${item.id}`}
-                    </Text>
-                    <Text style={[styles.offerContact, { color: colors.textSecondary }]} numberOfLines={1}>
-                      {item.contact_name || "—"}
-                    </Text>
-                    {item.issue_date ? (
-                      <Text style={[styles.offerDate, { color: colors.textTertiary }]}>
-                        {item.issue_date}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <View style={{ alignItems: "flex-end", gap: 6 }}>
-                    <Text style={[styles.offerAmount, { color: colors.textPrimary }]}>
-                      {formatTry(Number((item as any).gross_total || item.net_total || 0))}
-                    </Text>
-                    <View style={[styles.badge, { backgroundColor: st.bg }]}>
-                      <Text style={[styles.badgeText, { color: st.text }]}>{st.label}</Text>
-                    </View>
-                  </View>
-                </PressableScale>
-              </SafeAnimatedView>
+              <RowCard
+                title={item.description || `Teklif #${item.id}`}
+                subtitle={item.contact_name || "—"}
+                meta={item.issue_date ? formatDate(item.issue_date) : undefined}
+                amount={formatTry(offerTotal(item))}
+                badge={<StatusBadge label={st.label} kind={st.kind} size="sm" />}
+                onPress={() => router.push({ pathname: "/offers/[id]", params: { id: item.id } })}
+              />
             );
           }}
         />
@@ -284,39 +210,6 @@ export function OffersList() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
-  eyebrow: { fontSize: 11, fontWeight: fontWeight.bold, letterSpacing: 0.6, textTransform: "uppercase" },
-  title: { fontSize: 26, fontWeight: fontWeight.bold, letterSpacing: -0.6, marginTop: 2, marginBottom: spacing.sm },
-  summaryRow: { flexDirection: "row", gap: 8, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
-  sumCell: { flex: 1, padding: spacing.sm, borderRadius: radius.lg, borderWidth: 1 },
-  sumLabel: { fontSize: 10.5, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase" },
-  sumValue: { fontSize: 16, fontWeight: "800", marginTop: 4, letterSpacing: -0.3 },
-  searchWrap: {
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
-    height: 44,
-  },
-  searchInput: { flex: 1, fontSize: 14, fontWeight: "500" },
-  card: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: spacing.md,
-    gap: spacing.sm,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-  },
-  iconBox: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  offerTitle: { fontSize: 14, fontWeight: "800", letterSpacing: -0.2 },
-  offerContact: { fontSize: 12.5, fontWeight: "600", marginTop: 2 },
-  offerDate: { fontSize: 11, fontWeight: "500", marginTop: 2 },
-  offerAmount: { fontSize: 14, fontWeight: "800", letterSpacing: -0.3 },
-  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 9999 },
-  badgeText: { fontSize: 10.5, fontWeight: "700" },
-  filterScrollWrap: { paddingVertical: spacing.sm },
-  filterChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 9999, borderWidth: 1 },
+  stats: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
+  list: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, gap: spacing.xs, paddingBottom: spacing.huge },
 });

@@ -5,7 +5,7 @@ import * as BackgroundFetch from "expo-background-fetch";
 import * as TaskManager from "expo-task-manager";
 import { Platform } from "react-native";
 import * as Storage from "../storage";
-import { getAccountingSettings, getMe, getOrders, login as apiLogin, registerPushToken, setSessionHandlers } from "../api";
+import { getAccountingSettings, getMe, getOrders, getSupportNotifications, login as apiLogin, registerPushToken, setSessionHandlers } from "../api";
 import { displayOrderNo, formatOrderDateTime, isNewOrderStatus, providerLabel } from "../utils";
 import { clearCatalogCache } from "../catalogCache";
 import { clearAllCache } from "../offlineCache";
@@ -403,6 +403,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const provider = String(o.integration_provider || o.provider || o.channel || "");
           return isNewOrderStatus(o, provider) && !seen.has(o.id);
         });
+
+        // Destek ekibinden gelen okunmamış yanıtlar bildirim merkezine eklenir (ayrıca sesli bildirim üretilmez).
+        getSupportNotifications(token)
+          .then((rows) =>
+            addNotifications(
+              rows
+                .filter((r) => r.ticket_id)
+                .map((r) => ({
+                  id: `support-${r.ticket_id}-${r.last_super_message_at || ""}`,
+                  kind: "support" as const,
+                  title: `Destek yanıtı · ${r.subject || r.ticket_code || "Talep"}`,
+                  body: String(r.preview || ""),
+                  ticketId: r.ticket_id,
+                  ts: r.last_super_message_at ? new Date(r.last_super_message_at).getTime() || Date.now() : Date.now(),
+                }))
+            )
+          )
+          .catch(() => {});
 
         if (newOrders.length > 0) {
           newOrders.forEach((o) => seen.add(o.id));
