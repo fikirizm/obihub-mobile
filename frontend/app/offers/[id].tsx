@@ -1,20 +1,25 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Clipboard, Linking, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { Clipboard, Linking, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
+import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { createOfferPayment, getOfferPayment, getSalesOfferDetail, getWooIntegrations, updateSalesOffer } from "../../src/api";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatDate, formatTry } from "../../src/utils";
 import type { StatusKind } from "../../src/utils";
-import { CheckIcon, FileTextIcon, LinkIcon, MailIcon } from "../../src/components/Icons";
+import { CheckIcon, FileTextIcon, LinkIcon, MailIcon, PlugIcon, TagIcon, WalletIcon } from "../../src/components/Icons";
 import { EmptyState } from "../../src/components/EmptyState";
 import { PressableScale } from "../../src/components/KPICard";
+import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { Button } from "../../src/ui/Button";
 import { useFeedback } from "../../src/ui/Feedback";
+import { DetailHero } from "../../src/ui/DetailHero";
+import type { HeroStat } from "../../src/ui/DetailHero";
 import { StackHeader } from "../../src/ui/Header";
-import { Card, ListRow, SectionTitle } from "../../src/ui/ListRow";
+import { ON_HERO } from "../../src/ui/HeroCard";
+import { Card, IconTile, ListRow, SectionTitle } from "../../src/ui/ListRow";
 import type { OfferPayment, SalesOffer } from "../../src/types";
 
 const STATUS_META: Record<string, { kind: StatusKind; label: string }> = {
@@ -30,6 +35,67 @@ const STATUS_META: Record<string, { kind: StatusKind; label: string }> = {
 function fmtQty(v: any) {
   const n = parseFloat(String(v ?? 1));
   return Number.isNaN(n) ? "1" : n % 1 === 0 ? String(Math.round(n)) : String(n);
+}
+
+function initialsOf(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "";
+  const first = parts[0].charAt(0);
+  const last = parts.length > 1 ? parts[parts.length - 1].charAt(0) : "";
+  return (first + last).toLocaleUpperCase("tr-TR");
+}
+
+// Yükleme iskeleti: özet kartı, işlem düğmeleri ve kalem satırlarıyla aynı biçimde.
+function OfferSkeleton() {
+  const { colors } = useTheme();
+  const bar = (w: number | `${number}%`, h: number) => (
+    <View style={{ width: w, height: h, borderRadius: radius.sm, backgroundColor: colors.border }} />
+  );
+  return (
+    <View accessible accessibilityLabel="Teklif yükleniyor" testID="offer-loading">
+      <Card padded style={[styles.block, { gap: spacing.sm, minHeight: 196 }]}>
+        <View style={styles.skelRow}>
+          <View style={[styles.skelAvatar, { backgroundColor: colors.border }]} />
+          <View style={{ flex: 1, gap: spacing.xs }}>
+            {bar("70%", 16)}
+            {bar("45%", 12)}
+          </View>
+        </View>
+        <View style={{ marginTop: spacing.sm, gap: spacing.xs }}>
+          {bar("30%", 12)}
+          {bar("60%", 32)}
+        </View>
+        <View style={[styles.skelRow, { marginTop: spacing.sm }]}>
+          {bar("30%", 28)}
+          {bar("30%", 28)}
+          {bar("30%", 28)}
+        </View>
+      </Card>
+      <View style={styles.actions}>
+        <View style={[styles.skelButton, { backgroundColor: colors.border }]} />
+        <View style={[styles.skelButton, { backgroundColor: colors.border }]} />
+      </View>
+      <View style={styles.skelSection}>{bar(96, 16)}</View>
+      <Card style={styles.block}>
+        {[0, 1, 2].map((i) => (
+          <View
+            key={i}
+            style={[
+              styles.skelItem,
+              i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+            ]}
+          >
+            <View style={[styles.skelTile, { backgroundColor: colors.border }]} />
+            <View style={{ flex: 1, gap: spacing.xs }}>
+              {bar("65%", 14)}
+              {bar("40%", 12)}
+            </View>
+            {bar(64, 14)}
+          </View>
+        ))}
+      </Card>
+    </View>
+  );
 }
 
 export default function OfferDetail() {
@@ -132,7 +198,7 @@ export default function OfferDetail() {
     return (
       <View style={[styles.wrap, { backgroundColor: colors.background }]}>
         <StackHeader title="Teklif" />
-        <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.xxl }} />
+        <OfferSkeleton />
       </View>
     );
   }
@@ -142,7 +208,7 @@ export default function OfferDetail() {
       <View style={[styles.wrap, { backgroundColor: colors.background }]}>
         <StackHeader title="Teklif" />
         <EmptyState
-          icon={<FileTextIcon size={30} color={colors.textTertiary} />}
+          icon={<FileTextIcon size={30} color={colors.violet} />}
           title="Teklif bulunamadı"
           description="Teklif silinmiş olabilir. Listeden yeniden açmayı deneyin."
         />
@@ -158,41 +224,47 @@ export default function OfferDetail() {
   const totalDiscount = Number((offer as any).total_discount || offer.computed_total_discount || 0);
   const canDecide = offer.status === "waiting" || offer.status === "sent" || offer.status === "draft" || offer.status === "approved";
   const title = offer.description || `Teklif #${offer.id}`;
+  const heroTitle = offer.contact_name || title;
+  const initials = initialsOf(offer.contact_name || "");
+  // Tarih önce gelir: alt başlık iki satırda kesildiğinde kırpılan kısım, üst başlıkta da görünen açıklama olur.
+  const heroSubtitle = [offer.issue_date ? `Tarih ${formatDate(offer.issue_date)}` : null, offer.contact_name ? title : null]
+    .filter(Boolean)
+    .join(" · ");
+  const heroStats: HeroStat[] = [];
+  if (offer.due_date) heroStats.push({ label: "Son geçerlilik", value: formatDate(offer.due_date) });
+  if (lineItems.length > 0) heroStats.push({ label: "Kalem", value: String(lineItems.length) });
+  if (totalDiscount > 0) heroStats.push({ label: "Toplam indirim", value: `-${formatTry(totalDiscount)}`, tone: "bad" });
+  const payLabel = isPaid ? "Ödeme alındı" : isPending ? "Ödeme bekleniyor" : payment?.status || "-";
+  const payTint = isPaid ? colors.successBg : isPending ? colors.warningBg : colors.surfaceMuted;
+  const payColor = isPaid ? colors.success : isPending ? colors.warning : colors.textSecondary;
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="offer-detail">
       <StackHeader title={title} subtitle={offer.contact_name || undefined} />
       <ScrollView contentContainerStyle={{ paddingBottom: spacing.huge }} showsVerticalScrollIndicator={false}>
-        <Card padded style={styles.block}>
-          <View style={styles.headRow}>
-            <Text style={[type.headline, { color: colors.textPrimary, flex: 1, minWidth: 0 }]} numberOfLines={2}>
-              {offer.contact_name || title}
-            </Text>
-            <StatusBadge label={st.label} kind={st.kind} />
-          </View>
-          <Text style={[type.caption, { color: colors.textTertiary, marginTop: spacing.sm }]}>Toplam tutar</Text>
-          <Text style={[type.largeTitle, tabular, { color: colors.textPrimary }]} numberOfLines={1} adjustsFontSizeToFit>
-            {formatTry(Number(offer.net_total || 0))}
-          </Text>
-          {totalDiscount > 0 ? (
-            <Text style={[type.footnote, tabular, { color: colors.error, marginTop: 2 }]}>
-              Toplam indirim -{formatTry(totalDiscount)}
-            </Text>
-          ) : null}
-          {offer.issue_date || offer.due_date ? (
-            <View style={[styles.dateRow, { borderTopColor: colors.border }]}>
-              {offer.issue_date ? (
-                <Text style={[type.footnote, { color: colors.textSecondary }]}>Tarih {formatDate(offer.issue_date)}</Text>
-              ) : null}
-              {offer.due_date ? (
-                <Text style={[type.footnote, { color: colors.textSecondary }]}>Son geçerlilik {formatDate(offer.due_date)}</Text>
-              ) : null}
-            </View>
-          ) : null}
-        </Card>
+        <View style={{ marginTop: spacing.sm }}>
+          <DetailHero
+            tone="violet"
+            leading={
+              <View style={styles.avatar}>
+                {initials ? (
+                  <Text style={styles.avatarText}>{initials}</Text>
+                ) : (
+                  <FileTextIcon size={20} color={ON_HERO.text} />
+                )}
+              </View>
+            }
+            title={heroTitle}
+            subtitle={heroSubtitle || undefined}
+            badge={<StatusBadge label={st.label} kind={st.kind} />}
+            valueLabel="Toplam tutar"
+            value={formatTry(Number(offer.net_total || 0))}
+            stats={heroStats}
+          />
+        </View>
 
         {canDecide ? (
-          <View style={styles.actions}>
+          <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)} style={styles.actions}>
             <Button
               testID="offer-approve"
               label="Onayla"
@@ -210,17 +282,27 @@ export default function OfferDetail() {
               onPress={() => handleStatusChange("rejected")}
               style={{ flex: 1 }}
             />
-          </View>
+          </SafeAnimatedView>
         ) : null}
 
         {lineItems.length > 0 ? (
-          <>
-            <SectionTitle title="Kalemler" />
+          <SafeAnimatedView entering={FadeInDown.delay(140).duration(380)}>
+            <SectionTitle
+              title="Kalemler"
+              action={
+                <Text style={[type.footnote, tabular, { color: colors.textTertiary }]}>{lineItems.length} kalem</Text>
+              }
+            />
             <Card style={styles.block}>
               {lineItems.map((item, idx) => (
                 <ListRow
                   key={item.id || idx}
                   divider={idx > 0}
+                  leading={
+                    <IconTile tint={colors.violetSoft}>
+                      <TagIcon size={18} color={colors.violet} />
+                    </IconTile>
+                  }
                   title={(item as any).product_name || item.description || "Ürün/Hizmet"}
                   subtitle={`${fmtQty(item.quantity)} adet × ${formatTry(Number(item.unit_price || 0))}`}
                   trailing={
@@ -240,20 +322,32 @@ export default function OfferDetail() {
                 />
               ))}
             </Card>
-          </>
+          </SafeAnimatedView>
         ) : null}
 
         {/* Ödeme bölümü yalnızca WooCommerce entegrasyonu varsa veya ödeme zaten oluşturulmuşsa gösterilir. */}
         {hasPayment || wooIntegrations.length > 0 ? (
-          <>
+          <SafeAnimatedView entering={FadeInDown.delay(210).duration(380)}>
             <SectionTitle title="Ödeme" />
             <Card padded style={styles.block}>
               {hasPayment ? (
                 <View style={{ gap: spacing.sm }}>
-                  <StatusBadge
-                    label={isPaid ? "Ödeme alındı" : isPending ? "Ödeme bekleniyor" : payment?.status || "-"}
-                    kind={isPaid ? "success" : isPending ? "warning" : "neutral"}
-                  />
+                  <View style={styles.payHead}>
+                    <IconTile tint={payTint}>
+                      {isPaid ? <CheckIcon size={18} color={payColor} /> : <WalletIcon size={18} color={payColor} />}
+                    </IconTile>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={1}>
+                        Ödeme linki
+                      </Text>
+                      {payment?.woo_order_id ? (
+                        <Text style={[type.caption, tabular, { color: colors.textTertiary, marginTop: 1 }]} numberOfLines={1}>
+                          WooCommerce siparişi #{payment.woo_order_id}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <StatusBadge label={payLabel} kind={isPaid ? "success" : isPending ? "warning" : "neutral"} />
+                  </View>
 
                   <View style={[styles.linkBox, { borderColor: colors.border, backgroundColor: colors.surfaceMuted }]}>
                     <PressableScale
@@ -263,7 +357,9 @@ export default function OfferDetail() {
                       accessibilityLabel="Ödeme linkini aç"
                       style={styles.linkPress}
                     >
-                      <LinkIcon size={16} color={colors.primary} />
+                      <IconTile tint={colors.primarySoft}>
+                        <LinkIcon size={16} color={colors.primary} />
+                      </IconTile>
                       <Text style={[type.callout, { color: colors.primary, flex: 1, minWidth: 0 }]} numberOfLines={1}>
                         {payment?.payment_url ?? "-"}
                       </Text>
@@ -298,6 +394,19 @@ export default function OfferDetail() {
                 </View>
               ) : (
                 <View style={{ gap: spacing.sm }}>
+                  <View style={styles.payHead}>
+                    <IconTile tint={colors.violetSoft}>
+                      <WalletIcon size={18} color={colors.violet} />
+                    </IconTile>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={1}>
+                        Ödeme linki oluşturun
+                      </Text>
+                      <Text style={[type.caption, { color: colors.textTertiary, marginTop: 1 }]} numberOfLines={2}>
+                        Müşteriniz teklif tutarını bu link üzerinden öder.
+                      </Text>
+                    </View>
+                  </View>
                   {wooIntegrations.length > 1 ? (
                     <View style={{ gap: spacing.xs }} accessibilityRole="radiogroup">
                       <Text style={[type.caption, { color: colors.textSecondary }]}>Mağaza seçin</Text>
@@ -319,6 +428,9 @@ export default function OfferDetail() {
                               },
                             ]}
                           >
+                            <IconTile tint={active ? colors.surface : colors.surfaceMuted}>
+                              <PlugIcon size={18} color={active ? colors.primary : colors.textSecondary} />
+                            </IconTile>
                             <Text style={[type.bodyStrong, { color: colors.textPrimary, flex: 1, minWidth: 0 }]} numberOfLines={1}>
                               {integ.name || integ.id}
                             </Text>
@@ -331,8 +443,11 @@ export default function OfferDetail() {
 
                   {offer.contact_email ? (
                     <View style={[styles.optionRow, { borderColor: colors.border, backgroundColor: colors.surfaceMuted }]}>
+                      <IconTile tint={colors.surface}>
+                        <MailIcon size={18} color={colors.textSecondary} />
+                      </IconTile>
                       <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={[type.bodyStrong, { color: colors.textPrimary }]}>Müşteriye e-posta gönder</Text>
+                        <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={1}>Müşteriye e-posta gönder</Text>
                         <Text style={[type.caption, { color: colors.textTertiary, marginTop: 2 }]} numberOfLines={1}>
                           {offer.contact_email}
                         </Text>
@@ -352,7 +467,7 @@ export default function OfferDetail() {
                 </View>
               )}
             </Card>
-          </>
+          </SafeAnimatedView>
         ) : null}
       </ScrollView>
     </View>
@@ -362,16 +477,22 @@ export default function OfferDetail() {
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },
-  headRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm },
-  dateRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    columnGap: spacing.md,
-    rowGap: spacing.xxs,
-    marginTop: spacing.sm,
-    paddingTop: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: ON_HERO.faint,
   },
+  avatarText: { color: ON_HERO.text, fontSize: 16, fontWeight: "700" },
+  payHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  skelRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  skelAvatar: { width: 44, height: 44, borderRadius: 22 },
+  skelButton: { flex: 1, height: 48, borderRadius: radius.md },
+  skelSection: { paddingHorizontal: spacing.lg, marginTop: spacing.xl, marginBottom: spacing.sm },
+  skelItem: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 60, paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
+  skelTile: { width: 36, height: 36, borderRadius: 10 },
   actions: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginTop: spacing.md },
   linkBox: {
     flexDirection: "row",

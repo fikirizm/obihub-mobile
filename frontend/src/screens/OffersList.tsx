@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { router } from "expo-router";
+import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../auth/AuthProvider";
 import { useTheme } from "../theme/ThemeProvider";
 import { spacing } from "../theme/tokens";
@@ -10,11 +11,13 @@ import { FileTextIcon } from "../components/Icons";
 import { InvoiceCardSkeleton } from "../components/Skeleton";
 import { EmptyState } from "../components/EmptyState";
 import { NetworkErrorBanner } from "../components/NetworkErrorBanner";
+import { SafeAnimatedView } from "../components/SafeAnimatedView";
 import { StatusBadge } from "../components/StatusBadge";
 import { saveCache, loadCache } from "../offlineCache";
 import { useFocusLoad } from "../hooks/useFocusLoad";
 import { useDebounce } from "../hooks/useDebounce";
 import { Chip, ChipRow } from "../ui/Chip";
+import { IconTile } from "../ui/ListRow";
 import { RowCard, StatCard } from "../ui/RowCard";
 import { SearchField } from "../ui/SearchField";
 import type { SalesOffer } from "../types";
@@ -112,6 +115,17 @@ export function OffersList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  // Satır giriş animasyonu yalnızca ilk yüklemede oynar; sanallaştırma ya da süzgeç değişimiyle
+  // yeniden bağlanan satırlar beklemeden görünür.
+  const animateRows = useRef(true);
+  useEffect(() => {
+    if (loading) return;
+    const t = setTimeout(() => {
+      animateRows.current = false;
+    }, 700);
+    return () => clearTimeout(t);
+  }, [loading]);
+
   const filtered = useMemo(() => {
     const q = debouncedSearch.trim().toLowerCase();
     return list.filter((o) => {
@@ -148,18 +162,24 @@ export function OffersList() {
     <View style={[styles.wrap, { backgroundColor: colors.background }]}>
       <NetworkErrorBanner visible={isOffline} offline />
 
-      <View style={styles.stats}>
-        <StatCard label="Toplam" value={formatTry(totals.total)} />
-        <StatCard label="Adet" value={String(totals.count)} />
-      </View>
+      <SafeAnimatedView entering={FadeInDown.duration(380)}>
+        <View style={styles.stats}>
+          <StatCard label="Toplam" value={formatTry(totals.total)} />
+          <StatCard label="Adet" value={String(totals.count)} />
+        </View>
+      </SafeAnimatedView>
 
-      <SearchField value={search} onChangeText={setSearch} placeholder="Teklif başlığı veya müşteri ara" />
+      <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)}>
+        <SearchField value={search} onChangeText={setSearch} placeholder="Teklif başlığı veya müşteri ara" />
+      </SafeAnimatedView>
 
-      <ChipRow>
-        {FILTERS.map((f) => (
-          <Chip key={f.key} label={f.label} selected={statusFilter === f.key} onPress={() => setStatusFilter(f.key)} />
-        ))}
-      </ChipRow>
+      <SafeAnimatedView entering={FadeInDown.delay(140).duration(380)}>
+        <ChipRow>
+          {FILTERS.map((f) => (
+            <Chip key={f.key} label={f.label} selected={statusFilter === f.key} onPress={() => setStatusFilter(f.key)} />
+          ))}
+        </ChipRow>
+      </SafeAnimatedView>
 
       {loading ? (
         <ScrollView contentContainerStyle={styles.list} refreshControl={refreshControl}>
@@ -180,7 +200,7 @@ export function OffersList() {
           refreshControl={refreshControl}
           ListEmptyComponent={
             <EmptyState
-              icon={<FileTextIcon size={30} color={colors.textTertiary} />}
+              icon={<FileTextIcon size={30} color={colors.violet} />}
               title={query ? "Sonuç bulunamadı" : "Henüz teklif yok"}
               description={
                 query ? `"${query}" için eşleşen teklif bulunamadı.` : "Paraşüt'te oluşturulmuş teklif bulunmuyor."
@@ -189,10 +209,27 @@ export function OffersList() {
               onAction={query ? () => setSearch("") : undefined}
             />
           }
-          renderItem={({ item }) => {
+          renderItem={({ item, index }) => {
             const st = offerStatus(item.status);
-            return (
+            // Şerit durum rengini taşır; durumu belirsiz ya da taslak tekliflerde alanın mor tonu kullanılır.
+            const accent =
+              st.kind === "success"
+                ? colors.success
+                : st.kind === "warning"
+                  ? colors.warning
+                  : st.kind === "error"
+                    ? colors.error
+                    : st.kind === "info"
+                      ? colors.info
+                      : colors.violet;
+            const row = (
               <RowCard
+                accent={accent}
+                leading={
+                  <IconTile tint={colors.violetSoft}>
+                    <FileTextIcon size={18} color={colors.violet} />
+                  </IconTile>
+                }
                 title={item.description || `Teklif #${item.id}`}
                 subtitle={item.contact_name || "—"}
                 meta={item.issue_date ? formatDate(item.issue_date) : undefined}
@@ -200,6 +237,13 @@ export function OffersList() {
                 badge={<StatusBadge label={st.label} kind={st.kind} size="sm" />}
                 onPress={() => router.push({ pathname: "/offers/[id]", params: { id: item.id } })}
               />
+            );
+            // Sarmalayıcı her satırda aynı kalır (tip değişimi yeniden bağlamaya yol açmasın);
+            // yalnızca ilk yüklemede ilk ekrandaki satırlar sırayla kayarak gelir.
+            return (
+              <SafeAnimatedView entering={animateRows.current && index < 8 ? FadeInDown.delay(index * 35).duration(320) : undefined}>
+                {row}
+              </SafeAnimatedView>
             );
           }}
         />

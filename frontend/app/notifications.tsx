@@ -4,13 +4,16 @@ import { router } from "expo-router";
 import * as Notifications from "expo-notifications";
 import { markAllNotificationsRead, markNotificationRead, useNotifications } from "../src/notifications/store";
 import { useTheme } from "../src/theme/ThemeProvider";
-import { radius, spacing, type } from "../src/theme/tokens";
-import { BellIcon, MailIcon } from "../src/components/Icons";
+import { radius, spacing, tabular, type } from "../src/theme/tokens";
+import { FadeInDown } from "react-native-reanimated";
+import { ArrowRightIcon, BellIcon, MailIcon } from "../src/components/Icons";
+import { PressableScale } from "../src/components/KPICard";
+import { SafeAnimatedView } from "../src/components/SafeAnimatedView";
 import { EmptyState } from "../src/components/EmptyState";
 import { PlatformLogo } from "../src/components/PlatformLogo";
 import { Button } from "../src/ui/Button";
 import { StackHeader } from "../src/ui/Header";
-import { IconTile, ListRow } from "../src/ui/ListRow";
+import { IconTile } from "../src/ui/ListRow";
 
 function timeLabel(ts: number) {
   const diffMin = Math.max(0, Math.round((Date.now() - ts) / 60000));
@@ -33,9 +36,15 @@ export default function NotificationsScreen() {
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="notifications-screen">
       <StackHeader title="Bildirimler" subtitle={unread > 0 ? `${unread} okunmamış` : undefined} />
       {unread > 0 ? (
-        <View style={{ paddingHorizontal: spacing.lg, alignItems: "flex-end" }}>
+        <SafeAnimatedView entering={FadeInDown.duration(380)} style={styles.toolbar}>
+          <View style={[styles.unreadPill, { backgroundColor: colors.primarySoft }]}>
+            <BellIcon size={14} color={colors.primary} />
+            <Text style={[type.caption, tabular, { color: colors.primary, fontWeight: "700" }]} numberOfLines={1}>
+              {unread} okunmamış
+            </Text>
+          </View>
           <Button testID="notifications-mark-all" label="Tümünü okundu say" variant="ghost" size="sm" onPress={markAll} />
-        </View>
+        </SafeAnimatedView>
       ) : null}
       <FlatList
         data={list}
@@ -43,43 +52,66 @@ export default function NotificationsScreen() {
         contentContainerStyle={styles.list}
         ListEmptyComponent={
           <EmptyState
-            icon={<BellIcon size={30} color={colors.textTertiary} />}
+            icon={<BellIcon size={30} color={colors.primary} />}
             title="Bildirim yok"
             description="Yeni siparişler ve destek yanıtları burada görünür."
           />
         }
-        renderItem={({ item, index }) => (
-          <View
-            style={[
-              styles.item,
-              { backgroundColor: colors.surface, borderColor: colors.borderSubtle },
-              index === 0 && styles.first,
-              index === list.length - 1 && styles.last,
-            ]}
-          >
-            <ListRow
-              testID={`notification-${item.id}`}
-              divider={index > 0}
-              leading={
-                item.kind === "support" ? (
-                  <IconTile><MailIcon size={18} color={colors.primary} /></IconTile>
-                ) : (
-                  <PlatformLogo provider={item.provider || ""} size="sm" />
-                )
-              }
-              title={item.title}
-              subtitle={item.body}
-              meta={timeLabel(item.ts)}
-              trailing={!item.read ? <View style={[styles.dot, { backgroundColor: colors.primary }]} accessibilityLabel="Okunmamış" /> : undefined}
-              chevron={Boolean(item.orderId || item.ticketId)}
-              onPress={() => {
-                markNotificationRead(item.id);
-                if (item.kind === "support" && item.ticketId) router.push({ pathname: "/support/[id]", params: { id: item.ticketId } });
-                else if (item.orderId) router.push({ pathname: "/orders/[id]", params: { id: item.orderId, provider: item.provider || "" } });
-              }}
-            />
-          </View>
-        )}
+        renderItem={({ item, index }) => {
+          const unreadRow = !item.read;
+          const canOpen = Boolean(item.orderId || item.ticketId);
+          return (
+            <View
+              style={[
+                styles.item,
+                { backgroundColor: unreadRow ? colors.primarySoft : colors.surface, borderColor: colors.borderSubtle },
+                index === 0 && styles.first,
+                index === list.length - 1 && styles.last,
+              ]}
+            >
+              <PressableScale
+                testID={`notification-${item.id}`}
+                accessibilityRole="button"
+                accessibilityLabel={[unreadRow ? "Okunmamış" : null, item.title, item.body, timeLabel(item.ts)].filter(Boolean).join(", ")}
+                onPress={() => {
+                  markNotificationRead(item.id);
+                  if (item.kind === "support" && item.ticketId) router.push({ pathname: "/support/[id]", params: { id: item.ticketId } });
+                  else if (item.orderId) router.push({ pathname: "/orders/[id]", params: { id: item.orderId, provider: item.provider || "" } });
+                }}
+              >
+                <View style={[styles.row, index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
+                  {item.kind === "support" ? (
+                    <IconTile tint={unreadRow ? colors.surface : colors.emeraldSoft}>
+                      <MailIcon size={18} color={colors.emerald} />
+                    </IconTile>
+                  ) : (
+                    <PlatformLogo provider={item.provider || ""} size="sm" />
+                  )}
+                  <View style={styles.rowBody}>
+                    <View style={styles.titleRow}>
+                      <Text
+                        style={[type.body, { color: colors.textPrimary, flex: 1, minWidth: 0, fontWeight: unreadRow ? "700" : "500" }]}
+                        numberOfLines={1}
+                      >
+                        {item.title}
+                      </Text>
+                      <Text style={[type.caption, { color: unreadRow ? colors.primary : colors.textTertiary }]} numberOfLines={1}>
+                        {timeLabel(item.ts)}
+                      </Text>
+                    </View>
+                    {item.body ? (
+                      <Text style={[type.footnote, { color: unreadRow ? colors.textPrimary : colors.textSecondary, marginTop: 1 }]} numberOfLines={2}>
+                        {item.body}
+                      </Text>
+                    ) : null}
+                  </View>
+                  {unreadRow ? <View style={[styles.dot, { backgroundColor: colors.primary }]} /> : null}
+                  {canOpen ? <ArrowRightIcon size={16} color={colors.textTertiary} /> : null}
+                </View>
+              </PressableScale>
+            </View>
+          );
+        }}
       />
       {list.length > 0 ? (
         <Text style={[type.caption, { color: colors.textTertiary, textAlign: "center", paddingBottom: spacing.lg }]}>
@@ -96,5 +128,10 @@ const styles = StyleSheet.create({
   item: { borderLeftWidth: 1, borderRightWidth: 1 },
   first: { borderTopWidth: 1, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, overflow: "hidden" },
   last: { borderBottomWidth: 1, borderBottomLeftRadius: radius.lg, borderBottomRightRadius: radius.lg, overflow: "hidden" },
+  toolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm, paddingHorizontal: spacing.lg, marginBottom: spacing.xxs },
+  unreadPill: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 6 },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 64, paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
+  rowBody: { flex: 1, minWidth: 0 },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   dot: { width: 10, height: 10, borderRadius: 5 },
 });

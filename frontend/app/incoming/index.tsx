@@ -1,20 +1,23 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Platform, StyleSheet, Text, View } from "react-native";
+import { Platform, StyleSheet, Text, View } from "react-native";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { getIncomingInvoicePdf, getIncomingInvoices, resolveIncomingSource } from "../../src/api";
 import { usePagedList } from "../../src/hooks/usePagedList";
 import { openBase64Pdf } from "../../src/pdf";
 import { useTheme } from "../../src/theme/ThemeProvider";
-import { spacing, type } from "../../src/theme/tokens";
+import { radius, spacing, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney } from "../../src/utils";
 import type { StatusKind } from "../../src/utils";
 import { InboxIcon } from "../../src/components/Icons";
 import { EmptyState } from "../../src/components/EmptyState";
+import { FadeInDown, SafeAnimatedView } from "../../src/components/SafeAnimatedView";
+import { OrderCardSkeleton } from "../../src/components/Skeleton";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { Chip, ChipRow } from "../../src/ui/Chip";
 import { useFeedback } from "../../src/ui/Feedback";
 import { StackHeader } from "../../src/ui/Header";
 import { ListBody } from "../../src/ui/ListBody";
+import { IconTile } from "../../src/ui/ListRow";
 import { RowCard } from "../../src/ui/RowCard";
 import type { IncomingInvoice, IncomingSource } from "../../src/types";
 
@@ -69,37 +72,63 @@ export default function IncomingInvoicesScreen() {
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="incoming-screen">
       <StackHeader title="Gelen e-faturalar" subtitle={source ? SOURCE_LABELS[source] : undefined} />
       {resolving ? (
-        <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.xxl }} />
+        <View style={styles.skeleton} accessibilityLabel="Gelen faturalar yükleniyor">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <OrderCardSkeleton key={i} />
+          ))}
+        </View>
       ) : !source ? (
         <EmptyState
-          icon={<InboxIcon size={30} color={colors.textTertiary} />}
+          icon={<InboxIcon size={30} color={colors.amber} />}
           title="Gelen fatura kaynağı yok"
           description="Gelen e-faturalar Paraşüt, BenimPOS veya Turkcell e-Fatura bağlantısıyla çalışır. Bağlantı web panelinden yapılır."
         />
       ) : (
         <>
           {connected.length > 1 ? (
-            <ChipRow>
-              {connected.map((s) => (
-                <Chip key={s} label={SOURCE_LABELS[s]} selected={s === source} onPress={() => setSource(s)} />
-              ))}
-            </ChipRow>
+            <SafeAnimatedView entering={FadeInDown.duration(380)}>
+              <ChipRow>
+                {connected.map((s) => (
+                  <Chip key={s} label={SOURCE_LABELS[s]} selected={s === source} onPress={() => setSource(s)} />
+                ))}
+              </ChipRow>
+            </SafeAnimatedView>
           ) : null}
           <ListBody
             state={list}
+            icon={<InboxIcon size={30} color={colors.amber} />}
             emptyTitle="Gelen fatura yok"
             emptyDescription="Bu kaynakta gelen e-fatura bulunmuyor."
             header={
-              <Text style={[type.caption, { color: colors.textTertiary, marginBottom: spacing.sm }]}>
-                {hasPdf && Platform.OS !== "web" ? "Faturayı görüntülemek için satıra dokunun. " : ""}
-                Faturayı gidere işleme (İçeri Al) web panelinden yapılır.
-              </Text>
+              <View style={[styles.note, { backgroundColor: colors.amberSoft }]}>
+                <InboxIcon size={16} color={colors.amber} />
+                <Text style={[type.caption, { color: colors.textSecondary, flex: 1 }]}>
+                  {hasPdf && Platform.OS !== "web" ? "Faturayı görüntülemek için satıra dokunun. " : ""}
+                  Faturayı gidere işleme (İçeri Al) web panelinden yapılır.
+                </Text>
+              </View>
             }
             renderItem={(inv) => {
-              const st = IMPORT_STATUS[String(inv.import_status || "none")] || IMPORT_STATUS.none;
+              const key = String(inv.import_status || "none");
+              const st = IMPORT_STATUS[key] || IMPORT_STATUS.none;
+              // Şerit rengi içeri alma durumunu izler; bilinmeyen durum "işlenmedi" sayılır.
+              const accent =
+                st === IMPORT_STATUS.applied
+                  ? colors.success
+                  : st === IMPORT_STATUS.none || st === IMPORT_STATUS.needs_review
+                    ? colors.warning
+                    : st === IMPORT_STATUS.in_progress
+                      ? colors.info
+                      : undefined;
               return (
                 <RowCard
                   testID={`incoming-${inv.id}`}
+                  accent={accent}
+                  leading={
+                    <IconTile tint={colors.amberSoft}>
+                      <InboxIcon size={18} color={colors.amber} />
+                    </IconTile>
+                  }
                   title={inv.sender_name || "Gönderen"}
                   subtitle={[inv.invoice_no, formatDate(inv.issue_date)].filter(Boolean).join(" · ")}
                   meta={pdfBusyId === inv.id ? "Fatura açılıyor…" : inv.sender_tax_no ? `VKN ${inv.sender_tax_no}` : undefined}
@@ -116,4 +145,8 @@ export default function IncomingInvoicesScreen() {
   );
 }
 
-const styles = StyleSheet.create({ wrap: { flex: 1 } });
+const styles = StyleSheet.create({
+  wrap: { flex: 1 },
+  skeleton: { padding: spacing.lg, gap: spacing.sm },
+  note: { flexDirection: "row", alignItems: "center", gap: spacing.xs, padding: spacing.sm, borderRadius: radius.md, marginBottom: spacing.sm },
+});

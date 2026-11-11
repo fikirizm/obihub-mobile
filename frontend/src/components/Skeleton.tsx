@@ -1,5 +1,14 @@
-import React, { useEffect, useRef } from "react";
-import { Animated, StyleSheet, View, ViewStyle } from "react-native";
+import React, { useEffect } from "react";
+import { StyleSheet, View, ViewStyle } from "react-native";
+import Animated, {
+  cancelAnimation,
+  Easing,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from "react-native-reanimated";
 import { useTheme } from "../theme/ThemeProvider";
 import { radius, spacing } from "../theme/tokens";
 
@@ -10,64 +19,111 @@ type SkeletonProps = {
   style?: ViewStyle;
 };
 
+// Yükleme yer tutucusu: yumuşak bir nabız (opaklık döngüsü). "Hareketi azalt" açıksa sabit kalır.
 export function Skeleton({ width = "100%", height = 16, borderRadius = 8, style }: SkeletonProps) {
   const { colors, mode } = useTheme();
-  const shimmer = useRef(new Animated.Value(0)).current;
+  const reduceMotion = useReducedMotion();
+  const pulse = useSharedValue(1);
 
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(shimmer, { toValue: 1, duration: 900, useNativeDriver: true }),
-        Animated.timing(shimmer, { toValue: 0, duration: 900, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [shimmer]);
+    if (reduceMotion) {
+      pulse.value = 0.75;
+      return;
+    }
+    pulse.value = 1;
+    pulse.value = withRepeat(withTiming(0.45, { duration: 950, easing: Easing.inOut(Easing.ease) }), -1, true);
+    return () => cancelAnimation(pulse);
+  }, [pulse, reduceMotion]);
 
-  const opacity = shimmer.interpolate({ inputRange: [0, 1], outputRange: [1, 0.4] });
+  const animated = useAnimatedStyle(() => ({ opacity: pulse.value }));
   const base = mode === "dark" ? colors.surfaceElevated : colors.border;
 
   return (
     <Animated.View
-      style={[
-        { width, height, borderRadius, backgroundColor: base, opacity },
-        style,
-      ]}
+      accessible={false}
+      importantForAccessibility="no-hide-descendants"
+      style={[{ width, height, borderRadius, backgroundColor: base }, style, animated]}
     />
   );
 }
 
-export function OrderCardSkeleton() {
+// Kart kabuğu: gerçek satır kartlarıyla (RowCard / OrderRow) aynı ölçüler.
+function CardShell({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
   const { colors, shadows } = useTheme();
   return (
-    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
-      <Skeleton width={40} height={40} borderRadius={12} />
-      <View style={{ flex: 1, gap: 8 }}>
-        <Skeleton width="55%" height={14} />
-        <Skeleton width="80%" height={11} />
-      </View>
-      <View style={{ alignItems: "flex-end", gap: 8 }}>
-        <Skeleton width={64} height={14} />
-        <Skeleton width={52} height={20} borderRadius={10} />
-      </View>
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={[styles.card, shadows.sm, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, style]}
+    >
+      {children}
     </View>
   );
 }
 
-export function DashboardSkeleton() {
+// Sipariş satırı: solda kare logo, ortada iki satır, sağda tutar ve durum rozeti.
+export function OrderCardSkeleton() {
   return (
-    <View style={{ paddingHorizontal: spacing.lg, gap: spacing.md }}>
-      {/* Hero card placeholder */}
-      <Skeleton height={200} borderRadius={20} style={{ marginBottom: spacing.sm }} />
-      {/* KPI row */}
-      <View style={{ flexDirection: "row", gap: spacing.sm }}>
-        <Skeleton height={88} borderRadius={16} style={{ flex: 1 }} />
-        <Skeleton height={88} borderRadius={16} style={{ flex: 1 }} />
-        <Skeleton height={88} borderRadius={16} style={{ flex: 1 }} />
+    <CardShell>
+      <Skeleton width={44} height={44} borderRadius={radius.md} />
+      <View style={styles.lines}>
+        <Skeleton width="58%" height={14} />
+        <Skeleton width="82%" height={11} />
       </View>
-      {/* Recent orders */}
-      <Skeleton width="40%" height={13} style={{ marginTop: spacing.xs }} />
+      <View style={styles.trailing}>
+        <Skeleton width={72} height={14} />
+        <Skeleton width={56} height={20} borderRadius={10} />
+      </View>
+    </CardShell>
+  );
+}
+
+// Panel: gradyan özet kartı, iki KPI kartı, bölüm başlığı ve liste.
+export function DashboardSkeleton() {
+  const { colors, shadows, mode } = useTheme();
+  const heroBg = mode === "dark" ? colors.surface : colors.backgroundElevated;
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={styles.dashboard}
+    >
+      {/* Özet kartı */}
+      <View style={[styles.hero, { backgroundColor: heroBg, borderColor: colors.borderSubtle }]}>
+        <View style={styles.heroTop}>
+          <Skeleton width={84} height={30} borderRadius={radius.pill} />
+          <Skeleton width={132} height={30} borderRadius={radius.pill} />
+        </View>
+        <Skeleton width="62%" height={40} borderRadius={radius.md} />
+        <Skeleton width="28%" height={13} style={{ marginTop: spacing.xs }} />
+        <Skeleton height={64} borderRadius={radius.md} style={{ marginTop: spacing.md }} />
+        <View style={[styles.heroFoot, { borderTopColor: colors.border }]}>
+          {[0, 1, 2].map((i) => (
+            <View key={i} style={styles.heroCell}>
+              <Skeleton width={48} height={11} />
+              <Skeleton width={64} height={15} />
+            </View>
+          ))}
+        </View>
+      </View>
+
+      {/* İki KPI kartı */}
+      <View style={styles.kpiRow}>
+        {[0, 1].map((i) => (
+          <View
+            key={i}
+            style={[styles.kpi, shadows.sm, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}
+          >
+            <Skeleton width={40} height={40} borderRadius={12} />
+            <Skeleton width="38%" height={30} style={{ marginTop: spacing.sm }} />
+            <Skeleton width="60%" height={14} style={{ marginTop: spacing.xs }} />
+            <Skeleton width="85%" height={11} style={{ marginTop: 6 }} />
+          </View>
+        ))}
+      </View>
+
+      {/* Liste */}
+      <Skeleton width="40%" height={14} style={{ marginTop: spacing.xs }} />
       {[0, 1, 2].map((i) => (
         <OrderCardSkeleton key={i} />
       ))}
@@ -75,21 +131,21 @@ export function DashboardSkeleton() {
   );
 }
 
+// Fatura satırı: solda simge kutusu, ortada üç satır, sağda tutar ve durum rozeti.
 export function InvoiceCardSkeleton() {
-  const { colors, shadows } = useTheme();
   return (
-    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
-      <Skeleton width={38} height={38} borderRadius={12} />
-      <View style={{ flex: 1, gap: 8 }}>
-        <Skeleton width="45%" height={14} />
-        <Skeleton width="70%" height={11} />
-        <Skeleton width="60%" height={10} />
+    <CardShell>
+      <Skeleton width={44} height={44} borderRadius={radius.md} />
+      <View style={styles.lines}>
+        <Skeleton width="48%" height={14} />
+        <Skeleton width="72%" height={11} />
+        <Skeleton width="56%" height={10} />
       </View>
-      <View style={{ alignItems: "flex-end", gap: 8 }}>
-        <Skeleton width={70} height={14} />
+      <View style={styles.trailing}>
+        <Skeleton width={78} height={14} />
         <Skeleton width={56} height={20} borderRadius={10} />
       </View>
-    </View>
+    </CardShell>
   );
 }
 
@@ -101,5 +157,25 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     borderRadius: radius.lg,
     borderWidth: 1,
+    minHeight: 64,
   },
+  lines: { flex: 1, minWidth: 0, gap: spacing.xs },
+  trailing: { alignItems: "flex-end", gap: spacing.xs },
+  dashboard: { paddingHorizontal: spacing.lg, gap: spacing.md },
+  hero: { borderRadius: radius.xxl, borderWidth: 1, padding: spacing.lg },
+  heroTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.md,
+  },
+  heroFoot: {
+    flexDirection: "row",
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+  },
+  heroCell: { flex: 1, alignItems: "center", gap: 6 },
+  kpiRow: { flexDirection: "row", gap: spacing.sm },
+  kpi: { flex: 1, borderRadius: radius.xl, borderWidth: 1, padding: spacing.md },
 });

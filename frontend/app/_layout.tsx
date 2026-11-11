@@ -116,13 +116,22 @@ function RootInner() {
   return (
     <>
       <StatusBar style={mode === "dark" ? "light" : "dark"} />
+      {/* İçeri girilen ekranlar sağdan kayarak açılır (iOS'ta kenardan geri kaydırma çalışır);
+          giriş ve sekmeler arasındaki geçiş yumuşak solmadır. */}
       <Stack
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: colors.background },
-          animation: "fade",
+          animation: "slide_from_right",
+          gestureEnabled: true,
         }}
-      />
+      >
+        <Stack.Screen name="index" options={{ animation: "fade" }} />
+        <Stack.Screen name="(tabs)" options={{ animation: "fade" }} />
+        <Stack.Screen name="forgot-password" options={{ animation: "slide_from_bottom" }} />
+        <Stack.Screen name="products/scan" options={{ animation: "slide_from_bottom" }} />
+        <Stack.Screen name="support/new" options={{ animation: "slide_from_bottom" }} />
+      </Stack>
       <SubscriptionLockOverlay />
     </>
   );

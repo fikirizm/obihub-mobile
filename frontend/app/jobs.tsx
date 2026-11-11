@@ -4,7 +4,9 @@ import { useAuth } from "../src/auth/AuthProvider";
 import { getSyncJobs, retrySyncJobs } from "../src/api";
 import { useTheme } from "../src/theme/ThemeProvider";
 import { radius, spacing, type } from "../src/theme/tokens";
-import { RefreshIcon } from "../src/components/Icons";
+import { FadeInDown } from "react-native-reanimated";
+import { AlertIcon, CheckIcon, RefreshIcon } from "../src/components/Icons";
+import { SafeAnimatedView } from "../src/components/SafeAnimatedView";
 import { EmptyState } from "../src/components/EmptyState";
 import { OrderCardSkeleton } from "../src/components/Skeleton";
 import { StatusBadge } from "../src/components/StatusBadge";
@@ -12,6 +14,8 @@ import { Button } from "../src/ui/Button";
 import { Chip, ChipRow } from "../src/ui/Chip";
 import { useFeedback } from "../src/ui/Feedback";
 import { StackHeader } from "../src/ui/Header";
+import { IconTile } from "../src/ui/ListRow";
+import { StatCard } from "../src/ui/RowCard";
 import type { SyncJob } from "../src/types";
 
 type Filter = "all" | "failed" | "success";
@@ -24,7 +28,7 @@ function when(ts?: string) {
 
 export default function JobsScreen() {
   const { token } = useAuth();
-  const { colors } = useTheme();
+  const { colors, shadows } = useTheme();
   const { toast } = useFeedback();
   const [filter, setFilter] = useState<Filter>("failed");
   const [jobs, setJobs] = useState<SyncJob[]>([]);
@@ -70,6 +74,8 @@ export default function JobsScreen() {
     }
   };
 
+  const failedCount = jobs.filter((j) => j.status !== "success").length;
+
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="jobs-screen">
       <StackHeader title="Senkron işleri" subtitle="Son 25 kayıt" />
@@ -91,20 +97,40 @@ export default function JobsScreen() {
           contentContainerStyle={styles.list}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={colors.primary} />}
           ItemSeparatorComponent={() => <View style={{ height: spacing.xs }} />}
-          renderItem={({ item }) => {
+          ListHeaderComponent={
+            filter === "all" && jobs.length > 0 ? (
+              <SafeAnimatedView entering={FadeInDown.duration(380)} style={styles.stats}>
+                <StatCard label="Listelenen" value={String(jobs.length)} />
+                <StatCard label="Başarısız" value={String(failedCount)} tone={failedCount > 0 ? "error" : undefined} />
+                <StatCard label="Başarılı" value={String(jobs.length - failedCount)} tone="success" />
+              </SafeAnimatedView>
+            ) : null
+          }
+          renderItem={({ item, index }) => {
             const ok = item.status === "success";
-            return (
-              <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+            const tone = ok ? colors.success : colors.error;
+            const card = (
+              <View style={[styles.card, shadows.sm, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+                <View style={[styles.accent, { backgroundColor: tone }]} />
                 <View style={styles.cardHead}>
-                  <Text style={[type.bodyStrong, { color: colors.textPrimary, flex: 1 }]} numberOfLines={2}>
-                    {item.product_name || item.sku || "Ürün"}
-                  </Text>
+                  <IconTile tint={ok ? colors.successBg : colors.errorBg}>
+                    {ok ? <CheckIcon size={18} color={tone} /> : <AlertIcon size={18} color={tone} />}
+                  </IconTile>
+                  <View style={styles.cardBody}>
+                    <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={2}>
+                      {item.product_name || item.sku || "Ürün"}
+                    </Text>
+                    <Text style={[type.caption, { color: colors.textTertiary, marginTop: 2 }]} numberOfLines={2}>
+                      {[item.integration_name || item.provider_label || item.provider, when(item.timestamp)].filter(Boolean).join(" · ")}
+                    </Text>
+                  </View>
                   <StatusBadge label={ok ? "Başarılı" : "Başarısız"} kind={ok ? "success" : "error"} size="sm" />
                 </View>
-                <Text style={[type.caption, { color: colors.textTertiary, marginTop: 2 }]}>
-                  {[item.integration_name || item.provider_label || item.provider, when(item.timestamp)].filter(Boolean).join(" · ")}
-                </Text>
-                {item.message ? <Text style={[type.footnote, { color: colors.textSecondary, marginTop: spacing.xs }]}>{item.message}</Text> : null}
+                {item.message ? (
+                  <View style={[styles.message, { backgroundColor: ok ? colors.surfaceMuted : colors.errorBg }]}>
+                    <Text style={[type.footnote, { color: colors.textSecondary }]}>{item.message}</Text>
+                  </View>
+                ) : null}
                 {!ok && item.retryable ? (
                   <Button
                     testID={`job-retry-${item.id}`}
@@ -120,12 +146,25 @@ export default function JobsScreen() {
                 ) : null}
               </View>
             );
+            return index < 8 ? (
+              <SafeAnimatedView entering={FadeInDown.delay(60 + index * 35).duration(320)}>{card}</SafeAnimatedView>
+            ) : (
+              card
+            );
           }}
           ListEmptyComponent={
             <EmptyState
-              icon={<RefreshIcon size={30} color={colors.textTertiary} />}
+              icon={
+                error ? (
+                  <AlertIcon size={30} color={colors.error} />
+                ) : filter === "failed" ? (
+                  <CheckIcon size={30} color={colors.success} />
+                ) : (
+                  <RefreshIcon size={30} color={colors.primary} />
+                )
+              }
               title={error ? "İşler yüklenemedi" : filter === "failed" ? "Başarısız iş yok" : "Kayıt yok"}
-              description={error || "Ürün eşitleme işleri burada listelenir."}
+              description={error || (filter === "failed" ? "Son kayıtlarda başarısız ürün eşitleme işi görünmüyor." : "Ürün eşitleme işleri burada listelenir.")}
               actionLabel={error ? "Tekrar dene" : undefined}
               onAction={error ? () => load() : undefined}
             />
@@ -139,6 +178,10 @@ export default function JobsScreen() {
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
   list: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing.huge },
+  stats: { flexDirection: "row", gap: spacing.xs, marginBottom: spacing.sm },
   card: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.md },
+  accent: { position: "absolute", left: 0, top: 12, bottom: 12, width: 4, borderTopRightRadius: 4, borderBottomRightRadius: 4 },
   cardHead: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm },
+  cardBody: { flex: 1, minWidth: 0 },
+  message: { marginTop: spacing.sm, borderRadius: radius.md, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
 });

@@ -5,8 +5,10 @@ import { getParasutExpenseInvoices } from "../../src/api";
 import { usePagedList } from "../../src/hooks/usePagedList";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { formatDate, formatMoney } from "../../src/utils";
+import { DownloadIcon } from "../../src/components/Icons";
 import { StackHeader } from "../../src/ui/Header";
 import { ListBody } from "../../src/ui/ListBody";
+import { IconTile } from "../../src/ui/ListRow";
 import { RowCard } from "../../src/ui/RowCard";
 import type { ExpenseInvoice } from "../../src/types";
 
@@ -22,10 +24,16 @@ export default function ExpensesScreen() {
       <StackHeader title="Gider faturaları" subtitle={list.loading ? "Paraşüt" : `${list.total} kayıt · Paraşüt`} />
       <ListBody
         state={list}
+        icon={<DownloadIcon size={30} color={colors.error} />}
         emptyTitle="Gider faturası yok"
         emptyDescription="Paraşüt'e işlenmiş gider faturası bulunmuyor."
         renderItem={(inv) => (
           <RowCard
+            leading={
+              <IconTile tint={colors.errorBg}>
+                <DownloadIcon size={18} color={colors.error} />
+              </IconTile>
+            }
             title={inv.supplier_name || inv.description || "Tedarikçi"}
             subtitle={[inv.invoice_no, formatDate(inv.issue_date)].filter(Boolean).join(" · ")}
             meta={inv.due_date ? `Vade ${formatDate(inv.due_date)}` : undefined}

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useId } from "react";
 import { StyleProp, StyleSheet, View, ViewStyle } from "react-native";
 import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { useTheme } from "../theme/ThemeProvider";
@@ -16,7 +16,8 @@ const TONES = {
 export function HeroCard({ tone = "blue", children, style }: { tone?: keyof typeof TONES; children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
   const { shadows } = useTheme();
   const t = TONES[tone];
-  const id = `hero-${tone}`;
+  // Kimlik her kart için benzersizdir: web'de aynı kimlikli iki gradyan (ör. liste ve detay ekranı birlikte açıkken) çakışır.
+  const id = `hero-${tone}-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   // Gölge dış kutuda, kırpma iç kutuda: iOS aynı kutuda ikisini birlikte çizmez.
   return (
     <View style={[styles.shadowWrap, { backgroundColor: t.to }, shadows.lg, style]}>

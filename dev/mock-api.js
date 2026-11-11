@@ -129,9 +129,9 @@ http
         { type: "stale_orders", severity: "warning", title: "2 sipariş 3 gündür bekliyor", desc: "Beklemede olan siparişleri kontrol edin.", action_path: "/siparisler" },
       ]);
     if (path === "/integrations") return send(res, 200, [
-      { id: "i1", name: "Deneme Mağaza", provider: "woocommerce", status: "active" },
-      { id: "i2", name: "Trendyol", provider: "trendyol", status: "active" },
-      { id: "i3", name: "Hepsiburada", provider: "hepsiburada", status: "active" },
+      { id: "i1", name: "Deneme Mağaza", provider: "woocommerce", status: "success" },
+      { id: "i2", name: "Trendyol", provider: "trendyol", status: "success" },
+      { id: "i3", name: "Hepsiburada", provider: "hepsiburada", status: "failed" },
     ]);
     if (path === "/parasut/invoices")
       return send(res, 200, { invoices: Array.from({ length: 6 }, (_, i) => ({

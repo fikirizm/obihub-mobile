@@ -14,7 +14,7 @@ import { printOrderLabel } from "../../src/labels";
 import { useFeedback } from "../../src/ui/Feedback";
 import { EmptyState } from "../../src/components/EmptyState";
 import { OrderRow, orderProvider } from "../../src/components/OrderRow";
-import { OrderCardSkeleton } from "../../src/components/Skeleton";
+import { Skeleton } from "../../src/components/Skeleton";
 import { useDebounce } from "../../src/hooks/useDebounce";
 import { TabHeader } from "../../src/ui/Header";
 import { Chip, ChipRow } from "../../src/ui/Chip";
@@ -33,6 +33,36 @@ const FILTERS: { key: FilterKey; label: string; statuses: string[] }[] = [
 ];
 
 const PER_PAGE = 30;
+
+// Yüklenirken gerçek listeyle aynı biçim: tek yuvarlak kart, içinde iki satırlı sipariş satırları.
+function OrdersSkeleton() {
+  const { colors } = useTheme();
+  return (
+    <View
+      style={[styles.skeletonCard, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}
+      accessibilityLabel="Siparişler yükleniyor"
+    >
+      {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+        <View
+          key={i}
+          style={[styles.skeletonRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+        >
+          <Skeleton width={36} height={36} borderRadius={10} />
+          <View style={{ flex: 1, gap: 9 }}>
+            <View style={styles.skeletonLine}>
+              <Skeleton width={i % 2 ? "48%" : "58%"} height={14} />
+              <Skeleton width={72} height={14} />
+            </View>
+            <View style={styles.skeletonLine}>
+              <Skeleton width={i % 2 ? "44%" : "36%"} height={11} />
+              <Skeleton width={78} height={20} borderRadius={10} />
+            </View>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
 
 // Sipariş satırını sola kaydırınca "Etiket" eylemi açılır (yalnızca cihazda).
 function SwipeableOrder({ order, divider, onPrint, busy }: { order: Order; divider: boolean; onPrint: (o: Order) => void; busy: boolean }) {
@@ -192,10 +222,8 @@ export default function OrdersScreen() {
       ) : null}
 
       {loading ? (
-        <View style={{ padding: spacing.lg, gap: spacing.sm }}>
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <OrderCardSkeleton key={i} />
-          ))}
+        <View style={styles.list}>
+          <OrdersSkeleton />
         </View>
       ) : (
         <FlatList
@@ -225,10 +253,10 @@ export default function OrdersScreen() {
           )}
           ListEmptyComponent={
             error ? (
-              <EmptyState icon={<InboxIcon size={30} color={colors.textTertiary} />} title="Siparişler yüklenemedi" description={error} actionLabel="Tekrar dene" onAction={() => fetchPage(1, "reset")} />
+              <EmptyState icon={<InboxIcon size={30} color={colors.error} />} title="Siparişler yüklenemedi" description={error} actionLabel="Tekrar dene" onAction={() => fetchPage(1, "reset")} />
             ) : (
               <EmptyState
-                icon={<InboxIcon size={30} color={colors.textTertiary} />}
+                icon={<InboxIcon size={30} color={colors.primary} />}
                 title={debouncedSearch ? "Sonuç bulunamadı" : "Sipariş yok"}
                 description={debouncedSearch ? "Arama ifadesini veya süzgeci değiştirin." : "Bu süzgece uyan sipariş bulunmuyor."}
               />
@@ -250,7 +278,11 @@ export default function OrdersScreen() {
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
   list: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing.xxl },
-  swipeAction: { width: 88, alignItems: "center", justifyContent: "center", gap: 4 },
+  // Kaydırma eylemi satırın tam yüksekliğini kaplar (satır iki satıra çıksa da).
+  swipeAction: { width: 88, alignSelf: "stretch", minHeight: 68, alignItems: "center", justifyContent: "center", gap: 4 },
+  skeletonCard: { borderWidth: 1, borderRadius: radius.lg },
+  skeletonRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.sm, paddingHorizontal: spacing.md, minHeight: 68 },
+  skeletonLine: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.xs },
   swipeText: { color: "#FFFFFF", fontSize: 13, fontWeight: "600" },
   first: { borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, overflow: "hidden" },
   last: { borderBottomLeftRadius: radius.lg, borderBottomRightRadius: radius.lg, overflow: "hidden" },

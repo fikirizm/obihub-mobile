@@ -88,7 +88,7 @@ export function DetailHero({
                   <Text style={styles.statLabel} numberOfLines={1}>
                     {s.label}
                   </Text>
-                  <Text style={[styles.statValue, tabular, { color }]} numberOfLines={1} adjustsFontSizeToFit>
+                  <Text style={[styles.statValue, tabular, { color, fontSize: stats.length >= 3 ? 15 : 20 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                     {s.value}
                   </Text>
                   {s.hint ? <Text style={styles.statHint}>{s.hint}</Text> : null}

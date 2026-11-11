@@ -9,10 +9,13 @@ import { usePagedList } from "../../src/hooks/usePagedList";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing } from "../../src/theme/tokens";
 import { formatDate, formatMoney, formatTry } from "../../src/utils";
+import { AlertIcon, CheckIcon, FileTextIcon, ReceiptIcon } from "../../src/components/Icons";
+import { FadeInDown, SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { Chip, ChipRow } from "../../src/ui/Chip";
 import { StackHeader } from "../../src/ui/Header";
 import { ListBody } from "../../src/ui/ListBody";
+import { IconTile } from "../../src/ui/ListRow";
 import { RowCard, StatCard } from "../../src/ui/RowCard";
 import { SearchField } from "../../src/ui/SearchField";
 import type { LocalInvoice } from "../../src/types";
@@ -47,10 +50,10 @@ export default function LocalInvoicesScreen() {
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="local-invoices-screen">
       <StackHeader title="Satış faturaları" subtitle={list.loading ? undefined : `${list.total} fatura`} />
       {summary ? (
-        <View style={styles.stats}>
+        <SafeAnimatedView entering={FadeInDown.duration(380)} style={styles.stats}>
           <StatCard label="Tahsil edilecek" value={formatTry(summary.total_remaining || 0)} />
           <StatCard label="Vadesi geçen" value={formatTry(summary.overdue_amount || 0)} tone={(summary.overdue_amount || 0) > 0 ? "error" : undefined} />
-        </View>
+        </SafeAnimatedView>
       ) : null}
       <SearchField testID="local-invoices-search" value={search} onChangeText={setSearch} placeholder="Müşteri veya fatura no ara" />
       <ChipRow>
@@ -60,13 +63,26 @@ export default function LocalInvoicesScreen() {
       </ChipRow>
       <ListBody
         state={list}
+        icon={<ReceiptIcon size={30} color={colors.emerald} />}
         emptyTitle="Fatura yok"
         emptyDescription="Bu süzgece uyan satış faturası bulunmuyor. Yeni fatura web panelinden oluşturulur."
         renderItem={(inv) => {
+          const key = String(inv.display_status || inv.status || "");
           const st = invoiceStatus(inv.display_status || inv.status);
+          // Durum rengi: gecikti kırmızı, taslak sarı, ödendi yeşil; diğerleri nötr mavi simge.
+          const look =
+            key === "gecikti"
+              ? { accent: colors.error, tint: colors.errorBg, icon: <AlertIcon size={18} color={colors.error} /> }
+              : key === "taslak"
+                ? { accent: colors.warning, tint: colors.warningBg, icon: <FileTextIcon size={18} color={colors.amber} /> }
+                : key === "odendi"
+                  ? { accent: colors.success, tint: colors.successBg, icon: <CheckIcon size={18} color={colors.success} /> }
+                  : { accent: undefined, tint: colors.emeraldSoft, icon: <ReceiptIcon size={18} color={colors.emerald} /> };
           return (
             <RowCard
               testID={`local-invoice-${inv.id}`}
+              accent={look.accent}
+              leading={<IconTile tint={look.tint}>{look.icon}</IconTile>}
               title={inv.customer_name || "Müşteri"}
               subtitle={`${inv.invoice_number || "Numarasız"} · ${formatDate(inv.issue_date)}`}
               meta={inv.due_date ? `Vade ${formatDate(inv.due_date)}` : undefined}
