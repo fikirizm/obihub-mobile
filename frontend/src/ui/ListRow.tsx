@@ -68,7 +68,7 @@ export function ListRow({
           {title}
         </Text>
         {subtitle ? (
-          <Text style={[type.footnote, { color: colors.textSecondary, marginTop: 1 }]} numberOfLines={1}>
+          <Text style={[type.footnote, { color: colors.textSecondary, marginTop: 1 }]} numberOfLines={2}>
             {subtitle}
           </Text>
         ) : null}

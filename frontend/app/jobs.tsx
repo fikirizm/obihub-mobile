@@ -138,7 +138,7 @@ export default function JobsScreen() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
-  list: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing.xxl },
+  list: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing.huge },
   card: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.md },
   cardHead: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm },
 });

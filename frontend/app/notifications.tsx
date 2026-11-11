@@ -85,7 +85,7 @@ export default function NotificationsScreen() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
-  list: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing.xl },
+  list: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing.huge },
   item: { borderLeftWidth: 1, borderRightWidth: 1 },
   first: { borderTopWidth: 1, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, overflow: "hidden" },
   last: { borderBottomWidth: 1, borderBottomLeftRadius: radius.lg, borderBottomRightRadius: radius.lg, overflow: "hidden" },

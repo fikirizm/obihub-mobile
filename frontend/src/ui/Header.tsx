@@ -8,6 +8,7 @@ import { useTheme } from "../theme/ThemeProvider";
 import { spacing, type } from "../theme/tokens";
 import { ArrowLeftIcon, BellIcon } from "../components/Icons";
 import { PressableScale } from "../components/KPICard";
+import { DESTRUCTIVE_BG } from "./Button";
 
 function initials(name?: string | null) {
   const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
@@ -43,7 +44,7 @@ export function TabHeader({ title, subtitle }: { title: string; subtitle?: strin
       >
         <BellIcon size={20} color={colors.textPrimary} />
         {unread > 0 ? (
-          <View style={[styles.badge, { backgroundColor: colors.error, borderColor: colors.background }]}>
+          <View style={[styles.badge, { backgroundColor: DESTRUCTIVE_BG, borderColor: colors.background }]}>
             <Text style={styles.badgeText}>{unread > 9 ? "9+" : String(unread)}</Text>
           </View>
         ) : null}
@@ -108,7 +109,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 3,
   },
-  badgeText: { color: "#FFFFFF", fontSize: 10, fontWeight: "700", lineHeight: 12 },
+  badgeText: { color: "#FFFFFF", fontSize: 11, fontWeight: "700", lineHeight: 12 },
   avatar: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   avatarText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700", letterSpacing: 0.2 },
 });

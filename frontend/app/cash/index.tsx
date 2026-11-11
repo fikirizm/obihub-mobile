@@ -61,7 +61,7 @@ export default function CashScreen() {
         />
       ) : (
         <ScrollView
-          contentContainerStyle={{ paddingBottom: spacing.xxl, paddingTop: spacing.xs }}
+          contentContainerStyle={{ paddingBottom: spacing.huge, paddingTop: spacing.xs }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
         >
           <Card style={styles.block}>

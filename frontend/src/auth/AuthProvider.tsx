@@ -7,6 +7,8 @@ import { Platform } from "react-native";
 import * as Storage from "../storage";
 import { getAccountingSettings, getMe, getOrders, login as apiLogin, registerPushToken, setSessionHandlers } from "../api";
 import { displayOrderNo, formatOrderDateTime, isNewOrderStatus, providerLabel } from "../utils";
+import { clearCatalogCache } from "../catalogCache";
+import { clearAllCache } from "../offlineCache";
 import { addNotifications, clearNotificationsStore, hydrateNotifications } from "../notifications/store";
 import type { Order, User } from "../types";
 
@@ -24,6 +26,9 @@ type AuthContextValue = {
   parasutConnected: boolean | null;
   // Etkin muhasebe programı ("parasut", "bizimhesap" ...); bilinmiyorsa null.
   accountingProvider: string | null;
+  // Muhasebe ayarı bu oturumda sunucudan okunabildi mi (false iken accountingProvider güvenilir değildir).
+  accountingLoaded: boolean;
+  reloadAccounting: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -201,6 +206,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [subscriptionLock, setSubscriptionLock] = useState<string | null>(null);
   const [parasutConnected, setParasutConnected] = useState<boolean | null>(null);
   const [accountingProvider, setAccountingProvider] = useState<string | null>(null);
+  const [accountingLoaded, setAccountingLoaded] = useState(false);
   // Ön plandaki yoklama ile push işleyicisinin ortak kullandığı "bildirimi verilmiş sipariş" kümesi.
   const seenOrderIdsRef = useRef<Set<string>>(new Set());
 
@@ -272,6 +278,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSubscriptionLock(null);
     setParasutConnected(null);
     setAccountingProvider(null);
+    setAccountingLoaded(false);
+    // Önceki kullanıcının verisi sonraki girişte görünmesin.
+    await clearAllCache().catch(() => {});
+    clearCatalogCache();
     clearNotificationsStore();
     Notifications.setBadgeCountAsync(0).catch(() => {});
   }, []);
@@ -291,9 +301,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loadAccounting = useCallback(async (authToken: string) => {
     try {
       const settings = await getAccountingSettings(authToken);
-      const connected = Boolean(settings?.parasut?.connected) || settings?.provider === "parasut";
+      // Web panelindeki kuralla aynı: tercih edilen program bağlıysa o, değilse bağlı olan (önce BizimHesap).
+      // BenimPOS muhasebe programı sayılmaz. Paraşüt kaydı bağlı kalsa bile etkin program BizimHesap olabilir.
+      const pref = String(settings?.preferred_provider || settings?.provider || "").toLowerCase();
+      const pc = Boolean(settings?.parasut?.connected);
+      const bc = Boolean(settings?.bizimhesap?.connected);
+      const active = pref === "bizimhesap" && bc ? "bizimhesap" : pref === "parasut" && pc ? "parasut" : bc ? "bizimhesap" : pc ? "parasut" : null;
+      const connected = active === "parasut";
       setParasutConnected(connected);
-      setAccountingProvider(settings?.provider ? String(settings.provider) : null);
+      setAccountingProvider(active);
+      setAccountingLoaded(true);
       await Storage.setItemAsync(PARASUT_CONNECTED_KEY, connected ? "1" : "0");
     } catch {
       // Öğrenilemedi: son bilinen değer kalır.
@@ -311,6 +328,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
+  }, [token, loadAccounting]);
+
+  const reloadAccounting = useCallback(async () => {
+    if (token) await loadAccounting(token);
   }, [token, loadAccounting]);
 
   const retrySubscription = useCallback(async () => {
@@ -486,6 +507,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       retrySubscription,
       parasutConnected,
       accountingProvider,
+      accountingLoaded,
+      reloadAccounting,
     }),
     [
       token,
@@ -498,6 +521,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       retrySubscription,
       parasutConnected,
       accountingProvider,
+      accountingLoaded,
+      reloadAccounting,
     ]
   );
 

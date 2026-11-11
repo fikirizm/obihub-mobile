@@ -4,6 +4,7 @@ export type User = {
   company_name: string;
   full_name: string;
   role?: string;
+  permissions?: string[];
   subscription_plan?: string;
   subscription_status?: string;
   subscription_expires_at?: string | null;
@@ -362,7 +363,7 @@ export type LocalInvoice = {
   paid_amount?: number;
   remaining_amount?: number;
   notes?: string;
-  items?: { name?: string; description?: string; product_name?: string; quantity?: number; unit_price?: number; vat_rate?: number; total?: number }[];
+  items?: { name?: string; description?: string; product_name?: string; quantity?: number; unit_price?: number; vat_rate?: number; total?: number; line_total?: number }[];
   payments?: { id?: string; amount?: number; date?: string; method?: string }[];
   parasut_invoice_id?: string;
   edoc_state?: string;

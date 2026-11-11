@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
+import { canManage } from "../../src/auth/permissions";
 import { createCashEntry, getCashAccount } from "../../src/api";
 import { todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -18,7 +19,7 @@ const ENTRY_LABELS: Record<string, string> = { income: "Gelir", expense: "Gider"
 export default function CashAccountScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const id = String(params.id || "");
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { colors } = useTheme();
   const { toast, promptEntry } = useFeedback();
   const [account, setAccount] = useState<CashAccount | null>(null);
@@ -72,7 +73,7 @@ export default function CashAccountScreen() {
         <Text style={[type.body, { color: colors.textSecondary, textAlign: "center", marginTop: spacing.xxl }]}>Hesap bulunamadı.</Text>
       ) : (
         <ScrollView
-          contentContainerStyle={{ paddingBottom: spacing.xxl }}
+          contentContainerStyle={{ paddingBottom: spacing.huge }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
         >
           <Card padded style={styles.block}>
@@ -80,10 +81,12 @@ export default function CashAccountScreen() {
             <Text testID="cash-balance" style={[type.largeTitle, tabular, { color: Number(account.balance) < 0 ? colors.error : colors.textPrimary }]}>
               {formatMoney(account.balance, cur)}
             </Text>
+            {canManage(user, "billing") ? (
             <View style={styles.actions}>
               <Button testID="cash-add-income" label="Gelir ekle" busy={busy === "income"} disabled={Boolean(busy)} onPress={() => add("income")} style={{ flex: 1 }} />
               <Button testID="cash-add-expense" label="Gider ekle" variant="secondary" busy={busy === "expense"} disabled={Boolean(busy)} onPress={() => add("expense")} style={{ flex: 1 }} />
             </View>
+            ) : null}
           </Card>
 
           <SectionTitle title="Hareketler" />

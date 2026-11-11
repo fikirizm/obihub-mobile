@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
+import { canManage } from "../../src/auth/permissions";
 import { collectPartyPayment, getPartyLedger } from "../../src/api";
 import { PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -16,9 +17,9 @@ import type { PartyLedgerRow } from "../../src/types";
 export default function CustomerDetailScreen() {
   const params = useLocalSearchParams<{ id: string; name?: string; balance?: string; registered?: string }>();
   const id = String(params.id || "");
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { colors } = useTheme();
-  const { toast, promptEntry, choose } = useFeedback();
+  const { toast, promptEntry } = useFeedback();
   const [rows, setRows] = useState<PartyLedgerRow[]>([]);
   const [balance, setBalance] = useState(Number(params.balance || 0));
   const [loading, setLoading] = useState(true);
@@ -27,6 +28,7 @@ export default function CustomerDetailScreen() {
   const [busy, setBusy] = useState(false);
   // Tahsilat yalnızca kayıtlı carilerde yapılabilir; siparişlerden türetilen carilerde uç 404 döner.
   const registered = params.registered === "1";
+  const mayCollect = canManage(user, "customers") || canManage(user, "billing");
 
   const load = useCallback(async () => {
     if (!token || !id) return;
@@ -49,10 +51,16 @@ export default function CustomerDetailScreen() {
 
   const onCollect = async () => {
     if (!token) return;
-    const entry = await promptEntry({ title: "Tahsilat al", message: String(params.name || ""), initial: Math.max(0, balance), decimal: true, noteLabel: "Not (isteğe bağlı)" });
+    const entry = await promptEntry({
+      title: "Tahsilat al",
+      message: String(params.name || ""),
+      initial: Math.max(0, balance),
+      decimal: true,
+      noteLabel: "Not (isteğe bağlı)",
+      methods: [...PAYMENT_METHODS],
+    });
     if (!entry || entry.amount <= 0) return;
-    const method = await choose({ title: "Ödeme yöntemi", options: [...PAYMENT_METHODS] });
-    if (!method) return;
+    const method = entry.method || "nakit";
     setBusy(true);
     try {
       await collectPartyPayment(token, id, { amount: entry.amount, payment_method: method, note: entry.note || undefined, payment_date: todayIso() });
@@ -69,7 +77,7 @@ export default function CustomerDetailScreen() {
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="customer-detail">
       <StackHeader title={String(params.name || "Cari")} subtitle="Ekstre" />
       <ScrollView
-        contentContainerStyle={{ paddingBottom: spacing.xxl }}
+        contentContainerStyle={{ paddingBottom: spacing.huge }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
       >
         <Card padded style={styles.block}>
@@ -77,9 +85,9 @@ export default function CustomerDetailScreen() {
           <Text testID="customer-balance" style={[type.largeTitle, tabular, { color: balance > 0 ? colors.success : balance < 0 ? colors.error : colors.textPrimary }]}>
             {formatTry(Math.abs(balance))}
           </Text>
-          {registered ? <Button testID="customer-collect" label="Tahsilat al" busy={busy} onPress={onCollect} style={{ marginTop: spacing.md }} /> : null}
+          {registered && mayCollect ? <Button testID="customer-collect" label="Tahsilat al" busy={busy} onPress={onCollect} style={{ marginTop: spacing.md }} /> : null}
         </Card>
-        {!registered ? (
+        {!registered && mayCollect ? (
           <Text style={[type.caption, styles.note, { color: colors.textTertiary }]}>
             Bu cari siparişlerden oluşmuş. Tahsilat almak için web panelinde cari olarak kaydedin.
           </Text>

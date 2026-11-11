@@ -84,7 +84,14 @@ export default function DashboardScreen() {
 
   useFocusLoad(load, { hasData: Boolean(data.stats) });
 
-  const points = data.chart[range];
+  // Sunucunun günlük dizisi bugünü içermez; bugünün değeri özetten eklenir.
+  const points = useMemo(() => {
+    const base = data.chart[range];
+    const today = new Date().toISOString().slice(0, 10);
+    if (!data.stats || base.length === 0 || base[base.length - 1]?.date === today) return base;
+    return [...base, { date: today, total: Number(data.stats.revenue_today || 0), count: Number(data.stats.orders_today || 0) }];
+  }, [data, range]);
+  const [chartWidth, setChartWidth] = useState(0);
   const periodRevenue = useMemo(() => points.reduce((s, p) => s + Number(p.total || 0), 0), [points]);
   const periodOrders = useMemo(() => points.reduce((s, p) => s + Number(p.count || 0), 0), [points]);
   const todayLabel = new Intl.DateTimeFormat("tr-TR", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
@@ -194,16 +201,23 @@ export default function DashboardScreen() {
                 <Text style={[type.title, tabular, { color: colors.textPrimary }]}>{periodOrders}</Text>
               </View>
             </View>
-            <View style={{ marginTop: spacing.sm }} accessible accessibilityLabel={`Son ${range} günün günlük ciro grafiği`}>
+            <View
+              style={{ marginTop: spacing.sm, minHeight: 64 }}
+              onLayout={(e) => setChartWidth(Math.floor(e.nativeEvent.layout.width))}
+              accessible
+              accessibilityLabel={`Son ${range} günün günlük ciro grafiği`}
+            >
+              {chartWidth > 0 ? (
               <Sparkline
                 data={points.length > 1 ? points.map((p) => Number(p.total || 0)) : [0, 0]}
-                width={320}
+                width={chartWidth}
                 height={64}
                 color={colors.primary}
                 fillOpacity={0.18}
                 showAxis
                 axisFormatter={(n) => `${formatCompact(n)}₺`}
               />
+              ) : null}
             </View>
           </Card>
 

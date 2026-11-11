@@ -27,6 +27,7 @@ export function InvoicesList({ source = "parasut" }: { source?: "parasut" | "biz
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
+  const [totalOnServer, setTotalOnServer] = useState(0);
   const [search, setSearch] = useState("");
   const [searchFocus, setSearchFocus] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
@@ -46,8 +47,10 @@ export function InvoicesList({ source = "parasut" }: { source?: "parasut" | "biz
       }
     }
     try {
-      const invoices = await getAccountingInvoices(token, source, { page: 1, perPage: 600 });
+      const res = await getAccountingInvoices(token, source);
+      const invoices = res.invoices;
       setList(invoices);
+      setTotalOnServer(res.total);
       setIsOffline(false);
       await saveCache(`invoices_list_${source}`, invoices);
     } catch {
@@ -123,6 +126,11 @@ export function InvoicesList({ source = "parasut" }: { source?: "parasut" | "biz
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="invoices-screen">
       <NetworkErrorBanner visible={isOffline} offline />
 
+      {totalOnServer > list.length ? (
+        <Text style={{ color: colors.textSecondary, fontSize: 13, paddingHorizontal: spacing.lg, marginBottom: spacing.xs }}>
+          En yeni {list.length} fatura gösteriliyor (toplam {totalOnServer}). Toplamlar yalnızca bu kayıtları içerir.
+        </Text>
+      ) : null}
       <View style={styles.summaryRow}>
         <View style={[styles.sumCell, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
           <Text style={[styles.sumLabel, { color: colors.textTertiary }]}>Bu Ay</Text>

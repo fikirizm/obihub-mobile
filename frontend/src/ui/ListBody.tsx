@@ -69,4 +69,4 @@ export function ListBody<T extends { id: string }>({
   );
 }
 
-const styles = StyleSheet.create({ list: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing.xxl } });
+const styles = StyleSheet.create({ list: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing.huge } });

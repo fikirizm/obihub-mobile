@@ -10,8 +10,9 @@ import { Card, ListRow, SectionTitle } from "../src/ui/ListRow";
 import type { TrialStatus, UsageSummary } from "../src/types";
 
 const STATUS_LABELS: Record<string, string> = { active: "Etkin", trial: "Deneme", expired: "Süresi doldu", suspended: "Duraklatıldı", cancelled: "İptal edildi" };
-const USAGE_ROWS: { key: string; label: string }[] = [
-  { key: "integrations", label: "Entegrasyon" },
+// Entegrasyon sınırına tabi sayaç `billable_integrations` alanıdır (muhasebe bağlantıları sayılmaz).
+const USAGE_ROWS: { key: string; label: string; usageKey?: string }[] = [
+  { key: "integrations", usageKey: "billable_integrations", label: "Entegrasyon" },
   { key: "products", label: "Ürün" },
   { key: "orders_monthly", label: "Aylık sipariş" },
 ];
@@ -50,7 +51,7 @@ export default function SubscriptionScreen() {
         <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.xxl }} />
       ) : (
         <ScrollView
-          contentContainerStyle={{ paddingBottom: spacing.xxl }}
+          contentContainerStyle={{ paddingBottom: spacing.huge }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
         >
           <SectionTitle title="Paket" />
@@ -68,7 +69,7 @@ export default function SubscriptionScreen() {
               <SectionTitle title="Kullanım" />
               <Card style={styles.block}>
                 {USAGE_ROWS.filter((r) => usage.limits?.[r.key] != null).map((r, i) => {
-                  const used = Number(usage.usage?.[r.key] || 0);
+                  const used = Number(usage.usage?.[r.usageKey ?? r.key] ?? usage.usage?.[r.key] ?? 0);
                   const limit = Number(usage.limits?.[r.key] || 0);
                   return <ListRow key={r.key} divider={i > 0} title={r.label} trailing={<Value tone={limit > 0 && used >= limit ? colors.error : undefined}>{`${used} / ${limit}`}</Value>} />;
                 })}

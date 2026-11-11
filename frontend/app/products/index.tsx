@@ -162,7 +162,7 @@ export default function ProductsScreen() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
-  list: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.xxl },
+  list: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.huge },
   row: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.sm, borderRadius: radius.lg, borderWidth: 1, minHeight: 72 },
   thumb: { width: 48, height: 48, borderRadius: radius.sm, borderWidth: 1, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   thumbImg: { width: "100%", height: "100%" },

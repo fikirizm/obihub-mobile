@@ -247,7 +247,11 @@ export async function getSalesReportsOverview(
   options?: { startDate?: Date; endDate?: Date }
 ) {
   const body: Record<string, string | number> = { period_days: periodDays };
-  if (options?.startDate) body.since_date = options.startDate.toISOString().slice(0, 10);
+  // Yerel tarih gönderilir; UTC'ye çevirmek Türkiye saatinde bir önceki günü verir.
+  if (options?.startDate) {
+    const d = options.startDate;
+    body.since_date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
   const payload = await request<any>(`/reports/overview`, { method: "POST", body: JSON.stringify(body) }, token);
   const summary = payload?.summary || {};
   const channelsSource = Array.isArray(payload?.channels) ? payload.channels : payload?.channel_breakdown;
@@ -491,6 +495,7 @@ export async function getProducts(token: string, search?: string) {
 
 export type AccountingSettings = {
   provider?: string | null;
+  preferred_provider?: string | null;
   parasut?: { connected?: boolean; status?: string } | null;
   bizimhesap?: { connected?: boolean; status?: string } | null;
 };
@@ -511,7 +516,7 @@ export async function getOrdersPage(
     qs.set("page", String(page));
     qs.set("per_page", String(perPage));
     qs.set("sort_by", "-order_date");
-    if (options.search) qs.set("search", options.search);
+    if (options.search) qs.set("search", escapeSearch(options.search));
     if (options.integrationId) qs.set("integration_id", options.integrationId);
     if (status) qs.set("status", status);
     const payload = await request<any>(`/orders?${qs.toString()}`, { method: "GET" }, token);
@@ -602,9 +607,16 @@ export async function getCatalog(
   return { products, channels, total: Number(stock?.total ?? products.length), page, perPage };
 }
 
-// Ana stoğu mutlak değere ayarlar. Kanal eşitlemesi yalnızca verilen hedeflere yapılır.
+// Sunucu boş `sync_targets` listesini "bağlı tüm kanallar" sayar. Hiçbir kanala gönderilmemesi
+// isteniyorsa hiçbir sağlayıcıyla eşleşmeyen bu işaretçi gönderilir.
+export const SYNC_NONE = "none";
+
+type SyncResult = { message?: string; synced_providers?: string[]; skipped_providers?: Record<string, string> };
+
+// Ana stoğu mutlak değere ayarlar. Değer yalnızca `syncTargets` içindeki sağlayıcılara gönderilir; liste boş bırakılamaz.
 export async function setProductStock(token: string, productId: string, stock: number, syncTargets: string[]) {
-  return request<{ message?: string; new_stock?: number; synced_providers?: string[]; skipped_providers?: Record<string, string> }>(
+  if (syncTargets.length === 0) throw { message: "Stok hedefi belirlenemedi.", status: 0 };
+  return request<SyncResult & { new_stock?: number }>(
     "/stock/adjust",
     {
       method: "POST",
@@ -630,10 +642,14 @@ export async function setChannelStock(token: string, productId: string, integrat
   );
 }
 
-export async function setProductPrice(token: string, productId: string, price: number) {
-  return request<{ message?: string; new_price?: number }>(
+// Ana fiyatı değiştirir. `pushToChannels` true ise fiyat ürünün bağlı olduğu tüm kanallara da gönderilir (web panelindeki davranış).
+export async function setProductPrice(token: string, productId: string, price: number, pushToChannels: boolean) {
+  return request<SyncResult & { new_price?: number }>(
     "/price/adjust",
-    { method: "POST", body: JSON.stringify({ product_id: productId, price, currency: "TRY", sync_all: false, sync_targets: [] }) },
+    {
+      method: "POST",
+      body: JSON.stringify({ product_id: productId, price, currency: "TRY", sync_all: pushToChannels, sync_targets: pushToChannels ? [] : [SYNC_NONE] }),
+    },
     token
   );
 }
@@ -730,7 +746,7 @@ export async function getParties(
   const page = options.page ?? 1;
   const perPage = 30;
   const qs = new URLSearchParams({ page: String(page), per_page: String(perPage), sort: "balance_desc" });
-  if (options.search) qs.set("search", options.search);
+  if (options.search) qs.set("search", escapeSearch(options.search));
   if (options.balanceStatus) qs.set("balance_status", options.balanceStatus);
   const d = await request<any>(`/customers?${qs.toString()}`, { method: "GET" }, token);
   const res = paged<Party>(d, "items", page, perPage);
@@ -784,12 +800,38 @@ export async function addLocalInvoicePayment(token: string, id: string, body: { 
 }
 
 // Muhasebe programındaki satış faturaları. Paraşüt ve BizimHesap aynı satır biçimini döndürür.
-export async function getAccountingInvoices(token: string, source: "parasut" | "bizimhesap", options?: { page?: number; perPage?: number }) {
-  const qs = new URLSearchParams();
-  qs.set("page", String(options?.page ?? 1));
-  qs.set("per_page", String(Math.min(options?.perPage ?? 100, source === "bizimhesap" ? 100 : 600)));
-  const payload = await request<any>(`/${source}/invoices?${qs.toString()}`, { method: "GET" }, token);
-  return (Array.isArray(payload?.invoices) ? payload.invoices : []) as Invoice[];
+// Sunucu sayfa başına en çok 100 kayıt verir (Paraşüt'te 25'e düşebilir); sayfalar biriken kayıt sayısına göre ilerletilir.
+export async function getAccountingInvoices(token: string, source: "parasut" | "bizimhesap", options?: { maxRecords?: number }) {
+  const perPage = source === "parasut" ? 25 : 100;
+  const max = options?.maxRecords ?? 300;
+  const fetchPage = async (page: number) => {
+    const payload = await request<any>(`/${source}/invoices?page=${page}&per_page=${perPage}`, { method: "GET" }, token);
+    return { rows: (Array.isArray(payload?.invoices) ? payload.invoices : []) as Invoice[], total: Number(payload?.total ?? 0) };
+  };
+  const first = await fetchPage(1);
+  const invoices = [...first.rows];
+  const total = Math.max(first.total, invoices.length);
+  const seen = new Set(invoices.map((i) => String(i.id)));
+  let page = 2;
+  while (invoices.length < Math.min(total, max) && first.rows.length === perPage) {
+    // Dörderli gruplar hâlinde paralel çekilir.
+    const pages = [page, page + 1, page + 2, page + 3].filter((p) => (p - 1) * perPage < Math.min(total, max));
+    if (pages.length === 0) break;
+    const batch = await Promise.all(pages.map((p) => fetchPage(p).catch(() => ({ rows: [] as Invoice[], total: 0 }))));
+    let added = 0;
+    batch.forEach((b) =>
+      b.rows.forEach((r) => {
+        if (!seen.has(String(r.id))) {
+          seen.add(String(r.id));
+          invoices.push(r);
+          added += 1;
+        }
+      })
+    );
+    if (added === 0) break;
+    page += pages.length;
+  }
+  return { invoices, total };
 }
 
 export async function getParasutExpenseInvoices(token: string, page = 1) {

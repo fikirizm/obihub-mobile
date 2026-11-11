@@ -12,7 +12,7 @@ export const palette = {
     borderSubtle: "#EEF2F7",
     textPrimary: "#0F172A",
     textSecondary: "#475569",
-    textTertiary: "#94A3B8",
+    textTertiary: "#64748B",
     primary: "#2563EB",
     primaryHover: "#1D4ED8",
     primarySoft: "#EFF6FF",

@@ -25,6 +25,7 @@ export function Chip({
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ selected: Boolean(selected) }}
+      hitSlop={4}
       style={[
         styles.chip,
         {
@@ -74,6 +75,7 @@ export function SegmentedControl<T extends string>({
             accessibilityRole="tab"
             accessibilityLabel={o.label}
             accessibilityState={{ selected: active }}
+            hitSlop={4}
             style={[styles.seg, active && [{ backgroundColor: colors.surface }, shadows.sm]]}
           >
             <Text style={[type.callout, { color: active ? colors.textPrimary : colors.textSecondary, fontWeight: active ? "600" : "500" }]}>
@@ -98,5 +100,5 @@ const styles = StyleSheet.create({
   },
   row: { gap: spacing.xs, paddingHorizontal: spacing.lg, paddingVertical: spacing.xs },
   segWrap: { flexDirection: "row", borderRadius: 12, padding: 3, marginHorizontal: spacing.lg },
-  seg: { flex: 1, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  seg: { flex: 1, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center" },
 });

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Stack, useRouter, useRootNavigationState, useSegments } from "expo-router";
 import { Platform } from "react-native";
 import { StatusBar } from "expo-status-bar";
@@ -8,7 +8,8 @@ import * as Notifications from "expo-notifications";
 import { ThemeProvider, useTheme } from "../src/theme/ThemeProvider";
 import { AuthProvider, useAuth } from "../src/auth/AuthProvider";
 import { SubscriptionLockOverlay } from "../src/components/SubscriptionLockOverlay";
-import { FeedbackProvider } from "../src/ui/Feedback";
+import { FeedbackProvider, useFeedback } from "../src/ui/Feedback";
+import { canOpenRoute } from "../src/auth/permissions";
 import { AppLockProvider } from "../src/security/AppLock";
 import { DataCacheProvider } from "../src/context/DataCacheContext";
 
@@ -29,9 +30,12 @@ function navigateToOrder(
 function useNotificationTapHandler() {
   const router = useRouter();
   const rootNavState = useRootNavigationState();
-  const coldStartHandled = useRef(false);
+  const { token, bootLoading } = useAuth();
+  const coldStartRequested = useRef(false);
+  const pending = useRef<Record<string, unknown> | null>(null);
+  const [pendingTick, setPendingTick] = useState(0);
 
-  // Live listener — works when app is foregrounded or backgrounded
+  // Uygulama açıkken (ön planda veya arka planda) bildirime dokunma.
   useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
       navigateToOrder(router, response.notification.request.content.data as Record<string, unknown>);
@@ -39,22 +43,31 @@ function useNotificationTapHandler() {
     return () => sub.remove();
   }, [router]);
 
-  // Cold start — app opened by tapping a notification while killed
-  // Must wait until Expo Router navigation is fully mounted
+  // Soğuk açılış: bildirim hedefi hemen açılmaz, oturum doğrulanana kadar bekletilir.
+  // Aksi halde giriş ekranının Panel'e yönlendirmesi sipariş ekranını ezer.
   useEffect(() => {
-    if (!rootNavState?.key) return; // Router not ready yet
-    if (coldStartHandled.current) return;
-    coldStartHandled.current = true;
-
-    // Web'de bu yöntem yoktur ve hata fırlatır; yalnızca cihazda çağrılır.
-    if (Platform.OS === "web") return;
+    if (Platform.OS === "web" || coldStartRequested.current) return;
+    coldStartRequested.current = true;
     Notifications.getLastNotificationResponseAsync()
       .then((response) => {
-        if (!response) return;
-        navigateToOrder(router, response.notification.request.content.data as Record<string, unknown>);
+        const data = response?.notification.request.content.data as Record<string, unknown> | undefined;
+        if (data?.order_id) {
+          pending.current = data;
+          setPendingTick((n) => n + 1);
+        }
       })
       .catch(() => {});
-  }, [rootNavState?.key, router]);
+  }, []);
+
+  useEffect(() => {
+    if (!pending.current || !rootNavState?.key || bootLoading) return;
+    const data = pending.current;
+    pending.current = null;
+    if (!token) return;
+    router.replace("/(tabs)/dashboard");
+    // Sekmeler yerleştikten sonra sipariş ekranını üstüne aç.
+    setTimeout(() => navigateToOrder(router, data), 0);
+  }, [pendingTick, rootNavState?.key, bootLoading, token, router]);
 }
 
 // Oturum uygulama açıkken sona ererse (24 saatlik süre) detay ekranlarından da giriş ekranına dön.
@@ -75,10 +88,28 @@ function useSessionGuard() {
   }, [rootNavState?.key, bootLoading, token, first, router]);
 }
 
+// Rolün izin vermediği ekran bağlantıyla veya bildirimle açılırsa Panel'e geri döner.
+function useRoleGuard() {
+  const router = useRouter();
+  const segments = useSegments();
+  const rootNavState = useRootNavigationState();
+  const { token, user, bootLoading } = useAuth();
+  const { toast } = useFeedback();
+  const first = String(segments[0] ?? "");
+
+  useEffect(() => {
+    if (!rootNavState?.key || bootLoading || !token || !user) return;
+    if (canOpenRoute(user, first)) return;
+    toast("Bu ekrana erişim yetkiniz yok.", "error");
+    router.replace("/(tabs)/dashboard");
+  }, [rootNavState?.key, bootLoading, token, user, first, router, toast]);
+}
+
 function RootInner() {
   const { mode, colors } = useTheme();
   useNotificationTapHandler();
   useSessionGuard();
+  useRoleGuard();
 
   return (
     <>

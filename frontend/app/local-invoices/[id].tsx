@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
+import { canManage } from "../../src/auth/permissions";
 import { addLocalInvoicePayment, getLocalInvoice, officializeLocalInvoice } from "../../src/api";
 import { invoiceStatus, PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -16,12 +17,17 @@ import { StackHeader } from "../../src/ui/Header";
 import { Card, ListRow, SectionTitle } from "../../src/ui/ListRow";
 import type { LocalInvoice } from "../../src/types";
 
+// Sunucu kalem tutarını `line_total` adıyla döndürür.
+function lineTotal(l: { total?: number; line_total?: number }) {
+  return l.line_total ?? l.total;
+}
+
 export default function LocalInvoiceDetailScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const id = String(params.id || "");
-  const { token, parasutConnected } = useAuth();
+  const { token, user, parasutConnected } = useAuth();
   const { colors } = useTheme();
-  const { toast, confirm, promptEntry, choose } = useFeedback();
+  const { toast, confirm, promptEntry } = useFeedback();
   const [inv, setInv] = useState<LocalInvoice | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -66,8 +72,9 @@ export default function LocalInvoiceDetailScreen() {
   const isDraft = inv.status === "taslak";
   const isCancelled = inv.status === "iptal";
   // Resmileştirme Paraşüt üzerinden yapılır.
-  const canOfficialize = isDraft && parasutConnected === true && !inv.parasut_invoice_id;
-  const canCollect = !isCancelled && remaining > 0.004;
+  const mayWrite = canManage(user, "billing");
+  const canOfficialize = mayWrite && isDraft && parasutConnected === true && !inv.parasut_invoice_id;
+  const canCollect = mayWrite && !isCancelled && remaining > 0.004;
 
   const onOfficialize = async () => {
     if (!token) return;
@@ -91,14 +98,20 @@ export default function LocalInvoiceDetailScreen() {
 
   const onCollect = async () => {
     if (!token) return;
-    const entry = await promptEntry({ title: "Tahsilat ekle", message: `Kalan ${formatMoney(remaining, cur)}`, initial: remaining, decimal: true, noteLabel: "Not (isteğe bağlı)" });
+    const entry = await promptEntry({
+      title: "Tahsilat ekle",
+      message: `Kalan ${formatMoney(remaining, cur)}`,
+      initial: remaining,
+      decimal: true,
+      noteLabel: "Not (isteğe bağlı)",
+      methods: [...PAYMENT_METHODS],
+    });
     if (!entry || entry.amount <= 0) return;
     if (entry.amount > remaining + 0.004) {
       toast("Tutar kalan borçtan büyük olamaz.", "error");
       return;
     }
-    const method = await choose({ title: "Ödeme yöntemi", options: [...PAYMENT_METHODS] });
-    if (!method) return;
+    const method = entry.method || "nakit";
     setBusy("payment");
     try {
       await addLocalInvoicePayment(token, inv.id, { amount: entry.amount, date: todayIso(), method, notes: entry.note || undefined });
@@ -118,7 +131,7 @@ export default function LocalInvoiceDetailScreen() {
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="local-invoice-detail">
       <StackHeader title={inv.invoice_number || "Fatura"} subtitle={formatDate(inv.issue_date)} />
       <ScrollView
-        contentContainerStyle={{ paddingBottom: spacing.xxl }}
+        contentContainerStyle={{ paddingBottom: spacing.huge }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
       >
         <Card padded style={styles.block}>
@@ -161,7 +174,7 @@ export default function LocalInvoiceDetailScreen() {
                   divider={i > 0}
                   title={l.name || l.product_name || l.description || "Kalem"}
                   subtitle={`${Number(l.quantity || 0)} × ${formatMoney(l.unit_price, cur)}${l.vat_rate != null ? ` · KDV %${l.vat_rate}` : ""}`}
-                  trailing={l.total != null ? <Text style={[type.callout, tabular, { color: colors.textPrimary }]}>{formatMoney(l.total, cur)}</Text> : undefined}
+                  trailing={lineTotal(l) != null ? <Text style={[type.callout, tabular, { color: colors.textPrimary }]}>{formatMoney(lineTotal(l), cur)}</Text> : undefined}
                 />
               ))}
             </Card>

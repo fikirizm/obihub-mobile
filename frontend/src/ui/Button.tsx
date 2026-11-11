@@ -4,6 +4,9 @@ import { useTheme } from "../theme/ThemeProvider";
 import { radius, spacing, type } from "../theme/tokens";
 import { PressableScale } from "../components/KPICard";
 
+// Beyaz yazıyla her iki temada yeterli kontrast veren kırmızı.
+export const DESTRUCTIVE_BG = "#DC2626";
+
 type Variant = "primary" | "secondary" | "ghost" | "destructive";
 
 export function Button({
@@ -29,7 +32,7 @@ export function Button({
 }) {
   const { colors } = useTheme();
   const bg =
-    variant === "primary" ? colors.primary : variant === "destructive" ? colors.error : variant === "secondary" ? colors.surface : "transparent";
+    variant === "primary" ? colors.primary : variant === "destructive" ? DESTRUCTIVE_BG : variant === "secondary" ? colors.surface : "transparent";
   const fg = variant === "primary" || variant === "destructive" ? "#FFFFFF" : variant === "ghost" ? colors.primary : colors.textPrimary;
   return (
     <PressableScale
@@ -39,6 +42,7 @@ export function Button({
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: Boolean(disabled || busy), busy: Boolean(busy) }}
+      hitSlop={size === "sm" ? 4 : undefined}
       style={[
         styles.base,
         { backgroundColor: bg, height: size === "sm" ? 40 : 50 },

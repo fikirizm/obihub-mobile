@@ -88,7 +88,7 @@ export default function NewTicketScreen() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
-  body: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  body: { padding: spacing.lg, paddingBottom: spacing.huge },
   topics: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: spacing.xs },
   label: { marginTop: spacing.lg },
   input: { borderWidth: 1, borderRadius: radius.md, paddingHorizontal: spacing.md, minHeight: 48, fontSize: 15, marginTop: spacing.xs },

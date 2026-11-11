@@ -16,12 +16,14 @@ import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { TabHeader } from "../../src/ui/Header";
+import { canAccess } from "../../src/auth/permissions";
+import { EmptyState } from "../../src/components/EmptyState";
 import { fontWeight, radius, spacing } from "../../src/theme/tokens";
 import { getOrders, getSalesReportsOverview } from "../../src/api";
 import { formatCompact, formatTry, providerColor, providerLabel, orderTimestamp } from "../../src/utils";
 import { DonutChart, Sparkline, AnimatedNumber } from "../../src/components/Charts";
 import { PressableScale } from "../../src/components/KPICard";
-import { CheckIcon, FilterIcon, PackageIcon, SparkleIcon, TrendDownIcon, TrendUpIcon, ZapIcon } from "../../src/components/Icons";
+import { ChartIcon, CheckIcon, FilterIcon, PackageIcon, SparkleIcon, TrendDownIcon, TrendUpIcon, ZapIcon } from "../../src/components/Icons";
 import { NetworkErrorBanner } from "../../src/components/NetworkErrorBanner";
 import { saveCache, loadCache } from "../../src/offlineCache";
 import { useFocusLoad } from "../../src/hooks/useFocusLoad";
@@ -50,6 +52,20 @@ type ReportsCache = { reports: ReportsOverview; orders: Order[]; rangeKey: strin
 const SCREEN_W = Dimensions.get("window").width;
 
 export default function ReportsScreen() {
+  const { user: reportsUser } = useAuth();
+  const { colors: guardColors } = useTheme();
+  if (!canAccess(reportsUser, "reports")) {
+    return (
+      <View style={{ flex: 1, backgroundColor: guardColors.background }} testID="reports-screen">
+        <TabHeader title="Raporlar" />
+        <EmptyState icon={<ChartIcon size={30} color={guardColors.textTertiary} />} title="Raporlara yetkiniz yok" description="Satış raporları hesap sahibi, müdür ve muhasebe rollerine açıktır." />
+      </View>
+    );
+  }
+  return <ReportsContent />;
+}
+
+function ReportsContent() {
   const { token } = useAuth();
   const { colors, mode, shadows } = useTheme();
   const [range, setRange] = useState<RangeT>(() => presetRanges().find((p) => p.key === "30d")!);

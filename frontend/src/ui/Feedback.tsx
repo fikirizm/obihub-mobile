@@ -26,7 +26,30 @@ type NumberPromptOptions = {
   confirmLabel?: string;
   // Verilirse tutarın altında açıklama alanı gösterilir.
   noteLabel?: string;
+  // Verilirse tutarın altında tek seçimli seçenekler gösterilir (ör. ödeme yöntemi).
+  // Ayrı bir sayfa açılmaz: iOS'ta art arda iki sayfa sunulamaz.
+  methods?: { value: string; label: string }[];
 };
+
+// Kullanıcının yazdığı sayıyı çözer. Virgül ondalık ayırıcıdır; virgül yoksa sondaki
+// "nokta + 1-2 hane" de ondalık sayılır ("12.5" → 12,5), diğer noktalar binlik ayırıcıdır ("1.250" → 1250).
+export function parseAmount(text: string, decimal: boolean): number | null {
+  const raw = text.trim();
+  if (!raw) return null;
+  let normalized: string;
+  if (raw.includes(",")) {
+    if (raw.split(",").length > 2) return null;
+    normalized = raw.replace(/\./g, "").replace(",", ".");
+  } else if (decimal && /^\d+\.\d{1,2}$/.test(raw)) {
+    normalized = raw;
+  } else {
+    normalized = raw.replace(/\./g, "");
+  }
+  if (!/^\d+(\.\d+)?$/.test(normalized)) return null;
+  const n = Number(normalized);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return decimal ? Math.round(n * 100) / 100 : Math.round(n);
+}
 
 type ChooseOptions<T extends string> = { title: string; message?: string; options: { value: T; label: string }[] };
 
@@ -36,7 +59,7 @@ type FeedbackValue = {
   // Sayı ister; vazgeçilirse null döner.
   promptNumber: (options: NumberPromptOptions) => Promise<number | null>;
   // Tutar ve açıklama ister; vazgeçilirse null döner.
-  promptEntry: (options: NumberPromptOptions) => Promise<{ amount: number; note: string } | null>;
+  promptEntry: (options: NumberPromptOptions) => Promise<{ amount: number; note: string; method: string } | null>;
   // Seçeneklerden birini seçtirir; vazgeçilirse null döner.
   choose: <T extends string>(options: ChooseOptions<T>) => Promise<T | null>;
 };
@@ -54,6 +77,8 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
   const numberResolver = useRef<((v: number | null) => void) | null>(null);
   const [noteText, setNoteText] = useState("");
   const noteRef = useRef("");
+  const [methodValue, setMethodValue] = useState("");
+  const methodRef = useRef("");
   const [chooseState, setChooseState] = useState<ChooseOptions<string> | null>(null);
   const chooseResolver = useRef<((v: string | null) => void) | null>(null);
 
@@ -78,24 +103,23 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
       setNumberText(options.decimal ? (options.initial ? options.initial.toFixed(2).replace(".", ",") : "") : String(Math.round(options.initial)));
       setNoteText("");
       noteRef.current = "";
+      const firstMethod = options.methods?.[0]?.value || "";
+      setMethodValue(firstMethod);
+      methodRef.current = firstMethod;
       setNumberState(options);
     });
   }, []);
 
   const promptEntry = useCallback(
     async (options: NumberPromptOptions) => {
-      const amount = await promptNumber({ ...options, noteLabel: options.noteLabel || "Açıklama" });
+      const amount = await promptNumber(options);
       if (amount === null) return null;
-      return { amount, note: noteRef.current.trim() };
+      return { amount, note: noteRef.current.trim(), method: methodRef.current };
     },
     [promptNumber]
   );
 
-  const parsedNumber = (() => {
-    const n = Number(numberText.replace(/\./g, "").replace(",", "."));
-    if (numberText.trim() === "" || !Number.isFinite(n) || n < 0) return null;
-    return numberState?.decimal ? Math.round(n * 100) / 100 : Math.round(n);
-  })();
+  const parsedNumber = numberState ? parseAmount(numberText, Boolean(numberState.decimal)) : null;
 
   const settleNumber = useCallback((value: number | null) => {
     numberResolver.current?.(value);
@@ -214,6 +238,33 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
                 />
                 {numberState.suffix ? <Text style={[type.headline, { color: colors.textTertiary }]}>{numberState.suffix}</Text> : null}
               </View>
+              {numberState.methods && numberState.methods.length > 0 ? (
+                <View style={styles.methodRow} accessibilityRole="radiogroup">
+                  {numberState.methods.map((m) => {
+                    const active = methodValue === m.value;
+                    return (
+                      <Pressable
+                        key={m.value}
+                        testID={`method-${m.value}`}
+                        accessibilityRole="radio"
+                        accessibilityLabel={m.label}
+                        accessibilityState={{ selected: active }}
+                        hitSlop={4}
+                        onPress={() => {
+                          setMethodValue(m.value);
+                          methodRef.current = m.value;
+                        }}
+                        style={[
+                          styles.methodChip,
+                          { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primarySoft : colors.surface },
+                        ]}
+                      >
+                        <Text style={[type.callout, { color: active ? colors.primary : colors.textSecondary, fontWeight: "600" }]}>{m.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
               {numberState.noteLabel ? (
                 <TextInput
                   testID="number-note"
@@ -313,6 +364,8 @@ const styles = StyleSheet.create({
     height: 60,
   },
   numberInput: { flex: 1, fontSize: 26, fontWeight: "700", fontVariant: ["tabular-nums"], paddingVertical: 0, height: 60 },
+  methodRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: spacing.sm },
+  methodChip: { height: 40, paddingHorizontal: 14, borderRadius: 9999, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   noteInput: { borderWidth: 1, borderRadius: radius.md, paddingHorizontal: spacing.md, height: 48, fontSize: 15, marginTop: spacing.sm },
   grabber: { width: 36, height: 4, borderRadius: 2, alignSelf: "center", marginBottom: spacing.md },
 });

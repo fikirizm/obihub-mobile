@@ -3,8 +3,8 @@ import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native
 import { Image as ExpoImage } from "expo-image";
 import { useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
-import { canAccess } from "../../src/auth/permissions";
-import { getCatalog, setChannelPrice, setChannelStock, setProductPrice, setProductStock } from "../../src/api";
+import { canManage } from "../../src/auth/permissions";
+import { getCatalog, setChannelPrice, setChannelStock, setProductPrice, setProductStock, SYNC_NONE } from "../../src/api";
 import { recallChannels, recallProduct, rememberCatalog } from "../../src/catalogCache";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
@@ -21,14 +21,14 @@ import type { CatalogProduct, ChannelRef } from "../../src/types";
 export default function ProductDetailScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const id = String(params.id || "");
-  const { token, user, accountingProvider } = useAuth();
+  const { token, user, accountingProvider, accountingLoaded, reloadAccounting } = useAuth();
   const { colors } = useTheme();
-  const { toast, promptNumber } = useFeedback();
+  const { toast, promptNumber, promptEntry } = useFeedback();
   const [product, setProduct] = useState<CatalogProduct | null>(() => recallProduct(id));
   const [channels, setChannels] = useState<ChannelRef[]>(() => recallChannels());
   const [refreshing, setRefreshing] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const canEdit = canAccess(user, "inventory");
+  const canEdit = canManage(user, "inventory");
 
   const reload = useCallback(async () => {
     if (!token || !product) return;
@@ -45,15 +45,30 @@ export default function ProductDetailScreen() {
     }
   }, [token, product]);
 
-  // Değişikliği sunucuya yazar; başarılıysa listeyi yeniden okur.
-  const run = async (key: string, action: () => Promise<{ message?: string }>, done: string) => {
+  // Değişikliği sunucuya yazar. Başarılıysa yazılan değer ekrana hemen uygulanır; ardından liste yeniden okunur.
+  const run = async (
+    key: string,
+    action: () => Promise<{ message?: string; skipped_providers?: Record<string, string> }>,
+    apply: (p: CatalogProduct) => CatalogProduct,
+    done: string
+  ) => {
     setBusyKey(key);
     try {
-      await action();
-      toast(done, "success");
+      const res = await action();
+      setProduct((prev) => {
+        if (!prev) return prev;
+        const next = apply(prev);
+        rememberCatalog([next], []);
+        return next;
+      });
+      const skipped = Object.keys(res?.skipped_providers || {});
+      if (skipped.length > 0) toast(`Kaydedildi, ancak şu kanallara gönderilemedi: ${skipped.join(", ")}`, "error");
+      else toast(done, "success");
       await reload();
     } catch (e: any) {
       toast(e?.message || "Güncellenemedi.", "error");
+      // Sunucu yerel değeri yazıp kanal hatası döndürmüş olabilir; güncel durumu oku.
+      await reload();
     } finally {
       setBusyKey(null);
     }
@@ -70,38 +85,73 @@ export default function ProductDetailScreen() {
 
   const editBaseStock = async () => {
     if (!token) return;
-    const v = await promptNumber({ title: "Ana stok", message: product.name, initial: product.stock, suffix: "adet" });
+    // Hedef muhasebe programı bilinmeden yazılmaz: sunucu boş hedefi "tüm kanallar" sayar.
+    if (!accountingLoaded) {
+      await reloadAccounting();
+      toast("Muhasebe ayarı okunamadı. Bağlantıyı kontrol edip tekrar deneyin.", "error");
+      return;
+    }
+    const v = await promptNumber({
+      title: "Ana stok",
+      message: accountingProvider ? `${product.name}\nMuhasebe programına da yansıtılır; pazaryeri stokları ayrı güncellenir.` : product.name,
+      initial: product.stock,
+      suffix: "adet",
+    });
     if (v === null || v === product.stock) return;
-    // Web panelindeki gibi: ana stok yalnızca muhasebe programına yansıtılır, kanallar ayrı güncellenir.
-    await run("stock", () => setProductStock(token, product.id, v, accountingProvider ? [accountingProvider] : []), "Stok güncellendi");
+    // Web panelindeki gibi: ana stok yalnızca muhasebe programına yansıtılır.
+    await run("stock", () => setProductStock(token, product.id, v, [accountingProvider || SYNC_NONE]), (p) => ({ ...p, stock: v }), "Stok güncellendi");
   };
 
   const editBasePrice = async () => {
     if (!token) return;
-    const v = await promptNumber({ title: "Ana fiyat", message: product.name, initial: product.price, decimal: true, suffix: "₺" });
-    if (v === null || v === product.price) return;
-    await run("price", () => setProductPrice(token, product.id, v), "Fiyat güncellendi");
+    // Kapsam aynı sayfada seçilir (iOS'ta art arda iki sayfa açılamaz). Varsayılan: yalnızca ana fiyat.
+    const entry = await promptEntry({
+      title: "Ana fiyat",
+      message: product.name,
+      initial: product.price,
+      decimal: true,
+      suffix: "₺",
+      methods: [
+        { value: "base", label: "Yalnızca ana fiyat" },
+        { value: "all", label: "Bağlı tüm kanallara da gönder" },
+      ],
+    });
+    if (!entry) return;
+    const v = entry.amount;
+    const pushAll = entry.method === "all";
+    if (v === product.price && !pushAll) return;
+    await run("price", () => setProductPrice(token, product.id, v, pushAll), (p) => ({ ...p, price: v }), pushAll ? "Fiyat güncellendi ve kanallara gönderildi" : "Fiyat güncellendi");
   };
 
   const editChannelStock = async (ch: ChannelRef, current: number) => {
     if (!token) return;
     const v = await promptNumber({ title: `${ch.name} stoğu`, message: product.name, initial: current, suffix: "adet" });
     if (v === null || v === current) return;
-    await run(`cs-${ch.id}`, () => setChannelStock(token, product.id, ch.id, v), `${ch.name} stoğu güncellendi`);
+    await run(
+      `cs-${ch.id}`,
+      () => setChannelStock(token, product.id, ch.id, v),
+      (p) => ({ ...p, channelStocks: p.channelStocks.map((x) => (x.integration_id === ch.id ? { ...x, stock: v } : x)) }),
+      `${ch.name} stoğu güncellendi`
+    );
   };
 
   const editChannelPrice = async (ch: ChannelRef, current: number) => {
     if (!token) return;
     const v = await promptNumber({ title: `${ch.name} fiyatı`, message: product.name, initial: current, decimal: true, suffix: "₺" });
     if (v === null || v === current) return;
-    await run(`cp-${ch.id}`, () => setChannelPrice(token, product.id, ch.id, v), `${ch.name} fiyatı güncellendi`);
+    await run(
+      `cp-${ch.id}`,
+      () => setChannelPrice(token, product.id, ch.id, v),
+      (p) => ({ ...p, channelPrices: p.channelPrices.map((x) => (x.integration_id === ch.id ? { ...x, price: v } : x)) }),
+      `${ch.name} fiyatı güncellendi`
+    );
   };
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="product-detail-screen">
       <StackHeader title="Ürün" />
       <ScrollView
-        contentContainerStyle={{ paddingBottom: spacing.xxl }}
+        contentContainerStyle={{ paddingBottom: spacing.huge }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); reload(); }} tintColor={colors.primary} />}
       >
         <View style={styles.head}>

@@ -32,3 +32,14 @@ export async function clearCache(key: string): Promise<void> {
     await FileSystem.deleteAsync(path(key), { idempotent: true });
   } catch {}
 }
+
+// Tüm çevrimdışı önbelleği siler (çıkışta çağrılır).
+export async function clearAllCache(): Promise<void> {
+  try {
+    if (!cacheDir) return;
+    const names = await FileSystem.readDirectoryAsync(cacheDir);
+    await Promise.all(
+      names.filter((n) => n.startsWith("obihub_cache_")).map((n) => FileSystem.deleteAsync(`${cacheDir}${n}`, { idempotent: true }).catch(() => {}))
+    );
+  } catch {}
+}

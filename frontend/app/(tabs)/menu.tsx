@@ -20,7 +20,7 @@ export default function MenuScreen() {
   const onLogout = async () => {
     const ok = await confirm({
       title: "Çıkış yapılsın mı?",
-      message: "Tekrar giriş yapana kadar bu cihaza sipariş bildirimi gelmez.",
+      message: "Hesabınıza tekrar giriş yapmanız gerekir.",
       confirmLabel: "Çıkış yap",
       destructive: true,
     });
@@ -43,6 +43,7 @@ export default function MenuScreen() {
               onPress={() => router.push("/products")}
             />
           ) : null}
+          {canAccess(user, "integrations") ? (
           <ListRow
             testID="menu-integrations"
             divider
@@ -52,6 +53,7 @@ export default function MenuScreen() {
             chevron
             onPress={() => router.push("/integrations")}
           />
+          ) : null}
           <ListRow
             testID="menu-hepsijet"
             divider

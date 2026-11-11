@@ -54,8 +54,8 @@ export default function Index() {
     setSubmitting(true);
     setError(null);
     try {
+      // Yönlendirmeyi yukarıdaki effect yapar; burada ikinci kez yapılmaz.
       await login(email.trim(), password);
-      router.replace("/(tabs)/dashboard");
     } catch (e: any) {
       setError(e?.message || "Giriş başarısız oldu.");
     } finally {

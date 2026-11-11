@@ -39,7 +39,7 @@ export default function SettingsScreen() {
   const onLogout = async () => {
     const ok = await confirm({
       title: "Çıkış yapılsın mı?",
-      message: "Tekrar giriş yapana kadar bu cihaza sipariş bildirimi gelmez.",
+      message: "Hesabınıza tekrar giriş yapmanız gerekir.",
       confirmLabel: "Çıkış yap",
       destructive: true,
     });
@@ -49,7 +49,7 @@ export default function SettingsScreen() {
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="settings-screen">
       <StackHeader title="Ayarlar" />
-      <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: spacing.huge }}>
         <SectionTitle title="Profil" />
         <Card style={styles.block}>
           <ListRow title="Ad Soyad" trailing={<Value>{user?.full_name || "-"}</Value>} />

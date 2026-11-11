@@ -17,3 +17,8 @@ export function recallProduct(id: string) {
 export function recallChannels() {
   return channels;
 }
+
+export function clearCatalogCache() {
+  items.clear();
+  channels = [];
+}
