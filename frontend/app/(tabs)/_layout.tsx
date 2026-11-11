@@ -70,6 +70,9 @@ function TabButton({
   return (
     <Pressable
       testID={testID}
+      accessibilityRole="tab"
+      accessibilityLabel={TAB_LABELS[name]}
+      accessibilityState={{ selected: active }}
       onPressIn={() => (scale.value = withTiming(0.94, { duration: 90 }))}
       onPressOut={() => (scale.value = withSpring(active ? 1.04 : 1, { damping: 18 }))}
       onPress={onPress}
@@ -106,8 +109,11 @@ function TabButton({
 
 function CustomTabBar({ state, navigation }: any) {
   const { colors, shadows } = useTheme();
-  const { unreadNotifications } = useAuth();
+  const { unreadNotifications, parasutConnected } = useAuth();
   const insets = useSafeAreaInsets();
+  // Fatura ve Teklif ekranları Paraşüt verisi gösterir; Paraşüt bağlı değilse gizlenir.
+  // Durum henüz bilinmiyorsa (null) sekmeler gösterilmeye devam eder.
+  const hiddenTabs: TabName[] = parasutConnected === false ? ["invoices", "offers"] : [];
 
   return (
     <View
@@ -129,7 +135,7 @@ function CustomTabBar({ state, navigation }: any) {
             if (!isActive && !event.defaultPrevented) navigation.navigate(route.name);
           };
           const tabName = route.name as TabName;
-          if (!TAB_ORDER.includes(tabName)) return null;
+          if (!TAB_ORDER.includes(tabName) || hiddenTabs.includes(tabName)) return null;
           return (
             <TabButton
               key={route.key}

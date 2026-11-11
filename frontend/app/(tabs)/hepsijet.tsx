@@ -149,8 +149,20 @@ export default function HepsiJetScreen() {
 
   const submitCustomer = async () => {
     if (!token) return;
-    if (!form.full_name.trim() || !form.phone.trim()) {
-      Alert.alert("Eksik bilgi", "Ad Soyad ve Telefon zorunlu.");
+    if (!form.full_name.trim()) {
+      Alert.alert("Eksik bilgi", "Ad Soyad zorunlu.");
+      return;
+    }
+    if (form.phone.replace(/\D/g, "").length < 10) {
+      Alert.alert("Eksik bilgi", "Telefon en az 10 haneli olmalı.");
+      return;
+    }
+    if (!form.city.trim() || !form.town.trim() || !form.district.trim()) {
+      Alert.alert("Eksik bilgi", "İl, ilçe ve mahalle zorunlu.");
+      return;
+    }
+    if (!form.address_line.trim()) {
+      Alert.alert("Eksik bilgi", "Adres zorunlu.");
       return;
     }
     setBusy(true);
@@ -179,7 +191,7 @@ export default function HepsiJetScreen() {
       const sh = await createHepsiJetManualShipment(token, {
         customer_id: selectedCustomerId,
         total_parcels: Number(parcels) || 1,
-        total_desi: Number(desi) || 1,
+        desi: Number(String(desi).replace(",", ".")) || 1,
       });
       if (!sh?.id) throw new Error("Etiket oluşturma yanıtı eksik.");
       setShipments((prev) => [sh, ...prev]);

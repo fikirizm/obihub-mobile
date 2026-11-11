@@ -86,35 +86,58 @@ export default function OrderDetail() {
 
   const provider = providerHint || (order ? String(order.integration_provider || order.provider || order.channel || "") : "");
 
-  const fetchLabelData = async (): Promise<string> => {
-    if (!token || !order) return "";
+  // Etiket PDF'ini cihaza yazar; dosya yolunu döndürür. Etiket yoksa nedenini açıklayan hata fırlatır.
+  const fetchLabelFile = async (): Promise<string> => {
+    if (!token || !order) throw new Error("Oturum bulunamadı.");
+    const path = `${FileSystem.cacheDirectory}order-${order.id}.pdf`;
+    const writeBase64 = async (data: string) => {
+      await FileSystem.writeAsStringAsync(path, data, { encoding: FileSystem.EncodingType.Base64 });
+      return path;
+    };
     const k = providerKey(provider);
     if (k === "trendyol") {
       const r = await getTrendyolOrderLabel(token, order.id);
-      return r?.data || r?.label_data || "";
+      const data = r?.data || r?.label_data || "";
+      if (data) return writeBase64(data);
+      throw new Error("Trendyol bu sipariş için etiket döndürmedi.");
     }
     if (k === "hepsiburada") {
       const r = await getHepsiburadaOrderLabel(token, order.id);
-      return r?.data || r?.data_base64 || "";
+      const data = r?.data || r?.data_base64 || "";
+      if (data) return writeBase64(data);
+      // Hepsiburada bazı paketlerde dosya yerine indirme bağlantısı verir.
+      if (r?.url && /^https:\/\//i.test(r.url)) {
+        const dl = await FileSystem.downloadAsync(r.url, path);
+        if (dl.status >= 200 && dl.status < 300) return path;
+      }
+      throw new Error("Hepsiburada bu sipariş için etiket döndürmedi.");
     }
-    // default fallback
-    const r = await getShippingLabel(token, order.id);
-    return r?.data || "";
+    // Diğer kanallar (WooCommerce, n11 vb.): etiket, sipariş için oluşturulmuş kargo gönderisinden gelir.
+    const info = await getShippingLabel(token, order.id);
+    const barcode = String(info?.barcode || info?.cargo_barcodes?.[0]?.barcode || "").trim();
+    const cargoProvider = String(info?.cargo_provider || "").trim().toLowerCase();
+    if (!barcode && cargoProvider !== "yurtici") {
+      throw new Error("Bu sipariş için henüz kargo gönderisi oluşturulmamış. Önce web panelden gönderi oluşturun.");
+    }
+    const r = await getHepsiJetLabelWithProducts(token, order.id, barcode || undefined);
+    const data = r?.data || r?.data_base64 || "";
+    if (data) return writeBase64(data);
+    throw new Error(r?.message || "Kargo firması bu gönderi için etiket döndürmedi.");
   };
 
   const handlePrint = async () => {
     if (!token || !order) return;
     setPrintBusy(true);
     try {
-      setPrintStatus("Etiket verisi alınıyor...");
-      const data = await fetchLabelData();
-      if (!data) {
-        Alert.alert("Etiket bulunamadı", "Bu sipariş için etiket verisi alınamadı.");
+      setPrintStatus("Etiket alınıyor...");
+      let path: string;
+      try {
+        path = await fetchLabelFile();
+      } catch (e: any) {
+        Alert.alert("Etiket alınamadı", e?.message || "Bu sipariş için etiket alınamadı.");
+        setPrintStatus(null);
         return;
       }
-      setPrintStatus("Dosya hazırlanıyor...");
-      const path = `${FileSystem.cacheDirectory}order-${order.id}.pdf`;
-      await FileSystem.writeAsStringAsync(path, data, { encoding: FileSystem.EncodingType.Base64 });
       setPrintStatus("Yazıcıya gönderiliyor...");
       try {
         await Print.printAsync({ uri: path });

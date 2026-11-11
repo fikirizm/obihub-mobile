@@ -1,11 +1,11 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import * as Notifications from "expo-notifications";
 import * as FileSystem from "expo-file-system/legacy";
 import * as BackgroundFetch from "expo-background-fetch";
 import * as TaskManager from "expo-task-manager";
 import { Platform } from "react-native";
 import * as Storage from "../storage";
-import { getMe, getOrders, login as apiLogin, registerPushToken } from "../api";
+import { getAccountingSettings, getMe, getOrders, login as apiLogin, registerPushToken, setSessionHandlers } from "../api";
 import { displayOrderNo, formatOrderDateTime, isNewOrderStatus, providerLabel } from "../utils";
 import type { Order, User } from "../types";
 
@@ -18,6 +18,11 @@ type AuthContextValue = {
   refreshMe: () => Promise<void>;
   unreadNotifications: number;
   clearNotifications: () => void;
+  // Aboneliği kilitli hesapta backend'in döndürdüğü açıklama; kilit yoksa null.
+  subscriptionLock: string | null;
+  retrySubscription: () => Promise<void>;
+  // Paraşüt bağlantısı: true/false bilinir, null henüz öğrenilemedi (ekranlar gizlenmez).
+  parasutConnected: boolean | null;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -27,6 +32,20 @@ const USER_KEY = "obihub_user";
 const SEEN_ORDER_IDS_KEY = "obihub_seen_order_ids";
 const ORDERS_CHANNEL_ID = "orders";
 const BG_TASK_NAME = "obihub-order-poll";
+const PARASUT_CONNECTED_KEY = "obihub_parasut_connected";
+
+// Sunucu push'u ile bildirimi zaten gösterilmiş siparişlerin kimlikleri.
+// Aynı sipariş için uygulamanın kendi yoklaması ikinci bir bildirim üretmesin diye kullanılır.
+async function presentedOrderIds(): Promise<string[]> {
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    return presented
+      .map((n) => String((n.request.content.data as Record<string, unknown> | null)?.order_id || ""))
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
 
 // Background task — runs even when app is suspended/killed (iOS ~15 min, Android more frequent)
 TaskManager.defineTask(BG_TASK_NAME, async () => {
@@ -37,6 +56,7 @@ TaskManager.defineTask(BG_TASK_NAME, async () => {
     const rawSeen = await Storage.getItemAsync("obihub_seen_order_ids");
     const parsed = rawSeen ? JSON.parse(rawSeen) : [];
     const seen = new Set<string>(Array.isArray(parsed) ? parsed.map(String) : []);
+    (await presentedOrderIds()).forEach((id) => seen.add(id));
 
     const list = await getOrders(tokenRaw, undefined, { page: 1, perPage: 40, sortBy: "-created_at" });
     const rows = Array.isArray(list) ? list : [];
@@ -160,6 +180,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [bootLoading, setBootLoading] = useState(true);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [subscriptionLock, setSubscriptionLock] = useState<string | null>(null);
+  const [parasutConnected, setParasutConnected] = useState<boolean | null>(null);
+  // Ön plandaki yoklama ile push işleyicisinin ortak kullandığı "bildirimi verilmiş sipariş" kümesi.
+  const seenOrderIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -223,9 +247,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     await Storage.deleteItemAsync(TOKEN_KEY);
     await Storage.deleteItemAsync(USER_KEY);
+    await Storage.deleteItemAsync(PARASUT_CONNECTED_KEY);
     setToken(null);
     setUser(null);
+    setSubscriptionLock(null);
+    setParasutConnected(null);
   }, []);
+
+  // Oturumu sona eren (401) ve aboneliği kilitlenen (403) çağrıları tek yerden yakala.
+  // Oturum 24 saatte dolar ve yenilenmez; uygulama açıkken dolarsa giriş ekranına dönülür.
+  useEffect(() => {
+    setSessionHandlers({
+      onUnauthorized: () => {
+        logout().catch(() => {});
+      },
+      onSubscriptionLocked: (message) => setSubscriptionLock(message),
+    });
+    return () => setSessionHandlers({});
+  }, [logout]);
+
+  const loadAccounting = useCallback(async (authToken: string) => {
+    try {
+      const settings = await getAccountingSettings(authToken);
+      const connected = Boolean(settings?.parasut?.connected) || settings?.provider === "parasut";
+      setParasutConnected(connected);
+      await Storage.setItemAsync(PARASUT_CONNECTED_KEY, connected ? "1" : "0");
+    } catch {
+      // Öğrenilemedi: son bilinen değer kalır.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      const saved = await Storage.getItemAsync(PARASUT_CONNECTED_KEY).catch(() => null);
+      if (!cancelled && (saved === "1" || saved === "0")) setParasutConnected(saved === "1");
+      if (!cancelled) await loadAccounting(token);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, loadAccounting]);
+
+  const retrySubscription = useCallback(async () => {
+    if (!token) return;
+    try {
+      // Kilit sürüyorsa bu çağrı yine 403 döner ve kilit ekranı açık kalır.
+      await getOrders(token, undefined, { page: 1, perPage: 1 });
+      setSubscriptionLock(null);
+      await loadAccounting(token);
+    } catch {}
+  }, [token, loadAccounting]);
 
   const refreshMe = useCallback(async () => {
     if (!token) return;
@@ -244,12 +317,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Foreground notification handler
   useEffect(() => {
     Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-      }),
+      handleNotification: async (notification) => {
+        // Sunucu push'u: sipariş için yoklama zaten bildirim verdiyse ikincisini gösterme;
+        // vermediyse siparişi "görüldü" say ki yoklama tekrar bildirmesin.
+        const isRemote = (notification.request.trigger as { type?: string } | null)?.type === "push";
+        const orderId = String((notification.request.content.data as Record<string, unknown> | null)?.order_id || "");
+        if (isRemote && orderId) {
+          const seen = seenOrderIdsRef.current;
+          if (seen.has(orderId)) {
+            return { shouldShowBanner: false, shouldShowList: false, shouldPlaySound: false, shouldSetBadge: false };
+          }
+          seen.add(orderId);
+          setUnreadNotifications((v) => v + 1);
+          Storage.setItemAsync(SEEN_ORDER_IDS_KEY, JSON.stringify(Array.from(seen).slice(-300))).catch(() => {});
+        }
+        return { shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: true };
+      },
     });
   }, []);
 
@@ -258,11 +341,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!token) return;
     let stopped = false;
     let timer: ReturnType<typeof setInterval> | null = null;
-    let seen = new Set<string>();
 
     const poll = async () => {
       if (stopped) return;
       try {
+        const seen = seenOrderIdsRef.current;
+        // Uygulama arka plandayken sunucu push'u ile bildirilmiş siparişleri tekrar bildirme.
+        (await presentedOrderIds()).forEach((id) => seen.add(id));
         const list = await getOrders(token, undefined, { page: 1, perPage: 40, sortBy: "-created_at" });
         const rows = Array.isArray(list) ? list : [];
         const newOrders = rows.filter((o) => {
@@ -328,7 +413,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const rawSeen = await Storage.getItemAsync(SEEN_ORDER_IDS_KEY);
         const parsed = rawSeen ? JSON.parse(rawSeen) : [];
         if (Array.isArray(parsed)) {
-          seen = new Set((parsed as unknown[]).map((x) => String(x)));
+          (parsed as unknown[]).forEach((x) => seenOrderIdsRef.current.add(String(x)));
         }
 
         await poll();
@@ -361,8 +446,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [token]);
 
   const value = useMemo(
-    () => ({ token, user, bootLoading, login, logout, refreshMe, unreadNotifications, clearNotifications }),
-    [token, user, bootLoading, login, logout, refreshMe, unreadNotifications, clearNotifications]
+    () => ({
+      token,
+      user,
+      bootLoading,
+      login,
+      logout,
+      refreshMe,
+      unreadNotifications,
+      clearNotifications,
+      subscriptionLock,
+      retrySubscription,
+      parasutConnected,
+    }),
+    [
+      token,
+      user,
+      bootLoading,
+      login,
+      logout,
+      refreshMe,
+      unreadNotifications,
+      clearNotifications,
+      subscriptionLock,
+      retrySubscription,
+      parasutConnected,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

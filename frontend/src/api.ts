@@ -16,7 +16,22 @@ export const API_BASE_URL =
   (process.env.EXPO_PUBLIC_OBIHUB_API_URL && String(process.env.EXPO_PUBLIC_OBIHUB_API_URL)) ||
   "https://api.obihub.app/api";
 
-type ApiError = { message: string; status: number };
+type ApiError = { message: string; status: number; code?: "SUBSCRIPTION_LOCKED" };
+
+// Backend bu önekle başlayan 403 yanıtını abonelik kilidi için döndürür.
+const SUBSCRIPTION_LOCK_PREFIX = "Abonelik erişimi pasif.";
+
+type SessionHandlers = {
+  onUnauthorized?: () => void;
+  onSubscriptionLocked?: (message: string) => void;
+};
+
+let sessionHandlers: SessionHandlers = {};
+
+// AuthProvider, oturumu sona eren veya aboneliği kilitlenen çağrıları tek yerden yakalamak için kaydolur.
+export function setSessionHandlers(handlers: SessionHandlers) {
+  sessionHandlers = handlers;
+}
 
 const STATUS_MESSAGES: Record<number, string> = {
   401: "Oturumunuz sona erdi. Lütfen tekrar giriş yapın.",
@@ -43,15 +58,36 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
     throw { message: "Sunucuya bağlanılamıyor. İnternet bağlantınızı kontrol edin.", status: 0 } as ApiError;
   }
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: any = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // JSON olmayan yanıt (ör. ağ geçidi hata sayfası)
+      data = null;
+    }
+  }
   if (!res.ok) {
-    const serverMessage = data?.detail || data?.message;
+    const detail = data?.detail;
+    const serverMessage = typeof detail === "string" ? detail : typeof data?.message === "string" ? data.message : "";
     const friendlyMessage = STATUS_MESSAGES[res.status];
     const err: ApiError = {
       message: serverMessage || friendlyMessage || `Sunucu hatası (${res.status})`,
       status: res.status,
     };
+    // Yalnızca oturumlu çağrılar: giriş ekranındaki hatalı şifre 401'i oturumu etkilemez.
+    if (token) {
+      if (res.status === 401) {
+        sessionHandlers.onUnauthorized?.();
+      } else if (res.status === 403 && serverMessage.startsWith(SUBSCRIPTION_LOCK_PREFIX)) {
+        err.code = "SUBSCRIPTION_LOCKED";
+        sessionHandlers.onSubscriptionLocked?.(serverMessage);
+      }
+    }
     throw err;
+  }
+  if (text && data === null) {
+    throw { message: "Sunucudan beklenmeyen bir yanıt alındı.", status: res.status } as ApiError;
   }
   return data as T;
 }
@@ -96,8 +132,14 @@ export async function getOrderDetail(token: string, orderId: string) {
   return request<Order>(`/orders/${orderId}`, { method: "GET" }, token);
 }
 
+// Etiket dosyası döndürmez; siparişin kargo bilgisini (barkod, kargo firması) verir.
 export async function getShippingLabel(token: string, orderId: string) {
-  return request<{ success?: boolean; data?: string; format?: string }>(
+  return request<{
+    barcode?: string | null;
+    cargo_barcodes?: Array<{ barcode?: string }>;
+    cargo_provider?: string | null;
+    cargo_status?: string | null;
+  }>(
     `/orders/${orderId}/shipping-label`,
     { method: "GET" },
     token
@@ -131,11 +173,13 @@ export async function getHepsiburadaOrderLabel(token: string, orderId: string, p
   );
 }
 
-export async function getHepsiJetLabelWithProducts(token: string, orderId: string, barcode: string) {
+// HepsiJet ve Yurtiçi gönderileri için ürün listeli etiket PDF'i (base64). Barkod verilmezse siparişin kayıtlı barkodu kullanılır.
+export async function getHepsiJetLabelWithProducts(token: string, orderId: string, barcode?: string) {
   const qs = new URLSearchParams();
-  qs.set("barcode", barcode);
+  if (barcode) qs.set("barcode", barcode);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return request<{ success?: boolean; data?: string; data_base64?: string; message?: string; format?: string }>(
-    `/hepsijet/label-with-products/${orderId}?${qs.toString()}`,
+    `/hepsijet/label-with-products/${orderId}${suffix}`,
     { method: "GET" },
     token
   );
@@ -299,7 +343,7 @@ export async function listHepsiJetManualShipments(token: string, options?: { pag
 
 export async function createHepsiJetManualShipment(
   token: string,
-  payload: { customer_id: string; total_parcels?: number; total_desi?: number; note?: string }
+  payload: { customer_id: string; total_parcels?: number; desi?: number; notes?: string }
 ) {
   const res = await request<{ success?: boolean; shipment?: HepsiJetManualShipment; message?: string }>(
     `/hepsijet/manual/shipments`,
@@ -435,4 +479,14 @@ export async function getProducts(token: string, search?: string) {
   const qs = new URLSearchParams({ page: "1", per_page: "50" });
   if (search) qs.set("search", search);
   return request<any>(`/parasut/products?${qs.toString()}`, { method: "GET" }, token);
+}
+
+export type AccountingSettings = {
+  provider?: string | null;
+  parasut?: { connected?: boolean; status?: string } | null;
+  bizimhesap?: { connected?: boolean; status?: string } | null;
+};
+
+export async function getAccountingSettings(token: string) {
+  return request<AccountingSettings>("/settings/accounting", { method: "GET" }, token);
 }
