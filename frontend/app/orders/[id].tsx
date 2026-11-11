@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, RefreshControl, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Image as ExpoImage } from "expo-image";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Haptics from "expo-haptics";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import * as FileSystem from "expo-file-system/legacy";
@@ -23,7 +25,9 @@ import {
 import {
   displayOrderNo,
   displayOrderStatus,
+  formatOrderDateTime,
   formatTry,
+  getOrderTrackingNo,
   providerKey,
   providerLabel,
   relativeDateLabel,
@@ -33,6 +37,7 @@ import { PressableScale } from "../../src/components/KPICard";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
 import { ArrowLeftIcon, CloudIcon, PackageIcon, PrinterIcon } from "../../src/components/Icons";
+import { saveCache, loadCache } from "../../src/offlineCache";
 import type { Order } from "../../src/types";
 
 export default function OrderDetail() {
@@ -44,35 +49,53 @@ export default function OrderDetail() {
   const insets = useSafeAreaInsets();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isOffline, setIsOffline] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [printBusy, setPrintBusy] = useState(false);
   const [cloudBusy, setCloudBusy] = useState(false);
+  const [printStatus, setPrintStatus] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      if (!token || !orderId) return;
-      setLoading(true);
-      try {
-        const o = await getOrderDetail(token, orderId);
-        setOrder(o);
-      } catch {}
-      finally {
+  const load = async (silent = false) => {
+    if (!token || !orderId) return;
+    if (!silent) setLoading(true);
+    const cacheKey = `order_detail_${orderId}`;
+    if (!silent) {
+      const cached = await loadCache<Order>(cacheKey);
+      if (cached) {
+        setOrder(cached);
+        setIsOffline(true);
         setLoading(false);
       }
-    })();
+    }
+    try {
+      const o = await getOrderDetail(token, orderId);
+      setOrder(o);
+      setIsOffline(false);
+      await saveCache(cacheKey, o);
+    } catch {
+      // Ağ hatası — cache gösterilmeye devam eder
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
   }, [token, orderId]);
 
-  const provider = providerHint || (order ? String((order as any).integration_provider || (order as any).provider || order.channel || "") : "");
+  const provider = providerHint || (order ? String(order.integration_provider || order.provider || order.channel || "") : "");
 
   const fetchLabelData = async (): Promise<string> => {
     if (!token || !order) return "";
     const k = providerKey(provider);
     if (k === "trendyol") {
       const r = await getTrendyolOrderLabel(token, order.id);
-      return r?.data || (r as any)?.label_data || "";
+      return r?.data || r?.label_data || "";
     }
     if (k === "hepsiburada") {
       const r = await getHepsiburadaOrderLabel(token, order.id);
-      return r?.data || (r as any)?.data_base64 || "";
+      return r?.data || r?.data_base64 || "";
     }
     // default fallback
     const r = await getShippingLabel(token, order.id);
@@ -83,13 +106,16 @@ export default function OrderDetail() {
     if (!token || !order) return;
     setPrintBusy(true);
     try {
+      setPrintStatus("Etiket verisi alınıyor...");
       const data = await fetchLabelData();
       if (!data) {
         Alert.alert("Etiket bulunamadı", "Bu sipariş için etiket verisi alınamadı.");
         return;
       }
+      setPrintStatus("Dosya hazırlanıyor...");
       const path = `${FileSystem.cacheDirectory}order-${order.id}.pdf`;
       await FileSystem.writeAsStringAsync(path, data, { encoding: FileSystem.EncodingType.Base64 });
+      setPrintStatus("Yazıcıya gönderiliyor...");
       try {
         await Print.printAsync({ uri: path });
       } catch {
@@ -97,8 +123,10 @@ export default function OrderDetail() {
           await Sharing.shareAsync(path, { mimeType: "application/pdf" });
         }
       }
+      setPrintStatus(null);
     } catch (e: any) {
       Alert.alert("Hata", e?.message || "Yazdırma başarısız.");
+      setPrintStatus(null);
     } finally {
       setPrintBusy(false);
     }
@@ -134,7 +162,8 @@ export default function OrderDetail() {
   }
 
   const kind = statusKindFromOrder(order, provider);
-  const items = (order.items || []) as any[];
+  const trackingNo = getOrderTrackingNo(order);
+  const items = order.items || [];
   const subtotal = items.reduce((a, b) => a + Number(b.total_price ?? Number(b.unit_price || 0) * Number(b.quantity || 0)), 0);
 
   return (
@@ -150,7 +179,9 @@ export default function OrderDetail() {
           <ArrowLeftIcon size={18} color={colors.textPrimary} />
         </PressableScale>
         <View style={{ flex: 1, alignItems: "center" }}>
-          <Text style={[styles.headerLabel, { color: colors.textTertiary }]}>SİPARİŞ</Text>
+          <Text style={[styles.headerLabel, { color: isOffline ? colors.warning : colors.textTertiary }]}>
+            {isOffline ? "ÇEVRİMDIŞI · ÖNBELLEK" : "SİPARİŞ"}
+          </Text>
           <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
             #{displayOrderNo(order)}
           </Text>
@@ -158,7 +189,16 @@ export default function OrderDetail() {
         <PlatformLogo provider={provider} size="sm" />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 60 }}>
+      <ScrollView
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: 60 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => { setRefreshing(true); load(true); }}
+            tintColor={colors.primary}
+          />
+        }
+      >
         {/* Top summary */}
         <SafeAnimatedView
           entering={FadeIn.duration(400)}
@@ -172,6 +212,9 @@ export default function OrderDetail() {
               </Text>
               <Text style={[styles.dateText, { color: colors.textSecondary }]} numberOfLines={1}>
                 {relativeDateLabel(order)} · {providerLabel(provider)}
+              </Text>
+              <Text style={[styles.dateText, { color: colors.textTertiary }]}>
+                Sipariş Tarihi: {formatOrderDateTime(order)}
               </Text>
             </View>
             <StatusBadge label={displayOrderStatus(order, provider)} kind={kind} />
@@ -188,6 +231,26 @@ export default function OrderDetail() {
               <Text style={[styles.fcValue, { color: colors.textPrimary }]}>{formatTry(order.total_amount || subtotal)}</Text>
             </View>
           </View>
+          {trackingNo ? (
+            <>
+              <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
+              <TouchableOpacity
+                activeOpacity={0.7}
+                style={[styles.summaryFootCell, styles.trackingRow, { backgroundColor: colors.primarySoft, borderRadius: 10, padding: spacing.sm }]}
+                onPress={async () => {
+                  try {
+                    await Share.share({ message: trackingNo });
+                    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  } catch {}
+                }}
+              >
+                <Text style={[styles.fcLabel, { color: colors.primary }]}>KARGO TAKİP · KOPYALA</Text>
+                <Text style={[styles.fcValue, { color: colors.primary }]} numberOfLines={1}>
+                  {trackingNo}
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : null}
         </SafeAnimatedView>
 
         {/* Action buttons */}
@@ -220,6 +283,14 @@ export default function OrderDetail() {
           </PressableScale>
         </SafeAnimatedView>
 
+        {/* Print status indicator */}
+        {printStatus ? (
+          <View style={[styles.printStatusRow, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={[styles.printStatusText, { color: colors.textSecondary }]}>{printStatus}</Text>
+          </View>
+        ) : null}
+
         {/* Items */}
         <SafeAnimatedView
           entering={FadeInDown.delay(140).duration(400)}
@@ -234,27 +305,47 @@ export default function OrderDetail() {
             <Text style={[styles.empty, { color: colors.textTertiary }]}>Bu siparişte ürün detayı yok.</Text>
           ) : (
             items.map((it, idx) => {
-              const img = String(it?.image_url || it?.image || it?.images?.[0]?.url || it?.images?.[0] || "").trim();
+              const img0 = it?.images?.[0];
+              const img0Url = typeof img0 === "object" ? (img0?.url ?? img0?.src ?? "") : (img0 ?? "");
+              const img = String(
+                it?.image_url || it?.imageUrl || it?.pictureUrl || it?.picture_url ||
+                it?.image || it?.picture || it?.img || it?.thumbnail ||
+                it?.src || it?.url || img0Url || ""
+              ).trim();
               const valid = /^https?:\/\//i.test(img);
+              const displayName = (
+                it?.product_name || it?.name || it?.sku || it?.barcode || it?.product_id || "Ürün"
+              ).trim();
+              const genericNames = ["ürün", "urun", "product", "bilinmeyen"];
+              const isGenericName = genericNames.includes(displayName.toLowerCase());
+              const unitPrice = Number(it?.unit_price || it?.price || (it?.total_price && it?.quantity ? Number(it.total_price) / Math.max(1, Number(it.quantity)) : 0) || 0);
               return (
                 <SafeAnimatedView key={`${it.sku || it.product_name || idx}-${idx}`} entering={FadeInDown.delay(idx * 40)}>
                   <View style={[styles.itemRow, idx > 0 && { borderTopWidth: 1, borderColor: colors.borderSubtle }]}>
                     <View style={[styles.itemImg, { backgroundColor: colors.surfaceMuted, borderColor: colors.borderSubtle }]}>
                       {valid ? (
-                        <Image source={{ uri: img }} style={{ width: "100%", height: "100%" }} resizeMode="cover" />
+                        <ExpoImage
+                          source={{ uri: img }}
+                          style={{ width: "100%", height: "100%", borderRadius: 9 }}
+                          contentFit="cover"
+                          transition={200}
+                        />
                       ) : (
                         <PackageIcon size={20} color={colors.textTertiary} />
                       )}
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.itemName, { color: colors.textPrimary }]} numberOfLines={2}>
-                        {it.product_name || "Ürün"}
+                      <Text
+                        style={[styles.itemName, { color: isGenericName ? colors.textSecondary : colors.textPrimary }]}
+                        numberOfLines={2}
+                      >
+                        {displayName}
                       </Text>
                       <Text style={[styles.itemSku, { color: colors.textTertiary }]} numberOfLines={1}>
-                        SKU: {it.sku || "-"}
+                        {it.sku || it.barcode ? `SKU: ${it.sku || it.barcode}` : "SKU: -"}
                       </Text>
                       <Text style={[styles.itemPrice, { color: colors.textSecondary }]}>
-                        {formatTry(it.total_price ?? it.unit_price ?? 0)}
+                        Birim: {formatTry(unitPrice)}
                       </Text>
                     </View>
                     <View style={[styles.qtyBadge, { backgroundColor: colors.primarySoft }]}>
@@ -301,11 +392,14 @@ const styles = StyleSheet.create({
   dateText: { fontSize: 12.5, fontWeight: "600", marginTop: 4 },
   divider: { height: 1, marginVertical: spacing.sm },
   summaryFoot: { flexDirection: "row", alignItems: "center" },
+  trackingRow: {},
   summaryFootCell: { flex: 1 },
   fcDivider: { width: 1, height: 28 },
   fcLabel: { fontSize: 10.5, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase" },
   fcValue: { fontSize: 16, fontWeight: "800", letterSpacing: -0.3, marginTop: 2 },
   actionRow: { flexDirection: "row", gap: 10, marginTop: spacing.md },
+  printStatusRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8, paddingHorizontal: spacing.md, paddingVertical: 10, borderRadius: radius.md, borderWidth: 1 },
+  printStatusText: { fontSize: 13, fontWeight: "600" },
   actionBtn: {
     flex: 1,
     height: 50,

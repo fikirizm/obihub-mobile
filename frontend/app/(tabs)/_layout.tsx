@@ -5,17 +5,18 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, withSpring } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
-import { ChartIcon, HomeIcon, PlugIcon, ReceiptIcon, TruckIcon } from "../../src/components/Icons";
+import { ChartIcon, FileTextIcon, HomeIcon, PlugIcon, ReceiptIcon, TruckIcon } from "../../src/components/Icons";
 import { fontWeight, radius, spacing } from "../../src/theme/tokens";
 
-type TabName = "dashboard" | "integrations" | "invoices" | "reports" | "hepsijet";
+type TabName = "dashboard" | "integrations" | "invoices" | "offers" | "reports" | "hepsijet";
 
-const TAB_ORDER: TabName[] = ["dashboard", "integrations", "invoices", "reports", "hepsijet"];
+const TAB_ORDER: TabName[] = ["dashboard", "integrations", "invoices", "offers", "reports", "hepsijet"];
 
 const TAB_ACCENTS: Record<TabName, string> = {
   dashboard: "#0F172A",
   integrations: "#2563EB",
   invoices: "#16A34A",
+  offers: "#D97706",
   reports: "#7C3AED",
   hepsijet: "#F97316",
 };
@@ -24,6 +25,7 @@ const TAB_LABELS: Record<TabName, string> = {
   dashboard: "Panel",
   integrations: "Mağaza",
   invoices: "Fatura",
+  offers: "Teklif",
   reports: "Rapor",
   hepsijet: "HepsiJet",
 };
@@ -33,11 +35,13 @@ function TabButton({
   active,
   onPress,
   testID,
+  badge,
 }: {
   name: TabName;
   active: boolean;
   onPress: () => void;
   testID?: string;
+  badge?: number;
 }) {
   const { colors } = useTheme();
   const scale = useSharedValue(1);
@@ -57,9 +61,11 @@ function TabButton({
         ? PlugIcon
         : name === "invoices"
           ? ReceiptIcon
-          : name === "reports"
-            ? ChartIcon
-            : TruckIcon;
+          : name === "offers"
+            ? FileTextIcon
+            : name === "reports"
+              ? ChartIcon
+              : TruckIcon;
 
   return (
     <Pressable
@@ -69,15 +75,22 @@ function TabButton({
       onPress={onPress}
       style={styles.tabBtn}
     >
-      <Animated.View
-        style={[
-          styles.iconWrap,
-          { backgroundColor: active ? accent : "transparent" },
-          animatedStyle,
-        ]}
-      >
-        <Icon size={22} color={iconColor} strokeWidth={active ? 2.2 : 1.8} />
-      </Animated.View>
+      <View style={styles.iconWrapOuter}>
+        <Animated.View
+          style={[
+            styles.iconWrap,
+            { backgroundColor: active ? accent : "transparent" },
+            animatedStyle,
+          ]}
+        >
+          <Icon size={22} color={iconColor} strokeWidth={active ? 2.2 : 1.8} />
+        </Animated.View>
+        {badge != null && badge > 0 ? (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{badge > 99 ? "99+" : String(badge)}</Text>
+          </View>
+        ) : null}
+      </View>
       <Text
         numberOfLines={1}
         style={[
@@ -93,6 +106,7 @@ function TabButton({
 
 function CustomTabBar({ state, navigation }: any) {
   const { colors, shadows } = useTheme();
+  const { unreadNotifications } = useAuth();
   const insets = useSafeAreaInsets();
 
   return (
@@ -123,6 +137,7 @@ function CustomTabBar({ state, navigation }: any) {
               active={isActive}
               onPress={onPress}
               testID={`tab-${tabName}`}
+              badge={tabName === "dashboard" ? unreadNotifications : undefined}
             />
           );
         })}
@@ -153,6 +168,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="dashboard" />
       <Tabs.Screen name="integrations" />
       <Tabs.Screen name="invoices" />
+      <Tabs.Screen name="offers" />
       <Tabs.Screen name="reports" />
       <Tabs.Screen name="hepsijet" />
     </Tabs>
@@ -176,6 +192,7 @@ const styles = StyleSheet.create({
     paddingTop: 4,
     gap: 4,
   },
+  iconWrapOuter: { position: "relative" },
   iconWrap: {
     width: 46,
     height: 30,
@@ -183,6 +200,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  badge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#EF4444",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3,
+  },
+  badgeText: { color: "#FFFFFF", fontSize: 9, fontWeight: "800" },
   label: {
     fontSize: 10.5,
     letterSpacing: 0.1,

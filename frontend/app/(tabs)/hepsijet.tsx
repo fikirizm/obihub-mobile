@@ -23,20 +23,26 @@ import { fontWeight, radius, spacing } from "../../src/theme/tokens";
 import {
   createHepsiJetManualCustomer,
   createHepsiJetManualShipment,
+  deleteHepsiJetManualCustomer,
+  deleteHepsiJetManualShipment,
+  enqueueHepsiJetManualShipmentCloudPrint,
   getHepsiJetManualShipmentLabel,
   listHepsiJetManualCustomers,
   listHepsiJetManualShipments,
+  trackHepsiJetManualShipment,
 } from "../../src/api";
 import { PressableScale } from "../../src/components/KPICard";
 import {
   CheckIcon,
   CloseIcon,
   CloudIcon,
+  RefreshIcon,
   DownloadIcon,
   PackageIcon,
   PlusIcon,
   PrinterIcon,
   SearchIcon,
+  TrashIcon,
   TruckIcon,
 } from "../../src/components/Icons";
 import type { HepsiJetManualCustomer, HepsiJetManualShipment } from "../../src/types";
@@ -50,7 +56,10 @@ export default function HepsiJetScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [labelBusyId, setLabelBusyId] = useState<string | null>(null);
-  const [shareBusyId, setShareBusyId] = useState<string | null>(null);
+  const [cloudBusyId, setCloudBusyId] = useState<string | null>(null);
+  const [trackBusyId, setTrackBusyId] = useState<string | null>(null);
+  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
+  const [deleteCustomerBusyId, setDeleteCustomerBusyId] = useState<string | null>(null);
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [form, setForm] = useState({
@@ -86,6 +95,42 @@ export default function HepsiJetScreen() {
   useEffect(() => {
     load();
   }, [token]);
+
+  useEffect(() => {
+    if (!token || !shipments.length) return undefined;
+    const timer = setInterval(async () => {
+      const active = shipments
+        .filter((shipment) => Boolean(shipment.barcode))
+        .filter((shipment) => {
+          const status = String(shipment.status || "").toLocaleLowerCase("tr-TR");
+          return !(
+            status.includes("teslim edildi") ||
+            status.includes("delivered") ||
+            status.includes("iptal") ||
+            status.includes("cancel") ||
+            status.includes("iade") ||
+            status.includes("return")
+          );
+        })
+        .slice(0, 8);
+      if (!active.length) return;
+      try {
+        const results = await Promise.allSettled(
+          active.map((shipment) => trackHepsiJetManualShipment(token, shipment.id))
+        );
+        const updates = results
+          .filter((result): result is PromiseFulfilledResult<{ shipment?: HepsiJetManualShipment }> => result.status === "fulfilled")
+          .map((result) => result.value?.shipment)
+          .filter((shipment): shipment is HepsiJetManualShipment => Boolean(shipment?.id));
+        if (updates.length) {
+          setShipments((prev) =>
+            prev.map((shipment) => updates.find((row) => row.id === shipment.id) || shipment)
+          );
+        }
+      } catch {}
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [token, shipments]);
 
   const filteredCustomers = useMemo(() => {
     const q = customerSearch.trim().toLowerCase();
@@ -136,6 +181,7 @@ export default function HepsiJetScreen() {
         total_parcels: Number(parcels) || 1,
         total_desi: Number(desi) || 1,
       });
+      if (!sh?.id) throw new Error("Etiket oluşturma yanıtı eksik.");
       setShipments((prev) => [sh, ...prev]);
       Alert.alert("Etiket oluşturuldu", `Barkod: ${sh.barcode || sh.id}`);
     } catch (e: any) {
@@ -177,21 +223,93 @@ export default function HepsiJetScreen() {
     }
   };
 
-  const shareLabel = async (s: HepsiJetManualShipment) => {
-    setShareBusyId(s.id);
+  const cloudPrintLabel = async (s: HepsiJetManualShipment) => {
+    if (!token) return;
+    setCloudBusyId(s.id);
     try {
-      const path = await fetchLabelFile(s);
-      if (!path) return;
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(path, { mimeType: "application/pdf", dialogTitle: `Etiket ${s.barcode || s.id}` });
+      const res = await enqueueHepsiJetManualShipmentCloudPrint(token, s.id);
+      if (!res?.success) throw new Error(res?.message || "Bulut yazdırma başlatılamadı.");
+      Alert.alert("Kuyruğa alındı", "Bulut yazdırma isteği gönderildi.");
+    } catch (e: any) {
+      Alert.alert("Hata", e?.message || "Bulut yazdırma başlatılamadı.");
+    } finally {
+      setCloudBusyId(null);
+    }
+  };
+
+  const deleteCustomer = (customerId: string) => {
+    if (!token) return;
+    Alert.alert("Müşteriyi Sil", "Müşteri silinsin mi?", [
+      { text: "Vazgeç", style: "cancel" },
+      {
+        text: "Sil",
+        style: "destructive",
+        onPress: async () => {
+          setDeleteCustomerBusyId(customerId);
+          try {
+            await deleteHepsiJetManualCustomer(token, customerId);
+            setCustomers((prev) => prev.filter((c) => c.id !== customerId));
+            if (selectedCustomerId === customerId) setSelectedCustomerId("");
+          } catch (e: any) {
+            Alert.alert("Silinemedi", e?.message || "Müşteri silinemedi.");
+          } finally {
+            setDeleteCustomerBusyId(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  const refreshShipmentStatus = async (shipmentId: string) => {
+    if (!token) return;
+    setTrackBusyId(shipmentId);
+    try {
+      const res = await trackHepsiJetManualShipment(token, shipmentId);
+      const next = (res as { shipment?: HepsiJetManualShipment })?.shipment;
+      if (next?.id) {
+        setShipments((prev) => prev.map((s) => (s.id === next.id ? { ...s, ...next } : s)));
       } else {
-        Alert.alert("Paylaşım yok", "Cihazda paylaşım desteği yok.");
+        await load(true);
       }
     } catch (e: any) {
-      Alert.alert("Hata", e?.message || "Etiket paylaşılamadı.");
+      Alert.alert("Durum güncellenemedi", e?.message || "Tekrar dene.");
     } finally {
-      setShareBusyId(null);
+      setTrackBusyId(null);
     }
+  };
+
+  const deleteShipment = (shipmentId: string) => {
+    if (!token) return;
+    Alert.alert("Etiketi Sil", "Teslim edilmemiş etiket silinsin mi?", [
+      { text: "Vazgeç", style: "cancel" },
+      {
+        text: "Sil",
+        style: "destructive",
+        onPress: async () => {
+          setDeleteBusyId(shipmentId);
+          try {
+            await deleteHepsiJetManualShipment(token, shipmentId);
+            setShipments((prev) => prev.filter((s) => s.id !== shipmentId));
+          } catch (e: any) {
+            Alert.alert("Silinemedi", e?.message || "Etiket silinemedi.");
+          } finally {
+            setDeleteBusyId(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  const shipmentStatusText = (statusRaw?: string) => {
+    const s = String(statusRaw || "").toLowerCase();
+    if (!s) return "Bilinmiyor";
+    if (s.includes("delivered") || s.includes("teslim")) return "Teslim Edildi";
+    if (s.includes("kurye") || s.includes("out_for_delivery") || s.includes("dagitima")) return "Kurye Dağıtıma Çıktı";
+    if (s.includes("sube") || s.includes("şube") || s.includes("branch")) return "Teslimat Şubesinde";
+    if (s.includes("transit") || s.includes("kargo") || s.includes("ship") || s.includes("transfer") || s.includes("yolda")) return "Dağıtım Sürecinde";
+    if (s.includes("pickup") || s.includes("accepted") || s.includes("accept") || s.includes("created")) return "Teslim Alınacak";
+    if (s.includes("cancel")) return "İptal";
+    return statusRaw || "Bilinmiyor";
   };
 
   return (
@@ -332,6 +450,17 @@ export default function HepsiJetScreen() {
                           ) : (
                             <View style={[styles.unselected, { borderColor: colors.borderSubtle }]} />
                           )}
+                          <PressableScale
+                            onPress={() => deleteCustomer(c.id)}
+                            disabled={deleteCustomerBusyId === c.id}
+                            style={[styles.slimActionBtn, { backgroundColor: colors.errorBg }]}
+                          >
+                            {deleteCustomerBusyId === c.id ? (
+                              <ActivityIndicator size="small" color={colors.error} />
+                            ) : (
+                              <TrashIcon size={14} color={colors.error} />
+                            )}
+                          </PressableScale>
                         </PressableScale>
                       </SafeAnimatedView>
                     );
@@ -416,35 +545,67 @@ export default function HepsiJetScreen() {
                       <Text style={[styles.shipmentBarcode, { color: colors.textPrimary }]} numberOfLines={1}>
                         #{s.barcode || s.id}
                       </Text>
-                      <Text style={[styles.shipmentMeta, { color: colors.textTertiary }]} numberOfLines={1}>
-                        {s.customer?.full_name || "Müşteri"} · {s.total_parcels || 1} paket · {s.total_desi || 1} desi
+                      <Text style={[styles.shipmentMeta, { color: colors.textTertiary }]} numberOfLines={2}>
+                        {s.customer_name || s.customer?.full_name || "Müşteri"} · {s.total_parcels || 1} paket · {s.total_desi || s.desi || 1} desi
                       </Text>
-                    </View>
-                    <View style={{ flexDirection: "row", gap: 6 }}>
-                      <PressableScale
-                        testID={`hepsijet-print-${s.id}`}
-                        onPress={() => printLabel(s)}
-                        disabled={labelBusyId === s.id}
-                        style={[styles.iconActionBtn, { backgroundColor: colors.primarySoft }]}
-                      >
-                        {labelBusyId === s.id ? (
-                          <ActivityIndicator size="small" color={colors.primary} />
-                        ) : (
-                          <PrinterIcon size={16} color={colors.primary} strokeWidth={2.2} />
-                        )}
-                      </PressableScale>
-                      <PressableScale
-                        testID={`hepsijet-cloud-${s.id}`}
-                        onPress={() => shareLabel(s)}
-                        disabled={shareBusyId === s.id}
-                        style={[styles.iconActionBtn, { backgroundColor: colors.hepsijetSoft }]}
-                      >
-                        {shareBusyId === s.id ? (
-                          <ActivityIndicator size="small" color={colors.hepsijet} />
-                        ) : (
-                          <CloudIcon size={16} color={colors.hepsijet} strokeWidth={2.2} />
-                        )}
-                      </PressableScale>
+                      <Text style={[styles.shipmentMeta, { color: colors.textTertiary }]} numberOfLines={2}>
+                        {[s.customer_phone, s.customer_district, s.customer_town, s.customer_city].filter(Boolean).join(" · ") || "Alıcı detayı yok"}
+                      </Text>
+                      <View style={styles.shipmentStatusRow}>
+                        <View style={[styles.shipmentStatusPill, { backgroundColor: colors.primarySoft }]}>
+                          <Text style={[styles.shipmentStatusText, { color: colors.primary }]} numberOfLines={1}>
+                            {shipmentStatusText(s.status)}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.shipmentActionsRow}>
+                        <PressableScale
+                          onPress={() => refreshShipmentStatus(s.id)}
+                          disabled={trackBusyId === s.id}
+                          style={[styles.iconActionBtn, { backgroundColor: colors.surfaceMuted }]}
+                        >
+                          {trackBusyId === s.id ? (
+                            <ActivityIndicator size="small" color={colors.textSecondary} />
+                          ) : (
+                            <RefreshIcon size={16} color={colors.textSecondary} strokeWidth={2.2} />
+                          )}
+                        </PressableScale>
+                        <PressableScale
+                          testID={`hepsijet-print-${s.id}`}
+                          onPress={() => printLabel(s)}
+                          disabled={labelBusyId === s.id}
+                          style={[styles.iconActionBtn, { backgroundColor: colors.primarySoft }]}
+                        >
+                          {labelBusyId === s.id ? (
+                            <ActivityIndicator size="small" color={colors.primary} />
+                          ) : (
+                            <PrinterIcon size={16} color={colors.primary} strokeWidth={2.2} />
+                          )}
+                        </PressableScale>
+                        <PressableScale
+                          testID={`hepsijet-cloud-${s.id}`}
+                          onPress={() => cloudPrintLabel(s)}
+                          disabled={cloudBusyId === s.id}
+                          style={[styles.iconActionBtn, { backgroundColor: colors.hepsijetSoft }]}
+                        >
+                          {cloudBusyId === s.id ? (
+                            <ActivityIndicator size="small" color={colors.hepsijet} />
+                          ) : (
+                            <CloudIcon size={16} color={colors.hepsijet} strokeWidth={2.2} />
+                          )}
+                        </PressableScale>
+                        <PressableScale
+                          onPress={() => deleteShipment(s.id)}
+                          disabled={deleteBusyId === s.id}
+                          style={[styles.iconActionBtn, { backgroundColor: colors.errorBg }]}
+                        >
+                          {deleteBusyId === s.id ? (
+                            <ActivityIndicator size="small" color={colors.error} />
+                          ) : (
+                            <TrashIcon size={16} color={colors.error} />
+                          )}
+                        </PressableScale>
+                      </View>
                     </View>
                   </View>
                 </SafeAnimatedView>
@@ -565,6 +726,7 @@ const styles = StyleSheet.create({
   customerMeta: { fontSize: 11.5, fontWeight: "500", marginTop: 2 },
   activeBadge: { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   unselected: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5 },
+  slimActionBtn: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   moreHint: { fontSize: 11, fontWeight: "600", textAlign: "center", marginTop: 4 },
   emptyMini: { padding: spacing.md, borderRadius: radius.md, alignItems: "center", marginTop: 4 },
   emptyMiniTitle: { fontSize: 13, fontWeight: "700" },
@@ -599,13 +761,17 @@ const styles = StyleSheet.create({
   primaryBtnText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
   helper: { fontSize: 11, fontWeight: "600", letterSpacing: 0.4, textTransform: "uppercase" },
   shipmentRow: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: "column",
+    alignItems: "stretch",
     paddingVertical: 12,
     gap: 8,
   },
   shipmentBarcode: { fontSize: 14, fontWeight: "800" },
   shipmentMeta: { fontSize: 11.5, fontWeight: "500", marginTop: 2 },
+  shipmentStatusRow: { marginTop: 6, flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  shipmentStatusPill: { borderRadius: 9999, paddingHorizontal: 8, paddingVertical: 3 },
+  shipmentStatusText: { fontSize: 11, fontWeight: "800", letterSpacing: 0.1 },
+  shipmentActionsRow: { marginTop: spacing.sm, flexDirection: "row", justifyContent: "flex-end", gap: 6 },
   iconActionBtn: {
     width: 36,
     height: 36,

@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { Text, View } from "react-native";
-import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop, G } from "react-native-svg";
+import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop, G, Text as SvgText } from "react-native-svg";
 import Animated, { useAnimatedProps, useSharedValue, withTiming, Easing } from "react-native-reanimated";
 import { useTheme } from "../theme/ThemeProvider";
 
@@ -16,6 +16,8 @@ export function Sparkline({
   color = "#60A5FA",
   fillOpacity = 0.18,
   showDots = false,
+  showAxis = false,
+  axisFormatter,
 }: {
   data: number[];
   width?: number;
@@ -23,15 +25,17 @@ export function Sparkline({
   color?: string;
   fillOpacity?: number;
   showDots?: boolean;
+  showAxis?: boolean;
+  axisFormatter?: (n: number) => string;
 }) {
   const padX = 4;
   const padY = 6;
   const w = Math.max(1, width - padX * 2);
   const h = Math.max(1, height - padY * 2);
 
-  const { line, area, dots } = useMemo(() => {
+  const { line, area, dots, minVal, maxVal } = useMemo(() => {
     const list = (data || []).filter((n) => Number.isFinite(n));
-    if (list.length < 2) return { line: "", area: "", dots: [] as { x: number; y: number }[] };
+    if (list.length < 2) return { line: "", area: "", dots: [] as { x: number; y: number }[], minVal: 0, maxVal: 0 };
     const min = Math.min(...list);
     const max = Math.max(...list);
     const range = Math.max(0.0001, max - min);
@@ -44,7 +48,7 @@ export function Sparkline({
       `M${pts[0].x.toFixed(2)},${(padY + h).toFixed(2)} ` +
       pts.map((p) => `L${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ") +
       ` L${pts[pts.length - 1].x.toFixed(2)},${(padY + h).toFixed(2)} Z`;
-    return { line, area, dots: pts };
+    return { line, area, dots: pts, minVal: min, maxVal: max };
   }, [data, w, h, padX, padY]);
 
   if (!line) {
@@ -66,6 +70,16 @@ export function Sparkline({
             <Circle key={i} cx={p.x} cy={p.y} r={2.4} fill={color} />
           ))
         : null}
+      {showAxis && line ? (
+        <>
+          <SvgText x={width - 2} y={padY + 8} fill={color} fontSize={9} fontWeight="700" textAnchor="end" opacity={0.75}>
+            {axisFormatter ? axisFormatter(maxVal) : maxVal >= 1000 ? `${(maxVal / 1000).toFixed(0)}k` : String(Math.round(maxVal))}
+          </SvgText>
+          <SvgText x={width - 2} y={height - 2} fill={color} fontSize={9} fontWeight="700" textAnchor="end" opacity={0.55}>
+            {axisFormatter ? axisFormatter(minVal) : minVal >= 1000 ? `${(minVal / 1000).toFixed(0)}k` : String(Math.round(minVal))}
+          </SvgText>
+        </>
+      ) : null}
     </Svg>
   );
 }
@@ -142,9 +156,6 @@ export function BarChart({
     </Svg>
   );
 }
-
-// expo react-native-svg Text
-import { Text as SvgText } from "react-native-svg";
 
 // ---------- Donut Chart ----------
 type DonutSlice = { label: string; value: number; color: string };

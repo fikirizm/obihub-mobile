@@ -186,6 +186,13 @@ export default function Index() {
               )}
             </PressableScale>
 
+            <PressableScale
+              onPress={() => router.push("/forgot-password")}
+              style={{ alignItems: "center", paddingVertical: spacing.xs, marginTop: spacing.xs }}
+            >
+              <Text style={[styles.forgotText, { color: colors.primary }]}>Şifremi unuttum</Text>
+            </PressableScale>
+
             <Text style={[styles.legal, { color: colors.textTertiary }]}>
               Devam ederek ObiHub Hizmet Şartlarını kabul etmiş olursun.
             </Text>
@@ -288,6 +295,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   submitText: { color: "#fff", fontSize: 16, fontWeight: fontWeight.bold, letterSpacing: -0.2 },
+  forgotText: { fontSize: 14, fontWeight: fontWeight.semibold },
   legal: { fontSize: 11, textAlign: "center", marginTop: spacing.sm, fontWeight: fontWeight.medium },
   footer: { alignItems: "center", marginTop: spacing.xl, paddingBottom: spacing.lg },
   footerText: { fontSize: 11, fontWeight: fontWeight.medium },

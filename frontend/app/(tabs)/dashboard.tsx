@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
@@ -8,130 +8,180 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { AppTopBar } from "../../src/components/AppTopBar";
 import { fontWeight, radius, spacing } from "../../src/theme/tokens";
-import { getInvoices, getOrders, getProductStock } from "../../src/api";
+import { getOrders, getProductStock } from "../../src/api";
 import {
   formatTry,
   formatCompact,
   displayOrderNo,
-  displayOrderStatus,
+  getOrderTrackingNo,
+  isNewOrderStatus,
   statusKindFromOrder,
   relativeDateLabel,
   orderTimestamp,
 } from "../../src/utils";
+import { localDateKey } from "../../src/components/reports/reportUtils";
 import { KPICard, PressableScale } from "../../src/components/KPICard";
-import { StatusBadge } from "../../src/components/StatusBadge";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
 import { Sparkline, AnimatedNumber } from "../../src/components/Charts";
-import { ArrowRightIcon, InboxIcon, PackageIcon, WalletIcon, ZapIcon, SparkleIcon, TrendUpIcon, TrendDownIcon } from "../../src/components/Icons";
-import type { Invoice, Order } from "../../src/types";
+import { ArrowRightIcon, InboxIcon, PackageIcon, ZapIcon, SparkleIcon, ClockIcon, TruckIcon, CheckIcon, CloseIcon } from "../../src/components/Icons";
+import { NetworkErrorBanner } from "../../src/components/NetworkErrorBanner";
+import { DashboardSkeleton } from "../../src/components/Skeleton";
+import { saveCache, loadCache } from "../../src/offlineCache";
+import { useFocusLoad } from "../../src/hooks/useFocusLoad";
+import type { Order } from "../../src/types";
+
+type DashStats = {
+  currentMonthOrders: number;
+  currentMonthRevenue: number;
+  previousMonthOrders: number;
+  previousMonthRevenue: number;
+  lowStock: number;
+  shippedOrders: number;
+  pendingOrders: number;
+  recentOrders: Order[];
+  sparkCurrentMonth: number[];
+  sparkPreviousMonth: number[];
+  todayOrders: number;
+  todayRevenue: number;
+};
+
+const EMPTY_STATS: DashStats = {
+  currentMonthOrders: 0,
+  currentMonthRevenue: 0,
+  previousMonthOrders: 0,
+  previousMonthRevenue: 0,
+  lowStock: 0,
+  shippedOrders: 0,
+  pendingOrders: 0,
+  recentOrders: [],
+  sparkCurrentMonth: [],
+  sparkPreviousMonth: [],
+  todayOrders: 0,
+  todayRevenue: 0,
+};
 
 export default function DashboardScreen() {
   const { token } = useAuth();
   const { colors, mode, shadows } = useTheme();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [stats, setStats] = useState({
-    monthlyOrders: 0,
-    monthlyRevenue: 0,
-    lowStock: 0,
-    pendingOrders: 0,
-    recentOrders: [] as Order[],
-    spark: [] as number[],
-    trendPct: 0,
-    last30Revenue: 0,
-    todayOrders: 0,
-  });
+  const [networkError, setNetworkError] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
+  const [monthView, setMonthView] = useState<"current" | "previous">("current");
+  const [stats, setStats] = useState<DashStats>(EMPTY_STATS);
 
-  const load = async (silent = false) => {
+  const load = useCallback(async (silent = false) => {
     if (!token) return;
     if (!silent) setLoading(true);
+    // Önce cache'den yükle — ağ başarısız olursa gösterilecek
+    if (!silent) {
+      const cached = await loadCache<DashStats>("dashboard_stats");
+      if (cached) {
+        setStats(cached);
+        setIsOffline(true);
+        setLoading(false);
+      }
+    }
     try {
       const now = new Date();
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      const last30Start = new Date(now);
-      last30Start.setDate(now.getDate() - 30);
+      const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-      const [invoiceResp, orderList, stockResp] = await Promise.all([
-        getInvoices(token, { page: 1, perPage: 600 }).catch(() => ({ invoices: [] as Invoice[] })),
-        getOrders(token, undefined, { page: 1, perPage: 200, sortBy: "-created_at" }).catch(() => [] as Order[]),
-        getProductStock(token, { page: 1, perPage: 500 }).catch(() => ({ products: [] as any[] })),
+      let fetchFailed = false;
+      const [orderList, stockResp] = await Promise.all([
+        getOrders(token, undefined, { page: 1, perPage: 500, sortBy: "-order_date" }).catch(() => { fetchFailed = true; return [] as Order[]; }),
+        getProductStock(token, { page: 1, perPage: 500 }).catch(() => { fetchFailed = true; return { products: [] as Array<{ id?: string; stock?: number }> }; }),
       ]);
+      setNetworkError(fetchFailed);
 
-      const invoices: Invoice[] = Array.isArray((invoiceResp as any)?.invoices)
-        ? (invoiceResp as any).invoices
-        : Array.isArray(invoiceResp) ? (invoiceResp as any) : [];
+      const monthDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      const prevMonthDays = new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+      const curKeys: string[] = [];
+      const prevKeys: string[] = [];
+      for (let i = 1; i <= monthDays; i++) curKeys.push(localDateKey(new Date(now.getFullYear(), now.getMonth(), i)));
+      for (let i = 1; i <= prevMonthDays; i++) prevKeys.push(localDateKey(new Date(now.getFullYear(), now.getMonth() - 1, i)));
+      const curMap: Record<string, number> = {};
+      const prevMap: Record<string, number> = {};
+      curKeys.forEach((k) => (curMap[k] = 0));
+      prevKeys.forEach((k) => (prevMap[k] = 0));
 
-      // Month invoices
-      const monthInvoices = invoices.filter((inv) => {
-        const d = new Date(String(inv.issue_date || ""));
-        return !Number.isNaN(d.getTime()) && d >= monthStart;
-      });
-      const monthRevenue = monthInvoices.reduce(
-        (s, inv) => s + Number(inv.display_gross_total || inv.gross_total || inv.net_total || 0),
-        0
-      );
-
-      // 30-day daily revenue from invoices
-      const dayKeys: string[] = [];
-      for (let i = 29; i >= 0; i--) {
-        const d = new Date(now);
-        d.setDate(now.getDate() - i);
-        dayKeys.push(d.toISOString().slice(0, 10));
-      }
-      const dayMap: Record<string, number> = {};
-      dayKeys.forEach((k) => (dayMap[k] = 0));
-      let last30 = 0;
-      for (const inv of invoices) {
-        const dKey = String(inv.issue_date || "").slice(0, 10);
-        if (dayMap[dKey] !== undefined) {
-          const amt = Number(inv.display_gross_total || inv.gross_total || inv.net_total || 0);
-          dayMap[dKey] += amt;
-          last30 += amt;
-        }
-      }
-      const sparkArr = dayKeys.map((k) => dayMap[k]);
-      const half = Math.floor(sparkArr.length / 2);
-      const first = sparkArr.slice(0, half).reduce((a, b) => a + b, 0);
-      const second = sparkArr.slice(half).reduce((a, b) => a + b, 0);
-      const trendPct = first > 0 ? ((second - first) / first) * 100 : second > 0 ? 100 : 0;
-
-      // Orders
+      // Orders — revenue + spark charts from order data
       const list = Array.isArray(orderList) ? orderList : [];
-      const monthOrders = list.filter((o: any) => {
+      const monthOrders = list.filter((o) => {
         const ts = orderTimestamp(o);
         return ts > 0 && new Date(ts) >= monthStart;
       });
-      const todayOrders = list.filter((o: any) => {
+      const previousMonthOrders = list.filter((o) => {
+        const ts = orderTimestamp(o);
+        if (ts <= 0) return false;
+        const d = new Date(ts);
+        return d >= prevMonthStart && d <= prevMonthEnd;
+      });
+      const monthRevenue = monthOrders.reduce((s, o) => s + Number(o.total_amount || 0), 0);
+      const prevMonthRevenue = previousMonthOrders.reduce((s, o) => s + Number(o.total_amount || 0), 0);
+
+      for (const o of list) {
+        const ts = orderTimestamp(o);
+        if (ts <= 0) continue;
+        const dKey = localDateKey(new Date(ts));
+        const amt = Number(o.total_amount || 0);
+        if (curMap[dKey] !== undefined) curMap[dKey] += amt;
+        if (prevMap[dKey] !== undefined) prevMap[dKey] += amt;
+      }
+
+      const todayList = list.filter((o) => {
         const ts = orderTimestamp(o);
         return ts > 0 && new Date(ts) >= todayStart;
-      }).length;
-      const pendingOrders = monthOrders.filter((o) => {
-        const k = statusKindFromOrder(o);
-        return k === "warning" || k === "info";
+      });
+      const todayOrders = todayList.length;
+      const todayRevenue = todayList.reduce((s, o) => s + Number(o.total_amount || 0), 0);
+      const pendingOrders = list.filter((o) => {
+        const provider = String(o.integration_provider || o.provider || o.channel || "");
+        return isNewOrderStatus(o, provider);
       }).length;
 
       // Stock
-      const products = Array.isArray((stockResp as any)?.products) ? (stockResp as any).products : [];
-      const lowStock = products.filter((p: any) => Number(p?.stock || 0) > 0 && Number(p?.stock || 0) <= 10).length;
+      const products = stockResp.products ?? [];
+      const lowStock = products.filter((p) => Number(p.stock || 0) > 0 && Number(p.stock || 0) <= 10).length;
+      const shippedOrders = list.filter((o) => {
+        const provider = String(o.integration_provider || o.provider || o.channel || "");
+        return statusKindFromOrder(o, provider) === "info";
+      }).length;
 
-      setStats({
-        monthlyOrders: monthOrders.length,
-        monthlyRevenue: monthRevenue,
+      const sparkCurrentMonth = curKeys.map((k) => curMap[k]);
+      const sparkPreviousMonth = prevKeys.map((k) => prevMap[k]);
+
+      const newStats: DashStats = {
+        currentMonthOrders: monthOrders.length,
+        currentMonthRevenue: monthRevenue,
+        previousMonthOrders: previousMonthOrders.length,
+        previousMonthRevenue: prevMonthRevenue,
         lowStock,
+        shippedOrders,
         pendingOrders,
         recentOrders: list.slice(0, 6),
-        spark: sparkArr,
-        trendPct,
-        last30Revenue: last30,
+        sparkCurrentMonth,
+        sparkPreviousMonth,
         todayOrders,
-      });
-    } catch {}
+        todayRevenue,
+      };
+      setStats(newStats);
+      setIsOffline(false);
+      setNetworkError(false);
+      await saveCache("dashboard_stats", newStats);
+    } catch {
+      // Ağ hatası — cache zaten yukarıda yüklendi, sadece hata bayrağı koy
+      if (stats.recentOrders.length === 0 && !silent) setNetworkError(true);
+    }
     finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [token]);
+
+  useFocusLoad(load, { hasData: stats.recentOrders.length > 0 || stats.currentMonthOrders > 0 });
 
   useEffect(() => {
     load();
@@ -142,6 +192,17 @@ export default function DashboardScreen() {
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="dashboard-screen">
       <AppTopBar />
+      <NetworkErrorBanner visible={networkError} />
+      <NetworkErrorBanner visible={isOffline && !networkError} offline />
+      {loading ? (
+        <ScrollView contentContainerStyle={{ paddingTop: spacing.sm, paddingBottom: 120 }}>
+          <View style={{ paddingHorizontal: spacing.lg, paddingTop: 4 }}>
+            <View style={{ height: 13, marginBottom: 6 }} />
+            <View style={{ height: 32, marginBottom: spacing.sm }} />
+          </View>
+          <DashboardSkeleton />
+        </ScrollView>
+      ) : (
       <ScrollView
         contentContainerStyle={{ paddingBottom: 120 }}
         refreshControl={
@@ -174,48 +235,60 @@ export default function DashboardScreen() {
           <View style={styles.heroTopRow}>
             <View style={styles.heroChip}>
               <SparkleIcon size={11} color="#93C5FD" />
-              <Text style={styles.heroChipText}>SON 30 GÜN</Text>
+              <Text style={styles.heroChipText}>{monthView === "current" ? "BU AY" : "GEÇEN AY"}</Text>
             </View>
-            <View style={[styles.trendChip, { backgroundColor: stats.trendPct >= 0 ? "rgba(34,197,94,0.18)" : "rgba(248,113,113,0.18)" }]}>
-              {stats.trendPct >= 0 ? <TrendUpIcon size={11} color="#22C55E" /> : <TrendDownIcon size={11} color="#F87171" />}
-              <Text style={{ color: stats.trendPct >= 0 ? "#22C55E" : "#F87171", fontSize: 11, fontWeight: "800" }}>
-                {`${stats.trendPct >= 0 ? "+" : ""}${stats.trendPct.toFixed(1)}%`}
+            <PressableScale
+              onPress={() => setMonthView((p) => (p === "current" ? "previous" : "current"))}
+              style={[styles.trendChip, { backgroundColor: "rgba(255,255,255,0.12)" }]}
+            >
+              <Text style={{ color: "#BFDBFE", fontSize: 11, fontWeight: "800" }}>
+                {monthView === "current" ? "Geçen Ay" : "Bu Ay"}
               </Text>
-            </View>
+            </PressableScale>
           </View>
 
-          <Text style={styles.heroLabel}>Toplam Ciro</Text>
+          <Text style={styles.heroLabel}>{monthView === "current" ? "Bu Ay Ciro" : "Geçen Ay Ciro"}</Text>
           <AnimatedNumber
             testID="dash-30day-revenue"
-            value={stats.last30Revenue}
+            value={monthView === "current" ? stats.currentMonthRevenue : stats.previousMonthRevenue}
             format={(n) => formatTry(n)}
             style={styles.heroValue}
           />
 
           <View style={{ marginTop: spacing.xs, marginBottom: 4 }}>
             <Sparkline
-              data={stats.spark.length ? stats.spark : [0, 0]}
+              data={monthView === "current" ? (stats.sparkCurrentMonth.length ? stats.sparkCurrentMonth : [0, 0]) : (stats.sparkPreviousMonth.length ? stats.sparkPreviousMonth : [0, 0])}
               width={320}
               height={56}
               color="#60A5FA"
               fillOpacity={0.35}
+              showAxis
+              axisFormatter={(n) => `${formatCompact(n)}₺`}
             />
           </View>
 
           <View style={styles.heroFoot}>
-            <View style={styles.heroFootCell}>
-              <Text style={styles.heroFootLabel}>Bugün</Text>
-              <Text style={styles.heroFootValue}>{stats.todayOrders}</Text>
+            <View style={[styles.heroFootCell, styles.heroFootTodayCell]}>
+              <View style={styles.heroFootTodayRow}>
+                <View style={styles.liveIndicator} />
+                <Text style={[styles.heroFootLabel, styles.heroFootTodayLabel]}>BUGÜN</Text>
+              </View>
+              <Text style={[styles.heroFootValue, styles.heroFootTodayValue]}>{stats.todayOrders} sip.</Text>
+              {stats.todayRevenue > 0 && (
+                <Text style={{ color: "#4ADE80", fontSize: 11, fontWeight: "700", marginTop: 1 }}>
+                  {formatCompact(stats.todayRevenue)}₺
+                </Text>
+              )}
             </View>
             <View style={styles.heroFootDivider} />
             <View style={styles.heroFootCell}>
-              <Text style={styles.heroFootLabel}>Bu Ay Sip.</Text>
-              <Text style={styles.heroFootValue}>{stats.monthlyOrders}</Text>
+              <Text style={styles.heroFootLabel}>{monthView === "current" ? "Bu Ay Sip." : "Geçen Ay Sip."}</Text>
+              <Text style={styles.heroFootValue}>{monthView === "current" ? stats.currentMonthOrders : stats.previousMonthOrders}</Text>
             </View>
             <View style={styles.heroFootDivider} />
             <View style={styles.heroFootCell}>
-              <Text style={styles.heroFootLabel}>Bu Ay Ciro</Text>
-              <Text style={styles.heroFootValue}>{formatCompact(stats.monthlyRevenue)}₺</Text>
+              <Text style={styles.heroFootLabel}>{monthView === "current" ? "Bu Ay Ciro" : "Geçen Ay Ciro"}</Text>
+              <Text style={styles.heroFootValue}>{formatCompact(monthView === "current" ? stats.currentMonthRevenue : stats.previousMonthRevenue)}₺</Text>
             </View>
           </View>
         </SafeAnimatedView>
@@ -223,21 +296,20 @@ export default function DashboardScreen() {
         {/* KPI grid */}
         <View style={styles.kpiRow}>
           <KPICard
-            label="Bekleyen Sipariş"
+            label="BEKLEYEN SİPARİŞ"
             value={String(stats.pendingOrders)}
             hint="aksiyon bekliyor"
             index={0}
-            accent={colors.warning}
-            onPress={() => router.push("/(tabs)/integrations")}
+            onPress={() => router.push("/orders/pending")}
             testID="kpi-pending-orders"
           />
           <KPICard
-            label="Düşük Stok"
-            value={String(stats.lowStock)}
-            hint="≤ 10 adet"
+            label="KARGODAKİ SİPARİŞLER"
+            value={String(stats.shippedOrders)}
+            hint="kargoya verilmiş"
             index={1}
-            accent={colors.error}
-            testID="kpi-low-stock"
+            onPress={() => router.push("/orders/shipped")}
+            testID="kpi-shipped-orders"
           />
         </View>
 
@@ -268,8 +340,9 @@ export default function DashboardScreen() {
             </View>
           ) : (
             stats.recentOrders.map((o, idx) => {
-              const provider = String((o as any)?.integration_provider || (o as any)?.provider || o.channel || "");
+              const provider = String(o.integration_provider || o.provider || o.channel || "");
               const kind = statusKindFromOrder(o, provider);
+              const trackingNo = getOrderTrackingNo(o);
               return (
                 <SafeAnimatedView key={o.id} entering={FadeInDown.delay(idx * 60).springify().damping(18)}>
                   <PressableScale
@@ -285,10 +358,15 @@ export default function DashboardScreen() {
                       <Text style={[styles.orderCustomer, { color: colors.textTertiary }]} numberOfLines={1}>
                         {o.customer_name || "Müşteri"} · {relativeDateLabel(o)}
                       </Text>
+                      {trackingNo ? (
+                        <Text style={[styles.orderCustomer, { color: colors.textTertiary, marginTop: 3 }]} numberOfLines={2}>
+                          Kargo Takip: {trackingNo}
+                        </Text>
+                      ) : null}
                     </View>
                     <View style={{ alignItems: "flex-end", gap: 4 }}>
                       <Text style={[styles.orderAmount, { color: colors.textPrimary }]}>{formatTry(o.total_amount || 0)}</Text>
-                      <StatusBadge label={displayOrderStatus(o, provider)} kind={kind} size="sm" />
+                      <StatusIconBadge kind={kind} />
                     </View>
                   </PressableScale>
                 </SafeAnimatedView>
@@ -321,6 +399,7 @@ export default function DashboardScreen() {
           </PressableScale>
         </SafeAnimatedView>
       </ScrollView>
+      )}
     </View>
   );
 }
@@ -347,6 +426,11 @@ const styles = StyleSheet.create({
   heroFootDivider: { width: 1, height: 24, backgroundColor: "rgba(255,255,255,0.1)" },
   heroFootLabel: { color: "#94A3B8", fontSize: 10, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase" },
   heroFootValue: { color: "#FFFFFF", fontSize: 16, fontWeight: "800", marginTop: 2, letterSpacing: -0.3 },
+  heroFootTodayCell: { alignItems: "center" },
+  heroFootTodayRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  heroFootTodayLabel: { color: "#4ADE80", letterSpacing: 0.8 },
+  heroFootTodayValue: { color: "#4ADE80", fontSize: 22, letterSpacing: -0.8 },
+  liveIndicator: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#4ADE80" },
   kpiRow: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
   sectionCard: {
     marginHorizontal: spacing.lg,
@@ -373,4 +457,22 @@ const styles = StyleSheet.create({
   actionIconWrap: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", marginBottom: 4 },
   actionTitle: { fontSize: 14, fontWeight: "700" },
   actionDesc: { fontSize: 11, fontWeight: "500" },
+});
+
+function StatusIconBadge({ kind }: { kind: "success" | "info" | "warning" | "error" | "neutral" }) {
+  if (kind === "success") return <View style={[statusStyles.badge, { backgroundColor: "rgba(22,163,74,0.15)" }]}><CheckIcon size={14} color="#22C55E" /></View>;
+  if (kind === "info") return <View style={[statusStyles.badge, { backgroundColor: "rgba(37,99,235,0.15)" }]}><TruckIcon size={14} color="#3B82F6" /></View>;
+  if (kind === "warning") return <View style={[statusStyles.badge, { backgroundColor: "rgba(245,158,11,0.18)" }]}><ClockIcon size={14} color="#F59E0B" /></View>;
+  if (kind === "error") return <View style={[statusStyles.badge, { backgroundColor: "rgba(239,68,68,0.15)" }]}><CloseIcon size={14} color="#EF4444" /></View>;
+  return <View style={[statusStyles.badge, { backgroundColor: "rgba(148,163,184,0.16)" }]}><PackageIcon size={14} color="#94A3B8" /></View>;
+}
+
+const statusStyles = StyleSheet.create({
+  badge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });

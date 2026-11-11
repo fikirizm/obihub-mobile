@@ -15,6 +15,8 @@ import { formatTry } from "../../src/utils";
 import { PressableScale } from "../../src/components/KPICard";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { ArrowLeftIcon, CheckIcon, DownloadIcon, ReceiptIcon } from "../../src/components/Icons";
+import { NetworkErrorBanner } from "../../src/components/NetworkErrorBanner";
+import { saveCache, loadCache } from "../../src/offlineCache";
 import type { Invoice } from "../../src/types";
 
 export default function InvoiceDetail() {
@@ -25,17 +27,29 @@ export default function InvoiceDetail() {
   const insets = useSafeAreaInsets();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isOffline, setIsOffline] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [officialBusy, setOfficialBusy] = useState(false);
+
+  const cacheKey = `invoice_detail_${invoiceId}`;
 
   const load = async () => {
     if (!token || !invoiceId) return;
     setLoading(true);
+    const cached = await loadCache<Invoice>(cacheKey);
+    if (cached) {
+      setInvoice(cached);
+      setIsOffline(true);
+      setLoading(false);
+    }
     try {
       const inv = await getInvoiceDetail(token, invoiceId);
       setInvoice(inv);
-    } catch {}
-    finally {
+      setIsOffline(false);
+      await saveCache(cacheKey, inv);
+    } catch {
+      if (!cached) setLoading(false);
+    } finally {
       setLoading(false);
     }
   };
@@ -107,6 +121,7 @@ export default function InvoiceDetail() {
     <View style={[styles.wrap, { backgroundColor: colors.background, paddingTop: insets.top }]}>
       <Stack.Screen options={{ headerShown: false }} />
 
+      <NetworkErrorBanner visible={isOffline} offline />
       <View style={styles.header}>
         <PressableScale
           testID="back-btn"
@@ -156,7 +171,7 @@ export default function InvoiceDetail() {
             testID="officialize"
             onPress={handleOfficialize}
             disabled={officialBusy || isOfficial}
-            style={[styles.actionBtnSecondary, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm, (officialBusy || isOfficial) && { opacity: 0.55 }]}
+            style={[styles.actionBtnSecondary, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm, (officialBusy || isOfficial) ? { opacity: 0.55 } : undefined]}
           >
             {officialBusy ? <ActivityIndicator color={colors.success} /> : (
               <>

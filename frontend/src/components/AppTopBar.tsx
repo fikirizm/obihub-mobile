@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../auth/AuthProvider";
 import { useTheme } from "../theme/ThemeProvider";
 import { fontWeight, radius, spacing } from "../theme/tokens";
-import { LogoutIcon, MoonIcon, SunIcon } from "./Icons";
+import { BellIcon, LogoutIcon, MoonIcon, SunIcon } from "./Icons";
 import { PressableScale } from "./KPICard";
 
 const ICO = require("../../assets/obihub/obihub-ico.png");
@@ -12,7 +12,7 @@ const ICO = require("../../assets/obihub/obihub-ico.png");
 export function AppTopBar() {
   const insets = useSafeAreaInsets();
   const { colors, mode, toggle, shadows } = useTheme();
-  const { user, logout } = useAuth();
+  const { user, logout, unreadNotifications, clearNotifications } = useAuth();
 
   return (
     <View style={[styles.wrap, { paddingTop: Math.max(insets.top, 12) + 4, backgroundColor: colors.background }]}>
@@ -32,6 +32,18 @@ export function AppTopBar() {
         </View>
 
         <View style={styles.right}>
+          <PressableScale
+            onPress={clearNotifications}
+            testID="header-notifications"
+            style={[styles.btn, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}
+          >
+            <BellIcon size={18} color={colors.textSecondary} />
+            {unreadNotifications > 0 ? (
+              <View style={[styles.badge, { backgroundColor: colors.error }]}>
+                <Text style={styles.badgeText}>{unreadNotifications > 9 ? "9+" : String(unreadNotifications)}</Text>
+              </View>
+            ) : null}
+          </PressableScale>
           <PressableScale
             onPress={toggle}
             testID="header-theme-toggle"
@@ -83,4 +95,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
   },
+  badge: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    minWidth: 15,
+    height: 15,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3,
+  },
+  badgeText: { color: "#FFFFFF", fontSize: 9, fontWeight: "800", lineHeight: 10 },
 });

@@ -88,3 +88,6 @@ credentials.json
 *.pem
 *.key
 .credentials
+
+# Yerel yedek klasörleri
+frontend_backup_*/

@@ -1,4 +1,4 @@
-import type { Order } from "../types";
+import type { Order } from "./types";
 
 export const PLATFORM_LOGOS = {
   woo: require("../assets/obihub/platform-woo.png"),
@@ -36,7 +36,7 @@ export function formatCompact(n: number | string | undefined | null) {
   return formatNumber(v, 0);
 }
 
-export function cleanOrderNo(raw: any) {
+export function cleanOrderNo(raw: unknown) {
   return String(raw || "")
     .trim()
     .replace(/^(WC|TY|HB)[-_]/i, "")
@@ -46,8 +46,8 @@ export function cleanOrderNo(raw: any) {
 
 export function displayOrderNo(order: Order) {
   const candidates = [
-    (order as any)?.trendyol_order_number,
-    (order as any)?.hepsiburada_order_number,
+    order.trendyol_order_number,
+    order.hepsiburada_order_number,
     order.channel_order_id,
     order.id,
   ];
@@ -106,18 +106,18 @@ export function trStatus(status: string) {
 export function displayOrderStatus(order: Order, providerHint?: string) {
   const provider = String(providerHint || order.channel || "").toLowerCase();
   if (provider.includes("woo")) {
-    return trStatus(String((order as any)?.wc_status || order.status || ""));
+    return trStatus(String(order.wc_status || order.status || ""));
   }
   if (provider.includes("trendyol")) {
-    const raw = String((order as any)?.trendyol_status || order.status || "")
+    const raw = String(order.trendyol_status || order.status || "")
       .trim()
       .toLowerCase()
       .replace(/\s+/g, "")
       .replace(/_/g, "");
-    return trendyolStatusMap[raw] || trStatus((order as any)?.trendyol_status || order.status);
+    return trendyolStatusMap[raw] || trStatus(order.trendyol_status || order.status);
   }
   if (provider.includes("hepsiburada")) {
-    return trStatus(String((order as any)?.hepsiburada_status || order.status || ""));
+    return trStatus(String(order.hepsiburada_status || order.status || ""));
   }
   return trStatus(order.status);
 }
@@ -127,10 +127,10 @@ export type StatusKind = "success" | "info" | "warning" | "error" | "neutral";
 export function statusKindFromOrder(order: Order, providerHint?: string): StatusKind {
   const shown = String(displayOrderStatus(order, providerHint) || "").toLowerCase();
   const raw = String(
-    (order as any)?.hepsiburada_status ||
-      (order as any)?.trendyol_status ||
-      (order as any)?.wc_status ||
-      (order as any)?.cargo_status ||
+    order.hepsiburada_status ||
+      order.trendyol_status ||
+      order.wc_status ||
+      order.cargo_status ||
       order.status ||
       ""
   )
@@ -153,7 +153,26 @@ export function statusKindFromOrder(order: Order, providerHint?: string): Status
   return "neutral";
 }
 
-export function providerKey(s: any): "woo" | "trendyol" | "hepsiburada" | "n11" | "other" {
+export function isNewOrderStatus(order: Order, providerHint?: string): boolean {
+  const shown = String(displayOrderStatus(order, providerHint) || "").toLowerCase();
+  const raw = String(
+    order.hepsiburada_status ||
+      order.trendyol_status ||
+      order.wc_status ||
+      order.cargo_status ||
+      order.status ||
+      ""
+  )
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/_/g, "")
+    .replace(/-/g, "");
+  if (shown.includes("kargo") || shown.includes("tamam") || shown.includes("teslim")) return false;
+  if (raw.includes("cargo") || raw.includes("ship") || raw.includes("transit") || raw.includes("deliver")) return false;
+  return shown.includes("hazır") || shown.includes("bekliyor") || raw.includes("new") || raw.includes("created") || raw.includes("pending") || raw.includes("processing");
+}
+
+export function providerKey(s: unknown): "woo" | "trendyol" | "hepsiburada" | "n11" | "other" {
   const v = String(s || "").toLowerCase();
   if (v.includes("woo")) return "woo";
   if (v.includes("trendyol")) return "trendyol";
@@ -193,7 +212,7 @@ export function providerColor(p: string, fallback: string): string {
 }
 
 export function orderTimestamp(order: Order) {
-  const candidates = [(order as any)?.order_date, (order as any)?.created_at, (order as any)?.updated_at];
+  const candidates = [order.order_date, order.created_at, order.updated_at];
   for (const c of candidates) {
     if (!c) continue;
     const ms = Date.parse(String(c));
@@ -227,4 +246,101 @@ export function relativeDateLabel(order: Order) {
     "Aralık",
   ];
   return `${dt.getDate()} ${trMonths[dt.getMonth()]} ${dt.getFullYear()}`;
+}
+
+export function formatOrderDateTime(order: Order): string {
+  const candidates = [order.order_date, order.created_at, order.updated_at];
+  let dt: Date | null = null;
+  for (const c of candidates) {
+    if (!c) continue;
+    const parsed = new Date(String(c));
+    if (!Number.isNaN(parsed.getTime())) {
+      dt = parsed;
+      break;
+    }
+  }
+  if (!dt) return "-";
+  try {
+    return new Intl.DateTimeFormat("tr-TR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(dt);
+  } catch {
+    return dt.toISOString().slice(0, 16).replace("T", " ");
+  }
+}
+
+function deepFindTracking(obj: any, depth = 0): string {
+  if (!obj || depth > 4) return "";
+  if (typeof obj === "string") {
+    const v = obj.trim();
+    if (v.length >= 6 && /[A-Za-z]/.test(v) && /\d/.test(v)) return v;
+    return "";
+  }
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const found = deepFindTracking(item, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  }
+  if (typeof obj !== "object") return "";
+  for (const [k, v] of Object.entries(obj)) {
+    const key = String(k).toLowerCase();
+    if (/(tracking|takip|awb|waybill|kargo.*no|cargo.*no)/.test(key)) {
+      const asStr = String(v ?? "").trim();
+      if (asStr) return asStr;
+    }
+  }
+  for (const v of Object.values(obj)) {
+    const found = deepFindTracking(v, depth + 1);
+    if (found) return found;
+  }
+  return "";
+}
+
+export function getOrderTrackingNo(order: Order): string {
+  const metaDataMatch = Array.isArray(order.meta_data)
+    ? order.meta_data.find((m) => /(tracking|takip|awb|waybill|kargo)/i.test(String(m?.key || "")))?.value
+    : undefined;
+  const metadataMatch = Array.isArray(order.metadata)
+    ? order.metadata.find((m) => /(tracking|takip|awb|waybill|kargo)/i.test(String(m?.key || "")))?.value
+    : undefined;
+  const metaObj = !Array.isArray(order.metadata) ? order.metadata : undefined;
+
+  const candidates = [
+    order.tracking_number,
+    order.trackingNumber,
+    order.cargo_tracking_number,
+    order.cargoTrackingNumber,
+    order.cargo_tracking,
+    order.tracking_code,
+    order.trackingCode,
+    order.kargo_takip_no,
+    order.kargoTakipNo,
+    order.awb,
+    order.waybill_no,
+    order.waybillNo,
+    order.cargo?.tracking_number,
+    order.cargo?.trackingNumber,
+    order.shipping?.tracking_number,
+    order.shipping?.trackingNumber,
+    order.shipment?.tracking_number,
+    order.shipment?.tracking_code,
+    order.shipment?.trackingNumber,
+    order.meta?.tracking_number,
+    order.meta?.trackingNumber,
+    metaObj?.tracking_number,
+    metaObj?.trackingNumber,
+    metaDataMatch,
+    metadataMatch,
+  ];
+  for (const c of candidates) {
+    const v = String(c || "").trim();
+    if (v) return v;
+  }
+  return deepFindTracking(order);
 }

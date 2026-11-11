@@ -165,6 +165,18 @@ export const LogoutIcon = ({ size = 20, color = "#0F172A", strokeWidth = 2 }: Ic
   </Svg>
 );
 
+export const BellIcon = ({ size = 20, color = "#0F172A", strokeWidth = 2 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M8 17h8l-1.2-1.8a6.2 6.2 0 0 1-1-3.4V10a3.8 3.8 0 1 0-7.6 0v1.8a6.2 6.2 0 0 1-1 3.4L8 17Z"
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeLinejoin="round"
+    />
+    <Path d="M10.2 18.2a1.8 1.8 0 0 0 3.6 0" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+  </Svg>
+);
+
 export const PackageIcon = ({ size = 20, color = "#0F172A", strokeWidth = 2 }: IconProps) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path d="M12 3 4 7v10l8 4 8-4V7l-8-4Z" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round" />
@@ -211,6 +223,13 @@ export const CloseIcon = ({ size = 20, color = "#0F172A", strokeWidth = 2 }: Ico
   </Svg>
 );
 
+export const TrashIcon = ({ size = 18, color = "#EF4444", strokeWidth = 2 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M4 7h16M10 4h4m-7 3 1 12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2l1-12" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M10 11v6M14 11v6" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+  </Svg>
+);
+
 export const TagIcon = ({ size = 18, color = "#0F172A", strokeWidth = 2 }: IconProps) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path d="m4 13 9-9 7 .5.5 7-9 9z" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round" />
@@ -222,6 +241,27 @@ export const SparkleIcon = ({ size = 16, color = "#60A5FA", strokeWidth = 2 }: I
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path d="M12 3v4M12 17v4M3 12h4M17 12h4" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
     <Path d="M12 8a4 4 0 0 0 4 4 4 4 0 0 0-4 4 4 4 0 0 0-4-4 4 4 0 0 0 4-4Z" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round" />
+  </Svg>
+);
+
+export const FileTextIcon = ({ size = 24, color = "#0F172A", strokeWidth = 2 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round" />
+    <Path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+export const LinkIcon = ({ size = 20, color = "#0F172A", strokeWidth = 2 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+    <Path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+export const MailIcon = ({ size = 20, color = "#0F172A", strokeWidth = 2 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round" />
+    <Path d="M22 6l-10 7L2 6" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
   </Svg>
 );
 

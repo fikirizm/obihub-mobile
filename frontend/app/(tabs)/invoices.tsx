@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, FlatList, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
@@ -12,6 +12,12 @@ import { formatTry } from "../../src/utils";
 import { PressableScale } from "../../src/components/KPICard";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { CheckIcon, ClockIcon, ReceiptIcon, SearchIcon } from "../../src/components/Icons";
+import { InvoiceCardSkeleton } from "../../src/components/Skeleton";
+import { EmptyState } from "../../src/components/EmptyState";
+import { NetworkErrorBanner } from "../../src/components/NetworkErrorBanner";
+import { saveCache, loadCache } from "../../src/offlineCache";
+import { useFocusLoad } from "../../src/hooks/useFocusLoad";
+import { useDebounce } from "../../src/hooks/useDebounce";
 import type { Invoice } from "../../src/types";
 
 export default function InvoicesScreen() {
@@ -20,6 +26,7 @@ export default function InvoicesScreen() {
   const [list, setList] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const [search, setSearch] = useState("");
   const [searchFocus, setSearchFocus] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
@@ -27,18 +34,37 @@ export default function InvoicesScreen() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   });
 
-  const load = async (silent = false) => {
+  const load = useCallback(async (silent = false) => {
     if (!token) return;
     if (!silent) setLoading(true);
+    if (!silent) {
+      const cached = await loadCache<Invoice[]>("invoices_list");
+      if (cached && cached.length > 0) {
+        setList(cached);
+        setIsOffline(true);
+        setLoading(false);
+      }
+    }
     try {
-      const data = await getInvoices(token, { page: 1, perPage: 100 });
-      setList(Array.isArray(data?.invoices) ? data.invoices : []);
-    } catch {}
-    finally {
+      const data = await getInvoices(token, { page: 1, perPage: 600 });
+      const invoices = Array.isArray(data?.invoices) ? data.invoices : [];
+      setList(invoices);
+      setIsOffline(false);
+      await saveCache("invoices_list", invoices);
+    } catch {
+      if (list.length === 0 && !silent) {
+        const cached = await loadCache<Invoice[]>("invoices_list");
+        if (cached) { setList(cached); setIsOffline(true); }
+      }
+    } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [token]);
+
+  const debouncedSearch = useDebounce(search, 300);
+
+  useFocusLoad(load, { hasData: list.length > 0 });
 
   useEffect(() => {
     load();
@@ -60,7 +86,7 @@ export default function InvoicesScreen() {
   }, [list]);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
     return list
       .filter((i) => {
         const d = i.issue_date ? new Date(i.issue_date) : null;
@@ -76,7 +102,7 @@ export default function InvoicesScreen() {
           String(i.contact_name || i.contact?.name || "").toLowerCase().includes(q)
         );
       });
-  }, [list, search, selectedMonth]);
+  }, [list, debouncedSearch, selectedMonth]);
 
   const monthTotals = useMemo(() => {
     let total = 0;
@@ -97,6 +123,7 @@ export default function InvoicesScreen() {
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="invoices-screen">
       <AppTopBar />
+      <NetworkErrorBanner visible={isOffline} offline />
       <View style={{ paddingHorizontal: spacing.lg, paddingTop: 4 }}>
         <Text style={[styles.eyebrow, { color: colors.primary }]}>FATURALAR</Text>
         <Text style={[styles.title, { color: colors.textPrimary }]}>Paraşüt</Text>
@@ -162,14 +189,21 @@ export default function InvoicesScreen() {
       </View>
 
       {loading ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
+        <ScrollView
+          contentContainerStyle={{ padding: spacing.lg, gap: spacing.sm }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={colors.primary} />}
+        >
+          {[0, 1, 2, 3, 4].map((i) => <InvoiceCardSkeleton key={i} />)}
+        </ScrollView>
       ) : (
         <FlatList
           data={filtered}
           keyExtractor={(i) => i.id}
           contentContainerStyle={{ padding: spacing.lg, gap: spacing.sm, paddingBottom: 140 }}
+          initialNumToRender={12}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          removeClippedSubviews
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -181,15 +215,17 @@ export default function InvoicesScreen() {
             />
           }
           ListEmptyComponent={
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIcon, { backgroundColor: colors.surfaceMuted, borderColor: colors.borderSubtle }]}>
-                <ReceiptIcon size={26} color={colors.textTertiary} />
-              </View>
-              <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>Fatura bulunamadı</Text>
-              <Text style={[styles.emptyDesc, { color: colors.textTertiary }]}>
-                Bu dönem için Paraşüt'te fatura yok ya da filtreyi değiştirmen gerekebilir.
-              </Text>
-            </View>
+            <EmptyState
+              icon={<ReceiptIcon size={30} color={colors.textTertiary} />}
+              title={search.trim() ? "Sonuç bulunamadı" : "Bu ayda fatura yok"}
+              description={
+                search.trim()
+                  ? `"${search.trim()}" için eşleşen fatura bulunamadı. Farklı bir arama dene.`
+                  : "Bu dönemde Paraşüt'te oluşturulmuş fatura bulunmuyor. Başka bir ayı seç veya filtreyi temizle."
+              }
+              actionLabel={search.trim() ? "Aramayı Temizle" : undefined}
+              onAction={search.trim() ? () => setSearch("") : undefined}
+            />
           }
           renderItem={({ item, index }) => {
             const isOfficial = item.can_officialize === false;

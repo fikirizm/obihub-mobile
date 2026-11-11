@@ -1,0 +1,12 @@
+.git
+.expo
+.expo-shared
+.metro-cache
+node_modules
+dist
+build
+coverage
+*.log
+
+# EAS prebuilds iOS from app.json so icons, notifications and version stay in sync.
+ios

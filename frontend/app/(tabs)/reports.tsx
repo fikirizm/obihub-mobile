@@ -1,15 +1,13 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
   Image,
-  Modal,
   Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
@@ -19,78 +17,37 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { AppTopBar } from "../../src/components/AppTopBar";
 import { fontWeight, radius, spacing } from "../../src/theme/tokens";
-import { getInvoices, getOrders, getSalesReportsOverview } from "../../src/api";
+import { getOrders, getSalesReportsOverview } from "../../src/api";
 import { formatCompact, formatTry, providerColor, providerLabel, orderTimestamp } from "../../src/utils";
 import { DonutChart, Sparkline, AnimatedNumber } from "../../src/components/Charts";
 import { PressableScale } from "../../src/components/KPICard";
+import { CheckIcon, FilterIcon, PackageIcon, SparkleIcon, TrendDownIcon, TrendUpIcon, ZapIcon } from "../../src/components/Icons";
+import { NetworkErrorBanner } from "../../src/components/NetworkErrorBanner";
+import { saveCache, loadCache } from "../../src/offlineCache";
+import { useFocusLoad } from "../../src/hooks/useFocusLoad";
+import { InsightRow } from "../../src/components/reports/InsightRow";
+import { DateRangeModal } from "../../src/components/reports/DateRangeModal";
 import {
-  CheckIcon,
-  CloseIcon,
-  FilterIcon,
-  InboxIcon,
-  PackageIcon,
-  SparkleIcon,
-  TrendDownIcon,
-  TrendUpIcon,
-  WalletIcon,
-  ZapIcon,
-} from "../../src/components/Icons";
-import type { Invoice, Order, ReportsOverview } from "../../src/types";
+  localDateKey,
+  parseAnyDate,
+  startOfDay,
+  endOfDay,
+  daysAgo,
+  presetRanges,
+  formatDateTr,
+  rangeDays,
+  normalizeReportPeriod,
+  periodDaysFromRangeKey,
+  rangeLabel,
+  formatDayLabelFull,
+  type RangeT,
+} from "../../src/components/reports/reportUtils";
+import type { Order, ReportsOverview } from "../../src/types";
+
+type ReportsCache = { reports: ReportsOverview; orders: Order[]; rangeKey: string };
+
 
 const SCREEN_W = Dimensions.get("window").width;
-
-type RangeT = { start: Date; end: Date; key: string; label: string };
-
-function startOfDay(d: Date) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-function endOfDay(d: Date) {
-  const x = new Date(d);
-  x.setHours(23, 59, 59, 999);
-  return x;
-}
-function daysAgo(n: number) {
-  const x = new Date();
-  x.setDate(x.getDate() - n);
-  return startOfDay(x);
-}
-function presetRanges(): RangeT[] {
-  const today = startOfDay(new Date());
-  const end = endOfDay(new Date());
-  const yest = startOfDay(new Date(Date.now() - 86400000));
-  const thisMonthStart = startOfDay(new Date(today.getFullYear(), today.getMonth(), 1));
-  const lastMonthEnd = endOfDay(new Date(today.getFullYear(), today.getMonth(), 0));
-  const lastMonthStart = startOfDay(new Date(lastMonthEnd.getFullYear(), lastMonthEnd.getMonth(), 1));
-  const yearStart = startOfDay(new Date(today.getFullYear(), 0, 1));
-  return [
-    { key: "today", label: "Bugün", start: today, end },
-    { key: "yesterday", label: "Dün", start: yest, end: endOfDay(yest) },
-    { key: "7d", label: "Son 7 gün", start: daysAgo(6), end },
-    { key: "14d", label: "Son 14 gün", start: daysAgo(13), end },
-    { key: "30d", label: "Son 30 gün", start: daysAgo(29), end },
-    { key: "90d", label: "Son 90 gün", start: daysAgo(89), end },
-    { key: "thisMonth", label: "Bu ay", start: thisMonthStart, end },
-    { key: "lastMonth", label: "Geçen ay", start: lastMonthStart, end: lastMonthEnd },
-    { key: "ytd", label: "Yıl başından", start: yearStart, end },
-  ];
-}
-
-function formatDateTr(d: Date) {
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  return `${dd}.${mm}.${d.getFullYear()}`;
-}
-
-function rangeDays(r: RangeT) {
-  return Math.max(1, Math.round((r.end.getTime() - r.start.getTime()) / 86400000) + 1);
-}
-
-function rangeLabel(r: RangeT) {
-  if (r.key !== "custom") return r.label;
-  return `${formatDateTr(r.start)} – ${formatDateTr(r.end)}`;
-}
 
 export default function ReportsScreen() {
   const { token } = useAuth();
@@ -102,49 +59,8 @@ export default function ReportsScreen() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [previousRevenue, setPreviousRevenue] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
-
-  const buildFromInvoices = async (start: Date, end: Date): Promise<ReportsOverview | null> => {
-    if (!token) return null;
-    const inv = await getInvoices(token, { page: 1, perPage: 600 }).catch(() => ({ invoices: [] as Invoice[] }));
-    const list: any[] = Array.isArray((inv as any)?.invoices) ? (inv as any).invoices : [];
-
-    const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
-    const dayKeys: string[] = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(end);
-      d.setDate(end.getDate() - i);
-      dayKeys.push(d.toISOString().slice(0, 10));
-    }
-    const dayMap: Record<string, { revenue: number; orders: number }> = {};
-    dayKeys.forEach((k) => (dayMap[k] = { revenue: 0, orders: 0 }));
-    const channelMap: Record<string, { provider: string; label: string; revenue: number; orders: number }> = {};
-    let totalRevenue = 0;
-    let totalOrders = 0;
-
-    for (const i of list) {
-      const issueRaw = String(i?.issue_date || "");
-      const dKey = issueRaw.slice(0, 10);
-      if (!dayMap[dKey]) continue;
-      const amt = Number(i?.display_gross_total || i?.gross_total || i?.net_total || 0) || 0;
-      dayMap[dKey].revenue += amt;
-      dayMap[dKey].orders += 1;
-      const provider = String(i?.platform_provider || i?.platform || "other").toLowerCase() || "other";
-      const label = String(i?.platform || provider || "Diğer");
-      if (!channelMap[provider]) channelMap[provider] = { provider, label, revenue: 0, orders: 0 };
-      channelMap[provider].revenue += amt;
-      channelMap[provider].orders += 1;
-      totalRevenue += amt;
-      totalOrders += 1;
-    }
-    return {
-      period_days: days,
-      total_revenue: totalRevenue,
-      total_orders: totalOrders,
-      average_order_value: totalOrders > 0 ? totalRevenue / totalOrders : 0,
-      daily_sales: dayKeys.map((k) => ({ date: k, revenue: dayMap[k].revenue, orders: dayMap[k].orders })),
-      channel_breakdown: Object.values(channelMap).sort((a, b) => b.revenue - a.revenue),
-    } as ReportsOverview;
-  };
+  const [isOffline, setIsOffline] = useState(false);
+  const loadSeq = useRef(0);
 
   const buildFromOrders = (orderList: Order[], start: Date, end: Date): ReportsOverview => {
     const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
@@ -152,7 +68,7 @@ export default function ReportsScreen() {
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date(end);
       d.setDate(end.getDate() - i);
-      dayKeys.push(d.toISOString().slice(0, 10));
+      dayKeys.push(localDateKey(d));
     }
     const dayMap: Record<string, { revenue: number; orders: number }> = {};
     dayKeys.forEach((k) => (dayMap[k] = { revenue: 0, orders: 0 }));
@@ -164,12 +80,12 @@ export default function ReportsScreen() {
       if (!ts) continue;
       const d = new Date(ts);
       if (d < start || d > end) continue;
-      const dKey = d.toISOString().slice(0, 10);
+      const dKey = localDateKey(d);
       if (!dayMap[dKey]) continue;
       const amt = Number(o.total_amount || 0);
       dayMap[dKey].revenue += amt;
       dayMap[dKey].orders += 1;
-      const provider = String((o as any)?.integration_provider || (o as any)?.provider || o.channel || "other").toLowerCase();
+      const provider = String(o.integration_provider || o.provider || o.channel || "other").toLowerCase();
       const label = providerLabel(provider);
       if (!channelMap[provider]) channelMap[provider] = { provider, label, revenue: 0, orders: 0 };
       channelMap[provider].revenue += amt;
@@ -187,45 +103,42 @@ export default function ReportsScreen() {
     } as ReportsOverview;
   };
 
-  const computePreviousRevenue = (orderList: Order[], allInvoices: any[], r: RangeT) => {
+  const computePreviousRevenue = (orderList: Order[], r: RangeT) => {
     const days = rangeDays(r);
     const prevEnd = new Date(r.start.getTime() - 1);
     const prevStart = new Date(prevEnd);
     prevStart.setDate(prevEnd.getDate() - (days - 1));
     let prev = 0;
-    for (const inv of allInvoices) {
-      const dStr = String(inv?.issue_date || "").slice(0, 10);
-      const d = new Date(dStr);
-      if (Number.isNaN(d.getTime())) continue;
-      if (d >= prevStart && d <= prevEnd) {
-        prev += Number(inv?.display_gross_total || inv?.gross_total || inv?.net_total || 0);
-      }
-    }
-    if (prev === 0) {
-      // fallback to orders
-      for (const o of orderList) {
-        const ts = orderTimestamp(o);
-        if (!ts) continue;
-        const d = new Date(ts);
-        if (d >= prevStart && d <= prevEnd) prev += Number(o.total_amount || 0);
-      }
+    for (const o of orderList) {
+      const ts = orderTimestamp(o);
+      if (!ts) continue;
+      const d = new Date(ts);
+      if (d >= prevStart && d <= prevEnd) prev += Number(o.total_amount || 0);
     }
     return prev;
   };
 
-  const load = async (silent = false) => {
+  const load = useCallback(async (silent = false) => {
     if (!token) return;
+    const seq = ++loadSeq.current;
     if (!silent) setLoading(true);
+    // Offline cache — sadece aynı range key için
+    if (!silent) {
+      const cached = await loadCache<ReportsCache>("reports_cache");
+      if (cached && cached.rangeKey === range.key && cached.reports) {
+        setReports(cached.reports);
+        setOrders(cached.orders || []);
+        setIsOffline(true);
+        setLoading(false);
+      }
+    }
     try {
       const days = rangeDays(range);
-      const [apiResp, ordersRaw, invResp] = await Promise.all([
-        getSalesReportsOverview(token, days).catch(() => null),
-        getOrders(token, undefined, { page: 1, perPage: 300, sortBy: "-created_at" }).catch(() => [] as Order[]),
-        getInvoices(token, { page: 1, perPage: 600 }).catch(() => ({ invoices: [] as Invoice[] })),
-      ]);
-      const orderList = Array.isArray(ordersRaw) ? ordersRaw : [];
-      setOrders(orderList);
-
+      const isApiWindow = ["7d", "30d", "90d", "thisMonth"].includes(range.key);
+      const normalizedDays = periodDaysFromRangeKey(range.key, days);
+      const apiResp = isApiWindow
+        ? await getSalesReportsOverview(token, normalizedDays, { startDate: range.start, endDate: range.end }).catch(() => null)
+        : null;
       const apiHasData =
         apiResp &&
         (Number(apiResp.total_revenue || 0) > 0 ||
@@ -233,29 +146,38 @@ export default function ReportsScreen() {
           (apiResp.daily_sales || []).length > 0 ||
           (apiResp.channel_breakdown || []).length > 0);
 
+      const ordersRaw = await getOrders(token, undefined, { page: 1, perPage: 500, sortBy: "-order_date" }).catch(() => [] as Order[]);
+      if (seq !== loadSeq.current) return;
+      const orderList = Array.isArray(ordersRaw) ? ordersRaw : [];
+      setOrders(orderList);
+
       let result: ReportsOverview | null = null;
-      if (apiHasData) {
-        result = apiResp;
+      const shouldUseApiDirectly = apiHasData && isApiWindow;
+      if (shouldUseApiDirectly) {
+        result = apiResp as ReportsOverview;
       } else {
-        const fromInv = await buildFromInvoices(range.start, range.end).catch(() => null);
-        if (fromInv && (fromInv.total_revenue ?? 0) > 0) {
-          result = fromInv;
-        } else {
-          // fallback to orders
-          const fromOrders = buildFromOrders(orderList, range.start, range.end);
-          result = fromOrders.total_revenue > 0 ? fromOrders : (fromInv || apiResp || null);
-        }
+        const fromOrders = buildFromOrders(orderList, range.start, range.end);
+        result = fromOrders;
+      }
+      if (seq !== loadSeq.current) return;
+      if (result && apiHasData && Array.isArray(apiResp?.status_breakdown)) {
+        result.status_breakdown = apiResp?.status_breakdown;
       }
       setReports(result);
+      setIsOffline(false);
+      if (result) {
+        await saveCache("reports_cache", { reports: result, orders: orderList, rangeKey: range.key });
+      }
 
-      const allInvoices: any[] = Array.isArray((invResp as any)?.invoices) ? (invResp as any).invoices : [];
-      setPreviousRevenue(computePreviousRevenue(orderList, allInvoices, range));
+      setPreviousRevenue(computePreviousRevenue(orderList, range));
     } catch {}
     finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [token, range]);
+
+  useFocusLoad(load, { hasData: reports !== null });
 
   useEffect(() => {
     load();
@@ -269,8 +191,6 @@ export default function ReportsScreen() {
 
   const trendPct = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : totalRevenue > 0 ? 100 : 0;
   const sparkData = dailyData.map((d) => Number(d.revenue || 0));
-  const maxDailyRev = Math.max(1, ...dailyData.map((d) => Number(d.revenue || 0)));
-  const topIdx = dailyData.findIndex((d) => Number(d.revenue || 0) === maxDailyRev);
   const topDay = dailyData.slice().sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0))[0];
   const topChannel = channelBreakdown[0];
 
@@ -283,14 +203,16 @@ export default function ReportsScreen() {
         const d = new Date(ts);
         if (d < range.start || d > range.end) continue;
       }
-      for (const it of (o.items || []) as any[]) {
+      for (const it of (o.items || [])) {
         const key = String(it?.product_name || it?.sku || "?").trim().toLowerCase();
         if (!key || key === "?") continue;
         const existing = map.get(key) || { name: it?.product_name || it?.sku || "Ürün", image: "", qty: 0, revenue: 0 };
         existing.qty += Number(it?.quantity || 0);
         existing.revenue += Number(it?.total_price ?? Number(it?.unit_price || 0) * Number(it?.quantity || 0));
         if (!existing.image) {
-          const url = String(it?.image_url || it?.image || it?.images?.[0]?.url || it?.images?.[0]?.src || it?.images?.[0] || "").trim();
+          const img0 = it?.images?.[0];
+          const img0Url = typeof img0 === "object" ? (img0?.url ?? "") : (img0 ?? "");
+          const url = String(it?.image_url || it?.image || img0Url || "").trim();
           if (/^https?:\/\//i.test(url)) existing.image = url;
         }
         map.set(key, existing);
@@ -310,6 +232,7 @@ export default function ReportsScreen() {
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="reports-screen">
       <AppTopBar />
+      <NetworkErrorBanner visible={isOffline} offline />
       <ScrollView
         contentContainerStyle={{ paddingBottom: 120 }}
         refreshControl={
@@ -403,7 +326,7 @@ export default function ReportsScreen() {
             </View>
             <View style={[styles.heroFootDivider]} />
             <View style={styles.heroFootCell}>
-              <Text style={styles.heroFootLabel}>Kanal</Text>
+              <Text style={styles.heroFootLabel}>Mağaza</Text>
               <Text style={styles.heroFootValue}>{channelBreakdown.length}</Text>
             </View>
           </View>
@@ -419,7 +342,7 @@ export default function ReportsScreen() {
                   key={p.key}
                   testID={`reports-period-${p.key}`}
                   onPress={() => setRange(p)}
-                  style={[styles.periodPill, active && { backgroundColor: colors.primary }]}
+                  style={[styles.periodPill, active ? { backgroundColor: colors.primary } : undefined]}
                 >
                   <Text style={[styles.periodPillText, { color: active ? "#FFFFFF" : colors.textSecondary, fontWeight: active ? "700" : "600" }]}>
                     {p.label.replace("Son ", "").replace("Bugün", "Bugün")}
@@ -430,7 +353,7 @@ export default function ReportsScreen() {
             <PressableScale
               testID="reports-period-custom"
               onPress={() => setPickerOpen(true)}
-              style={[styles.periodPill, isCustomActive && { backgroundColor: colors.primary }, { flexDirection: "row", gap: 6, alignItems: "center" }]}
+              style={[styles.periodPill, isCustomActive ? { backgroundColor: colors.primary } : undefined, { flexDirection: "row", gap: 6, alignItems: "center" }]}
             >
               <FilterIcon size={13} color={isCustomActive ? "#FFFFFF" : colors.textSecondary} strokeWidth={2.4} />
               <Text style={[styles.periodPillText, { color: isCustomActive ? "#FFFFFF" : colors.textSecondary, fontWeight: isCustomActive ? "700" : "600" }]}>
@@ -450,44 +373,13 @@ export default function ReportsScreen() {
           </SafeAnimatedView>
         ) : null}
 
-        {/* KPI grid */}
-        <SafeAnimatedView entering={FadeInUp.delay(180).duration(450)} style={styles.kpiGrid}>
-          <View style={[styles.kpiCell, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
-            <View style={[styles.kpiIcon, { backgroundColor: colors.primarySoft }]}>
-              <WalletIcon size={16} color={colors.primary} />
-            </View>
-            <Text style={[styles.kpiLabel, { color: colors.textTertiary }]}>Ciro</Text>
-            <Text style={[styles.kpiValue, { color: colors.textPrimary }]} numberOfLines={1}>
-              {formatTry(totalRevenue)}
-            </Text>
-          </View>
-          <View style={[styles.kpiCell, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
-            <View style={[styles.kpiIcon, { backgroundColor: colors.successBg }]}>
-              <InboxIcon size={16} color={colors.success} />
-            </View>
-            <Text style={[styles.kpiLabel, { color: colors.textTertiary }]}>Sipariş</Text>
-            <Text style={[styles.kpiValue, { color: colors.textPrimary }]} numberOfLines={1}>
-              {formatCompact(totalOrders)}
-            </Text>
-          </View>
-          <View style={[styles.kpiCell, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
-            <View style={[styles.kpiIcon, { backgroundColor: colors.warningBg }]}>
-              <ZapIcon size={16} color={colors.warning} />
-            </View>
-            <Text style={[styles.kpiLabel, { color: colors.textTertiary }]}>Ort. Sepet</Text>
-            <Text style={[styles.kpiValue, { color: colors.textPrimary }]} numberOfLines={1}>
-              {formatTry(aov)}
-            </Text>
-          </View>
-        </SafeAnimatedView>
-
         {/* Insights */}
-        <SafeAnimatedView entering={FadeInUp.delay(240).duration(450)} style={[styles.insightCard, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
+        <SafeAnimatedView entering={FadeInUp.delay(180).duration(450)} style={[styles.insightCard, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
           <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Akıllı İçgörüler</Text>
           <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
             <InsightRow
               icon={<TrendUpIcon size={14} color={colors.success} />}
-              label="En güçlü kanal"
+              label="En güçlü mağaza"
               value={topChannel ? `${topChannel.label || topChannel.provider}` : "Veri yok"}
               hint={topChannel ? `${formatTry(topChannel.revenue)} • ${topChannel.orders} sipariş` : undefined}
             />
@@ -508,10 +400,10 @@ export default function ReportsScreen() {
         </SafeAnimatedView>
 
         {/* Channel donut + legend */}
-        <SafeAnimatedView entering={FadeInUp.delay(300).duration(450)} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
+        <SafeAnimatedView entering={FadeInUp.delay(240).duration(450)} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
           <View style={styles.cardHeadRow}>
-            <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Kanal Dağılımı</Text>
-            <Text style={[styles.cardHint, { color: colors.textTertiary }]}>{channelBreakdown.length} kanal</Text>
+            <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Mağaza Dağılımı</Text>
+            <Text style={[styles.cardHint, { color: colors.textTertiary }]}>{channelBreakdown.length} mağaza</Text>
           </View>
 
           {channelBreakdown.length === 0 ? (
@@ -552,21 +444,8 @@ export default function ReportsScreen() {
           )}
         </SafeAnimatedView>
 
-        {/* Daily revenue */}
-        <SafeAnimatedView entering={FadeInUp.delay(360).duration(450)} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
-          <View style={styles.cardHeadRow}>
-            <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Günlük Ciro</Text>
-            <Text style={[styles.cardHint, { color: colors.textTertiary }]}>Son {dailyData.slice(-14).length} gün</Text>
-          </View>
-          {dailyData.length === 0 ? (
-            <Text style={[styles.empty, { color: colors.textTertiary }]}>Seçili dönem için veri yok.</Text>
-          ) : (
-            <DailyBars data={dailyData.slice(-14)} topIndex={dailyData.slice(-14).findIndex((d) => Number(d.revenue || 0) === maxDailyRev)} colors={colors} />
-          )}
-        </SafeAnimatedView>
-
         {/* Top products */}
-        <SafeAnimatedView entering={FadeInUp.delay(420).duration(450)} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
+        <SafeAnimatedView entering={FadeInUp.delay(300).duration(450)} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
           <View style={styles.cardHeadRow}>
             <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Çok Satanlar</Text>
             <Text style={[styles.cardHint, { color: colors.textTertiary }]}>Top 5 ürün</Text>
@@ -605,7 +484,7 @@ export default function ReportsScreen() {
         </SafeAnimatedView>
 
         {Array.isArray(reports?.status_breakdown) && (reports?.status_breakdown?.length ?? 0) > 0 ? (
-          <SafeAnimatedView entering={FadeInUp.delay(480).duration(450)} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
+          <SafeAnimatedView entering={FadeInUp.delay(360).duration(450)} style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
             <View style={styles.cardHeadRow}>
               <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Sipariş Durumu</Text>
             </View>
@@ -640,214 +519,6 @@ export default function ReportsScreen() {
       />
     </View>
   );
-}
-
-function InsightRow({ icon, label, value, hint, valueColor }: { icon: React.ReactNode; label: string; value: string; hint?: string; valueColor?: string }) {
-  const { colors } = useTheme();
-  return (
-    <View style={styles.insightRow}>
-      <View style={[styles.insightIcon, { backgroundColor: colors.surfaceMuted }]}>{icon}</View>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.insightLabel, { color: colors.textTertiary }]} numberOfLines={1}>
-          {label}
-        </Text>
-        <Text style={[styles.insightValue, { color: valueColor || colors.textPrimary }]} numberOfLines={1}>
-          {value}
-        </Text>
-      </View>
-      {hint ? (
-        <Text style={[styles.insightHint, { color: colors.textTertiary }]} numberOfLines={2}>
-          {hint}
-        </Text>
-      ) : null}
-    </View>
-  );
-}
-
-function DailyBars({ data, topIndex, colors }: { data: { date: string; revenue: number; orders: number }[]; topIndex: number; colors: any }) {
-  const max = Math.max(1, ...data.map((d) => Number(d.revenue || 0)));
-  const total = data.reduce((a, b) => a + Number(b.revenue || 0), 0);
-  return (
-    <View>
-      <View style={styles.dailyRow}>
-        {data.map((d, i) => {
-          const h = (Number(d.revenue || 0) / max) * 110;
-          const isTop = i === topIndex && Number(d.revenue || 0) > 0;
-          return (
-            <View key={`${d.date}-${i}`} style={styles.dailyCol}>
-              <View style={[styles.dailyBar, { height: Math.max(2, h), backgroundColor: isTop ? colors.primary : colors.borderSubtle }]} />
-            </View>
-          );
-        })}
-      </View>
-      <View style={styles.dailyLabels}>
-        {data.map((d, i) => (
-          <Text key={`l-${i}`} style={[styles.dailyLabel, { color: colors.textTertiary }]}>
-            {formatDayShort(d.date)}
-          </Text>
-        ))}
-      </View>
-      <View style={[styles.dailyFooter, { borderColor: colors.borderSubtle }]}>
-        <Text style={{ color: colors.textTertiary, fontSize: 11, fontWeight: "600", letterSpacing: 0.4, textTransform: "uppercase" }}>
-          {data.length} gün toplamı
-        </Text>
-        <Text style={{ color: colors.textPrimary, fontSize: 14, fontWeight: "700" }}>{formatTry(total)}</Text>
-      </View>
-    </View>
-  );
-}
-
-function DateRangeModal({
-  visible,
-  onClose,
-  currentRange,
-  onSelect,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  currentRange: RangeT;
-  onSelect: (r: RangeT) => void;
-}) {
-  const { colors, shadows } = useTheme();
-  const [startStr, setStartStr] = useState("");
-  const [endStr, setEndStr] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (visible) {
-      setStartStr(formatDateInput(currentRange.start));
-      setEndStr(formatDateInput(currentRange.end));
-      setError(null);
-    }
-  }, [visible, currentRange]);
-
-  const presets = useMemo(() => presetRanges(), []);
-
-  const applyCustom = () => {
-    const s = parseDateInput(startStr);
-    const e = parseDateInput(endStr);
-    if (!s || !e) {
-      setError("Tarihler GG.AA.YYYY formatında olmalı.");
-      return;
-    }
-    if (s > e) {
-      setError("Başlangıç tarihi bitişten sonra olamaz.");
-      return;
-    }
-    onSelect({ key: "custom", label: "Özel", start: startOfDay(s), end: endOfDay(e) });
-  };
-
-  return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
-        <PressableScale onPress={onClose} style={StyleSheet.absoluteFill as any}>
-          <View style={{ flex: 1 }} />
-        </PressableScale>
-        <View style={[styles.modalSheet, { backgroundColor: colors.surface }, shadows.lg]}>
-          <View style={styles.modalGrabber} />
-          <View style={styles.modalHeader}>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Tarih Aralığı</Text>
-            <PressableScale onPress={onClose} style={[styles.modalClose, { backgroundColor: colors.surfaceMuted }]}>
-              <CloseIcon size={16} color={colors.textSecondary} />
-            </PressableScale>
-          </View>
-
-          <ScrollView style={{ maxHeight: 480 }} contentContainerStyle={{ paddingBottom: spacing.md }}>
-            <Text style={[styles.modalSection, { color: colors.textTertiary }]}>HIZLI SEÇİMLER</Text>
-            <View style={styles.presetGrid}>
-              {presets.map((p) => {
-                const active = currentRange.key === p.key;
-                return (
-                  <PressableScale
-                    key={p.key}
-                    testID={`preset-${p.key}`}
-                    onPress={() => onSelect(p)}
-                    style={[
-                      styles.presetCell,
-                      {
-                        backgroundColor: active ? colors.primary : colors.surfaceMuted,
-                        borderColor: active ? colors.primary : colors.borderSubtle,
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.presetText, { color: active ? "#FFFFFF" : colors.textPrimary }]}>
-                      {p.label}
-                    </Text>
-                  </PressableScale>
-                );
-              })}
-            </View>
-
-            <Text style={[styles.modalSection, { color: colors.textTertiary, marginTop: spacing.md }]}>ÖZEL ARALIK</Text>
-            <View style={{ flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg }}>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>BAŞLANGIÇ</Text>
-                <TextInput
-                  testID="date-start-input"
-                  value={startStr}
-                  onChangeText={setStartStr}
-                  placeholder="GG.AA.YYYY"
-                  placeholderTextColor={colors.textTertiary}
-                  style={[styles.dateInput, { backgroundColor: colors.surfaceMuted, color: colors.textPrimary, borderColor: colors.borderSubtle }]}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>BİTİŞ</Text>
-                <TextInput
-                  testID="date-end-input"
-                  value={endStr}
-                  onChangeText={setEndStr}
-                  placeholder="GG.AA.YYYY"
-                  placeholderTextColor={colors.textTertiary}
-                  style={[styles.dateInput, { backgroundColor: colors.surfaceMuted, color: colors.textPrimary, borderColor: colors.borderSubtle }]}
-                />
-              </View>
-            </View>
-            {error ? (
-              <Text style={[styles.modalError, { color: colors.error }]}>{error}</Text>
-            ) : null}
-            <View style={{ paddingHorizontal: spacing.lg, marginTop: spacing.md }}>
-              <PressableScale
-                testID="apply-custom-range"
-                onPress={applyCustom}
-                style={[styles.applyBtn, { backgroundColor: colors.primary }, shadows.primary]}
-              >
-                <Text style={styles.applyBtnText}>Uygula</Text>
-              </PressableScale>
-            </View>
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-function formatDateInput(d: Date) {
-  return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
-}
-function parseDateInput(s: string): Date | null {
-  const m = s.trim().match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
-  if (!m) return null;
-  const dd = Number(m[1]);
-  const mm = Number(m[2]);
-  const yy = Number(m[3]);
-  const d = new Date(yy, mm - 1, dd);
-  if (Number.isNaN(d.getTime()) || d.getDate() !== dd || d.getMonth() + 1 !== mm) return null;
-  return d;
-}
-
-function formatDayShort(dateStr: string) {
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return String(dateStr).slice(5);
-  return `${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function formatDayLabelFull(dateStr?: string) {
-  if (!dateStr) return "-";
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return String(dateStr);
-  const months = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
-  return `${d.getDate()} ${months[d.getMonth()]}`;
 }
 
 const styles = StyleSheet.create({
@@ -906,11 +577,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   noticeText: { fontSize: 12, fontWeight: "600", flex: 1 },
-  kpiGrid: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginTop: spacing.xs },
-  kpiCell: { flex: 1, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1, gap: 4 },
-  kpiIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", marginBottom: 4 },
-  kpiLabel: { fontSize: 10.5, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase" },
-  kpiValue: { fontSize: 18, fontWeight: "800", letterSpacing: -0.4, marginTop: 2 },
   card: { marginHorizontal: spacing.lg, marginTop: spacing.md, borderRadius: radius.lg, borderWidth: 1, padding: spacing.md },
   insightCard: { marginHorizontal: spacing.lg, marginTop: spacing.md, borderRadius: radius.lg, borderWidth: 1, padding: spacing.md },
   cardHeadRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.xs },
@@ -927,12 +593,6 @@ const styles = StyleSheet.create({
   insightLabel: { fontSize: 11, fontWeight: "600", letterSpacing: 0.3, textTransform: "uppercase" },
   insightValue: { fontSize: 14, fontWeight: "700", marginTop: 2 },
   insightHint: { fontSize: 11, fontWeight: "500", maxWidth: 140, textAlign: "right" },
-  dailyRow: { flexDirection: "row", alignItems: "flex-end", height: 120, gap: 6, marginTop: spacing.xs },
-  dailyCol: { flex: 1, alignItems: "center", justifyContent: "flex-end" },
-  dailyBar: { width: "100%", borderTopLeftRadius: 4, borderTopRightRadius: 4 },
-  dailyLabels: { flexDirection: "row", marginTop: 6, gap: 6 },
-  dailyLabel: { flex: 1, textAlign: "center", fontSize: 9.5, fontWeight: "600" },
-  dailyFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1 },
   productRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 8 },
   productImgWrap: { width: 42, height: 42, borderRadius: 10, borderWidth: 1, overflow: "hidden", alignItems: "center", justifyContent: "center" },
   productName: { fontSize: 13, fontWeight: "700" },
@@ -944,20 +604,4 @@ const styles = StyleSheet.create({
   statusCell: { paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, minWidth: 100 },
   statusValue: { fontSize: 18, fontWeight: "800" },
   statusLabel: { fontSize: 11, fontWeight: "600", marginTop: 2, textTransform: "capitalize" },
-  // Modal
-  modalOverlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(11,17,32,0.55)" },
-  modalSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 8, paddingBottom: Platform.OS === "ios" ? 32 : 16 },
-  modalGrabber: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: "#CBD5E1", marginBottom: 12 },
-  modalHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.lg, marginBottom: 8 },
-  modalTitle: { fontSize: 18, fontWeight: "800", letterSpacing: -0.4, flex: 1 },
-  modalClose: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  modalSection: { fontSize: 11, fontWeight: "800", letterSpacing: 0.6, textTransform: "uppercase", paddingHorizontal: spacing.lg, marginTop: spacing.sm, marginBottom: 8 },
-  presetGrid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: spacing.lg, gap: 8 },
-  presetCell: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5 },
-  presetText: { fontSize: 13, fontWeight: "700", letterSpacing: -0.1 },
-  dateLabel: { fontSize: 10.5, fontWeight: "800", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 6 },
-  dateInput: { height: 46, borderRadius: 12, paddingHorizontal: 12, fontSize: 14, fontWeight: "600", borderWidth: 1.5, letterSpacing: 0.5 },
-  modalError: { fontSize: 12, fontWeight: "600", paddingHorizontal: spacing.lg, marginTop: spacing.xs },
-  applyBtn: { height: 50, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  applyBtnText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
 });

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -12,6 +12,7 @@ import {
   displayOrderNo,
   displayOrderStatus,
   formatTry,
+  getOrderTrackingNo,
   orderTimestamp,
   providerKey,
   providerLabel,
@@ -23,7 +24,11 @@ import { PressableScale } from "../../src/components/KPICard";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
 import { ArrowLeftIcon, RefreshIcon, SearchIcon } from "../../src/components/Icons";
+import { NetworkErrorBanner } from "../../src/components/NetworkErrorBanner";
+import { saveCache, loadCache } from "../../src/offlineCache";
 import type { Integration, Order } from "../../src/types";
+
+type IntegDetailCache = { orders: Order[]; integration: Integration | null };
 
 const SYNC_COOLDOWN_MS = 60_000;
 
@@ -39,6 +44,7 @@ export default function IntegrationOrders() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const [search, setSearch] = useState("");
   const [searchFocus, setSearchFocus] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
@@ -50,17 +56,31 @@ export default function IntegrationOrders() {
     return () => clearInterval(t);
   }, []);
 
+  const cacheKey = `integration_detail_${integrationId}`;
+
   const load = async (silent = false) => {
     if (!token || !integrationId) return;
-    if (!silent) setLoading(true);
+    if (!silent) {
+      setLoading(true);
+      const cached = await loadCache<IntegDetailCache>(cacheKey);
+      if (cached) {
+        setOrders(cached.orders);
+        setIntegration(cached.integration);
+        setIsOffline(true);
+        setLoading(false);
+      }
+    }
     try {
       const [list, ints] = await Promise.all([
         getOrders(token, integrationId, { page: 1, perPage: 200, sortBy: "-created_at" }),
         getIntegrations(token).catch(() => [] as Integration[]),
       ]);
-      setOrders(Array.isArray(list) ? list : []);
+      const fetchedOrders = Array.isArray(list) ? list : [];
       const found = (ints || []).find((i) => i.id === integrationId) || null;
+      setOrders(fetchedOrders);
       setIntegration(found);
+      setIsOffline(false);
+      await saveCache(cacheKey, { orders: fetchedOrders, integration: found });
     } catch {}
     finally {
       setLoading(false);
@@ -111,6 +131,7 @@ export default function IntegrationOrders() {
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background, paddingTop: insets.top }]}>
       <Stack.Screen options={{ headerShown: false }} />
+      <NetworkErrorBanner visible={isOffline} offline />
 
       <View style={styles.headerRow}>
         <PressableScale
@@ -139,7 +160,7 @@ export default function IntegrationOrders() {
             styles.syncBtn,
             { backgroundColor: accent },
             shadows.primary,
-            (syncBusy || remainingMs > 0) && { opacity: 0.6 },
+            (syncBusy || remainingMs > 0) ? { opacity: 0.6 } : undefined,
           ]}
         >
           {syncBusy ? (
@@ -168,9 +189,12 @@ export default function IntegrationOrders() {
       </View>
 
       {loading ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <ScrollView
+          contentContainerStyle={{ flex: 1, alignItems: "center", justifyContent: "center" }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={colors.primary} />}
+        >
           <ActivityIndicator color={colors.primary} />
-        </View>
+        </ScrollView>
       ) : (
         <FlatList
           data={filtered}
@@ -196,6 +220,7 @@ export default function IntegrationOrders() {
           }
           renderItem={({ item, index }) => {
             const kind = statusKindFromOrder(item, provider);
+            const trackingNo = getOrderTrackingNo(item);
             return (
               <SafeAnimatedView entering={FadeInDown.delay(index * 30).springify().damping(18)}>
                 <PressableScale
@@ -216,6 +241,11 @@ export default function IntegrationOrders() {
                     </Text>
                     <Text style={[styles.amount, { color: colors.textPrimary }]}>{formatTry(item.total_amount || 0)}</Text>
                   </View>
+                  {trackingNo ? (
+                    <Text style={[styles.trackingLine, { color: colors.textTertiary }]} numberOfLines={1}>
+                      Kargo Takip: {trackingNo}
+                    </Text>
+                  ) : null}
                 </PressableScale>
               </SafeAnimatedView>
             );
@@ -268,6 +298,7 @@ const styles = StyleSheet.create({
   bottomRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
   customer: { fontSize: 13, fontWeight: "600", flex: 1, paddingRight: 8 },
   amount: { fontSize: 14, fontWeight: "800" },
+  trackingLine: { fontSize: 11.5, fontWeight: "600", marginTop: 5 },
   emptyWrap: { alignItems: "center", padding: spacing.xl, marginTop: spacing.lg, gap: 6 },
   emptyTitle: { fontSize: 15, fontWeight: "700" },
   emptyDesc: { fontSize: 12.5, textAlign: "center", paddingHorizontal: 28, fontWeight: "500" },

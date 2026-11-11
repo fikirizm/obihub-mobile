@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, FlatList, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
 import { FadeInDown } from "react-native-reanimated";
@@ -9,42 +9,70 @@ import { useTheme } from "../../src/theme/ThemeProvider";
 import { AppTopBar } from "../../src/components/AppTopBar";
 import { fontWeight, radius, spacing } from "../../src/theme/tokens";
 import { getIntegrations, getOrders } from "../../src/api";
-import { providerKey, providerLabel, providerColor } from "../../src/utils";
+import { providerKey, providerLabel, providerColor, isNewOrderStatus, statusKindFromOrder } from "../../src/utils";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
 import { PressableScale } from "../../src/components/KPICard";
-import { ArrowRightIcon, PlugIcon, SparkleIcon } from "../../src/components/Icons";
+import { ArrowRightIcon, PlugIcon, SparkleIcon, InboxIcon, TruckIcon } from "../../src/components/Icons";
+import { NetworkErrorBanner } from "../../src/components/NetworkErrorBanner";
+import { saveCache, loadCache } from "../../src/offlineCache";
+import { useFocusLoad } from "../../src/hooks/useFocusLoad";
 import type { Integration, Order } from "../../src/types";
+
+type IntegCache = { list: Integration[]; orderCounts: Record<string, { all: number; pending: number; shipped: number }> };
 
 export default function IntegrationsScreen() {
   const { token } = useAuth();
   const { colors, mode, shadows } = useTheme();
   const [list, setList] = useState<Integration[]>([]);
-  const [orderCounts, setOrderCounts] = useState<Record<string, number>>({});
+  const [orderCounts, setOrderCounts] = useState<Record<string, { all: number; pending: number; shipped: number }>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
 
-  const load = async (silent = false) => {
+  const load = useCallback(async (silent = false) => {
     if (!token) return;
     if (!silent) setLoading(true);
+    if (!silent) {
+      const cached = await loadCache<IntegCache>("integrations_cache");
+      if (cached) {
+        setList(cached.list);
+        setOrderCounts(cached.orderCounts);
+        setIsOffline(true);
+        setLoading(false);
+      }
+    }
     try {
       const [data, orders] = await Promise.all([
         getIntegrations(token),
         getOrders(token, undefined, { page: 1, perPage: 200, sortBy: "-created_at" }).catch(() => [] as Order[]),
       ]);
-      setList(Array.isArray(data) ? data : []);
-      // Count orders per integration
-      const counts: Record<string, number> = {};
+      const intList = Array.isArray(data) ? data : [];
+      setList(intList);
+      const counts: Record<string, { all: number; pending: number; shipped: number }> = {};
       for (const o of (orders || [])) {
-        const intId = String((o as any)?.integration_id || "");
-        if (intId) counts[intId] = (counts[intId] || 0) + 1;
+        const intId = String(o.integration_id || "");
+        if (!intId) continue;
+        if (!counts[intId]) counts[intId] = { all: 0, pending: 0, shipped: 0 };
+        counts[intId].all += 1;
+        const provider = String(o.integration_provider || o.provider || o.channel || "");
+        if (isNewOrderStatus(o, provider)) counts[intId].pending += 1;
+        if (statusKindFromOrder(o, provider) === "info") counts[intId].shipped += 1;
       }
       setOrderCounts(counts);
-    } catch {}
-    finally {
+      setIsOffline(false);
+      await saveCache("integrations_cache", { list: intList, orderCounts: counts });
+    } catch {
+      if (list.length === 0 && !silent) {
+        const cached = await loadCache<IntegCache>("integrations_cache");
+        if (cached) { setList(cached.list); setOrderCounts(cached.orderCounts); setIsOffline(true); }
+      }
+    } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [token]);
+
+  useFocusLoad(load, { hasData: list.length > 0 });
 
   useEffect(() => {
     load();
@@ -55,6 +83,7 @@ export default function IntegrationsScreen() {
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="integrations-screen">
       <AppTopBar />
+      <NetworkErrorBanner visible={isOffline} offline />
       <View style={{ paddingHorizontal: spacing.lg, paddingTop: 4 }}>
         <Text style={[styles.eyebrow, { color: colors.primary }]}>BAĞLI MAĞAZALAR</Text>
         <Text style={[styles.title, { color: colors.textPrimary }]}>Entegrasyonlar</Text>
@@ -98,11 +127,17 @@ export default function IntegrationsScreen() {
       </SafeAnimatedView>
 
       {loading ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <ScrollView
+          contentContainerStyle={{ flex: 1, alignItems: "center", justifyContent: "center" }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={colors.primary} />}
+        >
           <ActivityIndicator color={colors.primary} />
-        </View>
+        </ScrollView>
       ) : list.length === 0 ? (
-        <View style={styles.emptyWrap}>
+        <ScrollView
+          contentContainerStyle={styles.emptyWrap}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={colors.primary} />}
+        >
           <View style={[styles.emptyIcon, { backgroundColor: colors.surfaceMuted, borderColor: colors.borderSubtle }]}>
             <PlugIcon size={26} color={colors.textTertiary} />
           </View>
@@ -110,7 +145,7 @@ export default function IntegrationsScreen() {
           <Text style={[styles.emptyDesc, { color: colors.textTertiary }]}>
             Trendyol, Hepsiburada, n11 veya WooCommerce mağazalarını ObiHub web panelinden bağla.
           </Text>
-        </View>
+        </ScrollView>
       ) : (
         <FlatList
           data={list}
@@ -129,7 +164,7 @@ export default function IntegrationsScreen() {
           renderItem={({ item, index }) => {
             const provider = String(item.provider || item.name || "");
             const accent = providerColor(provider, colors.primary);
-            const count = orderCounts[item.id] || 0;
+            const counts = orderCounts[item.id] || { all: 0, pending: 0, shipped: 0 };
             return (
               <SafeAnimatedView entering={FadeInDown.delay(index * 50).springify().damping(18)}>
                 <PressableScale
@@ -156,11 +191,16 @@ export default function IntegrationsScreen() {
                       </View>
                     </View>
                   </View>
-                  {count > 0 ? (
-                    <View style={[styles.countBadge, { backgroundColor: colors.primarySoft }]}>
-                      <Text style={[styles.countBadgeText, { color: colors.primary }]}>{count}</Text>
+                  <View style={styles.countsWrap}>
+                    <View style={[styles.countPill, { backgroundColor: colors.warningBg }]}>
+                      <InboxIcon size={12} color={colors.warning} />
+                      <Text style={[styles.countPillText, { color: colors.warning }]}>{counts.pending}</Text>
                     </View>
-                  ) : null}
+                    <View style={[styles.countPill, { backgroundColor: colors.primarySoft }]}>
+                      <TruckIcon size={12} color={colors.primary} />
+                      <Text style={[styles.countPillText, { color: colors.primary }]}>{counts.shipped}</Text>
+                    </View>
+                  </View>
                   <ArrowRightIcon size={18} color={colors.textTertiary} />
                 </PressableScale>
               </SafeAnimatedView>
@@ -227,8 +267,9 @@ const styles = StyleSheet.create({
   cardMetaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
   statusDot: { width: 6, height: 6, borderRadius: 3 },
   cardMeta: { fontSize: 12, fontWeight: "500" },
-  countBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 9999, minWidth: 32, alignItems: "center" },
-  countBadgeText: { fontSize: 12, fontWeight: "800", letterSpacing: -0.1 },
+  countsWrap: { flexDirection: "row", alignItems: "center", gap: 6 },
+  countPill: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 9999, paddingHorizontal: 8, paddingVertical: 4 },
+  countPillText: { fontSize: 11.5, fontWeight: "800", letterSpacing: -0.1, minWidth: 14, textAlign: "center" },
   emptyWrap: { alignItems: "center", padding: spacing.xl, marginTop: spacing.lg },
   emptyIcon: { width: 64, height: 64, borderRadius: 18, alignItems: "center", justifyContent: "center", borderWidth: 1, marginBottom: spacing.sm },
   emptyTitle: { fontSize: 16, fontWeight: "700", marginBottom: 6 },

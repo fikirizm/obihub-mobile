@@ -18,20 +18,37 @@ export const API_BASE_URL =
 
 type ApiError = { message: string; status: number };
 
+const STATUS_MESSAGES: Record<number, string> = {
+  401: "Oturumunuz sona erdi. Lütfen tekrar giriş yapın.",
+  403: "Bu işlem için yetkiniz bulunmuyor.",
+  404: "İstenen kayıt bulunamadı.",
+  429: "Çok fazla istek gönderildi. Lütfen biraz bekleyin.",
+  500: "Sunucuda bir hata oluştu. Lütfen tekrar deneyin.",
+  502: "Sunucuya ulaşılamıyor. İnternet bağlantınızı kontrol edin.",
+  503: "Hizmet geçici olarak kullanılamıyor. Lütfen tekrar deneyin.",
+};
+
 async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.headers || {}),
+      },
+    });
+  } catch {
+    throw { message: "Sunucuya bağlanılamıyor. İnternet bağlantınızı kontrol edin.", status: 0 } as ApiError;
+  }
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
+    const serverMessage = data?.detail || data?.message;
+    const friendlyMessage = STATUS_MESSAGES[res.status];
     const err: ApiError = {
-      message: data?.detail || data?.message || `HTTP ${res.status}`,
+      message: serverMessage || friendlyMessage || `Sunucu hatası (${res.status})`,
       status: res.status,
     };
     throw err;
@@ -96,7 +113,7 @@ export async function createHepsiJetShipment(token: string, orderId: string) {
 }
 
 export async function getHepsiJetLabel(token: string, barcode: string) {
-  return request<{ success?: boolean; data?: string; format?: string }>(
+  return request<{ success?: boolean; data?: string; data_base64?: string; message?: string; format?: string }>(
     `/hepsijet/label/${barcode}?format=PDF`,
     { method: "GET" },
     token
@@ -117,7 +134,7 @@ export async function getHepsiburadaOrderLabel(token: string, orderId: string, p
 export async function getHepsiJetLabelWithProducts(token: string, orderId: string, barcode: string) {
   const qs = new URLSearchParams();
   qs.set("barcode", barcode);
-  return request<{ success?: boolean; data?: string; format?: string }>(
+  return request<{ success?: boolean; data?: string; data_base64?: string; message?: string; format?: string }>(
     `/hepsijet/label-with-products/${orderId}?${qs.toString()}`,
     { method: "GET" },
     token
@@ -172,28 +189,37 @@ export async function downloadInvoicePdf(token: string, invoiceId: string) {
   );
 }
 
-export async function getSalesReportsOverview(token: string, periodDays = 30) {
-  const payload = await request<any>(`/reports/overview?period_days=${periodDays}`, { method: "GET" }, token);
-  const channel_breakdown = Array.isArray(payload?.channel_breakdown)
-    ? payload.channel_breakdown.map((x: any) => ({
+export async function getSalesReportsOverview(
+  token: string,
+  periodDays = 30,
+  options?: { startDate?: Date; endDate?: Date }
+) {
+  const body: Record<string, string | number> = { period_days: periodDays };
+  if (options?.startDate) body.since_date = options.startDate.toISOString().slice(0, 10);
+  const payload = await request<any>(`/reports/overview`, { method: "POST", body: JSON.stringify(body) }, token);
+  const summary = payload?.summary || {};
+  const channelsSource = Array.isArray(payload?.channels) ? payload.channels : payload?.channel_breakdown;
+  const timelineSource = Array.isArray(payload?.timeline) ? payload.timeline : payload?.daily_sales;
+  const channel_breakdown = Array.isArray(channelsSource)
+    ? channelsSource.map((x: any) => ({
         provider: x?.provider ?? x?.channel ?? "-",
-        label: x?.label ?? x?.provider ?? x?.channel ?? "-",
+        label: x?.label ?? x?.name ?? x?.provider ?? x?.channel ?? "-",
         revenue: Number(x?.revenue ?? x?.amount ?? 0),
         orders: Number(x?.orders ?? x?.count ?? 0),
       }))
     : [];
-  const daily_sales = Array.isArray(payload?.daily_sales)
-    ? payload.daily_sales.map((x: any) => ({
-        date: String(x?.date ?? "-"),
+  const daily_sales = Array.isArray(timelineSource)
+    ? timelineSource.map((x: any) => ({
+        date: String(x?.date ?? x?.key ?? "-"),
         revenue: Number(x?.revenue ?? x?.amount ?? 0),
         orders: Number(x?.orders ?? x?.count ?? 0),
       }))
     : [];
   return {
     ...payload,
-    total_revenue: Number(payload?.total_revenue ?? payload?.revenue ?? 0),
-    total_orders: Number(payload?.total_orders ?? payload?.orders ?? 0),
-    average_order_value: Number(payload?.average_order_value ?? payload?.avg_order ?? 0),
+    total_revenue: Number(payload?.total_revenue ?? summary?.total_revenue ?? payload?.revenue ?? 0),
+    total_orders: Number(payload?.total_orders ?? summary?.total_orders ?? payload?.orders ?? 0),
+    average_order_value: Number(payload?.average_order_value ?? summary?.avg_order_value ?? payload?.avg_order ?? 0),
     channel_breakdown,
     daily_sales,
   } as ReportsOverview;
@@ -221,7 +247,11 @@ export async function syncIntegrationOrders(token: string, integrationId: string
   if (!prefix) {
     throw { message: "Bu entegrasyon için sipariş çekme desteklenmiyor.", status: 400 };
   }
-  return request<any>(`/${prefix}/${integrationId}/sync-orders?days=${Math.max(1, days)}`, { method: "POST" }, token);
+  return request<{ success?: boolean; message?: string; synced?: number; count?: number }>(
+    `/${prefix}/${integrationId}/sync-orders?days=${Math.max(1, days)}`,
+    { method: "POST" },
+    token
+  );
 }
 
 export async function listHepsiJetManualCustomers(
@@ -244,11 +274,12 @@ export async function listHepsiJetManualCustomers(
 }
 
 export async function createHepsiJetManualCustomer(token: string, payload: Partial<HepsiJetManualCustomer>) {
-  return request<HepsiJetManualCustomer>(
+  const res = await request<{ success?: boolean; customer?: HepsiJetManualCustomer; message?: string }>(
     `/hepsijet/manual/customers`,
     { method: "POST", body: JSON.stringify(payload) },
     token
   );
+  return res?.customer as HepsiJetManualCustomer;
 }
 
 export async function listHepsiJetManualShipments(token: string, options?: { page?: number; perPage?: number }) {
@@ -270,17 +301,50 @@ export async function createHepsiJetManualShipment(
   token: string,
   payload: { customer_id: string; total_parcels?: number; total_desi?: number; note?: string }
 ) {
-  return request<HepsiJetManualShipment>(
+  const res = await request<{ success?: boolean; shipment?: HepsiJetManualShipment; message?: string }>(
     `/hepsijet/manual/shipments`,
     { method: "POST", body: JSON.stringify(payload) },
     token
   );
+  return res?.shipment as HepsiJetManualShipment;
 }
 
 export async function getHepsiJetManualShipmentLabel(token: string, shipmentId: string) {
   return request<{ success?: boolean; data?: string; data_base64?: string; format?: string; message?: string }>(
     `/hepsijet/manual/shipments/${shipmentId}/label`,
     { method: "GET" },
+    token
+  );
+}
+
+export async function enqueueHepsiJetManualShipmentCloudPrint(token: string, shipmentId: string) {
+  return request<{ success?: boolean; message?: string; queued?: boolean; job_id?: string }>(
+    `/hepsijet/manual/shipments/${shipmentId}/cloud-print`,
+    { method: "POST" },
+    token
+  );
+}
+
+export async function deleteHepsiJetManualCustomer(token: string, customerId: string) {
+  return request<{ success?: boolean; message?: string }>(
+    `/hepsijet/manual/customers/${customerId}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export async function deleteHepsiJetManualShipment(token: string, shipmentId: string) {
+  return request<{ success?: boolean; message?: string }>(
+    `/hepsijet/manual/shipments/${shipmentId}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+export async function trackHepsiJetManualShipment(token: string, shipmentId: string) {
+  return request<{ success?: boolean; shipment?: HepsiJetManualShipment; status?: string; message?: string }>(
+    `/hepsijet/manual/shipments/${shipmentId}/track`,
+    { method: "POST" },
     token
   );
 }
@@ -294,4 +358,81 @@ export async function enqueueOrderCloudPrint(token: string, orderId: string, bar
     { method: "POST" },
     token
   );
+}
+
+export async function requestPasswordReset(email: string) {
+  return request<{ success: boolean; message: string; expires_in?: number }>(
+    "/auth/password-reset/request-code",
+    { method: "POST", body: JSON.stringify({ email }) }
+  );
+}
+
+export async function confirmPasswordReset(email: string, code: string, newPassword: string) {
+  return request<{ success: boolean; message: string }>(
+    "/auth/password-reset/confirm",
+    { method: "POST", body: JSON.stringify({ email, code, new_password: newPassword }) }
+  );
+}
+
+export async function registerPushToken(token: string, pushToken: string) {
+  return request<{ ok: boolean }>(
+    "/push-token",
+    { method: "POST", body: JSON.stringify({ token: pushToken }) },
+    token
+  );
+}
+
+export async function getSalesOffers(token: string, options?: { page?: number; perPage?: number }) {
+  const qs = new URLSearchParams();
+  qs.set("page", String(options?.page ?? 1));
+  qs.set("per_page", String(options?.perPage ?? 100));
+  return request<any>(`/parasut/sales-offers?${qs.toString()}`, { method: "GET" }, token);
+}
+
+export async function getSalesOfferDetail(token: string, offerId: string) {
+  return request<any>(`/parasut/sales-offers/${offerId}`, { method: "GET" }, token);
+}
+
+export async function getOfferPayment(token: string, offerId: string) {
+  return request<any>(`/parasut/sales-offers/${offerId}/payment`, { method: "GET" }, token);
+}
+
+export async function createOfferPayment(token: string, offerId: string, sendEmail: boolean, integrationId: string) {
+  return request<any>(
+    `/parasut/sales-offers/${offerId}/payment`,
+    { method: "POST", body: JSON.stringify({ send_email: sendEmail, integration_id: integrationId }) },
+    token
+  );
+}
+
+export async function getWooIntegrations(token: string) {
+  return request<any>("/integrations?provider=woocommerce", { method: "GET" }, token);
+}
+
+export async function updateSalesOffer(token: string, offerId: string, data: Record<string, any>) {
+  return request<any>(
+    `/parasut/sales-offers/${offerId}`,
+    { method: "PATCH", body: JSON.stringify(data) },
+    token
+  );
+}
+
+export async function createSalesOffer(token: string, data: Record<string, any>) {
+  return request<any>(
+    "/parasut/sales-offers",
+    { method: "POST", body: JSON.stringify(data) },
+    token
+  );
+}
+
+export async function getContacts(token: string, search?: string) {
+  const qs = new URLSearchParams({ page: "1", per_page: "50" });
+  if (search) qs.set("search", search);
+  return request<any>(`/parasut/contacts?${qs.toString()}`, { method: "GET" }, token);
+}
+
+export async function getProducts(token: string, search?: string) {
+  const qs = new URLSearchParams({ page: "1", per_page: "50" });
+  if (search) qs.set("search", search);
+  return request<any>(`/parasut/products?${qs.toString()}`, { method: "GET" }, token);
 }

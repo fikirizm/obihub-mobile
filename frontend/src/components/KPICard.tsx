@@ -1,5 +1,5 @@
 import React from "react";
-import { Pressable, StyleSheet, Text, View, ViewStyle } from "react-native";
+import { Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { SafeAnimatedView } from "./SafeAnimatedView";
 import { useTheme } from "../theme/ThemeProvider";
@@ -18,7 +18,7 @@ export function PressableScale({
   children: React.ReactNode;
   onPress?: () => void;
   disabled?: boolean;
-  style?: ViewStyle | ViewStyle[];
+  style?: StyleProp<ViewStyle>;
   testID?: string;
 }) {
   const scale = useSharedValue(1);
@@ -103,7 +103,9 @@ const styles = StyleSheet.create({
   card: {
     flex: 1,
     borderRadius: radius.lg,
-    padding: spacing.md,
+    paddingVertical: spacing.md,
+    paddingRight: spacing.md,
+    paddingLeft: spacing.lg,
     borderWidth: 1,
     overflow: "hidden",
     minHeight: 96,
@@ -134,6 +136,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: fontWeight.bold,
     letterSpacing: -0.5,
+    marginTop: 2,
   },
   hint: {
     fontSize: 11,
@@ -142,10 +145,10 @@ const styles = StyleSheet.create({
   },
   accentBar: {
     position: "absolute",
-    left: 0,
+    left: 1,
     top: 0,
     bottom: 0,
-    width: 3,
+    width: 4,
     borderTopLeftRadius: radius.lg,
     borderBottomLeftRadius: radius.lg,
   },

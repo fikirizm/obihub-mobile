@@ -37,3 +37,12 @@ yarn-error.*
 *.tsbuildinfo
 
 app-example
+
+# Metro önbelleği
+.metro-cache/
+
+# iOS native projesi app.json'dan üretilir (expo prebuild / EAS)
+/ios/
+
+# Yedek görseller
+*.bak.png
