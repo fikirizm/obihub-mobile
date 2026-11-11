@@ -67,6 +67,30 @@ Bilinmesi gerekenler:
 - Cari bakiyesinde artı değer alacak, eksi değer borç olarak yorumlandı; gerçek veriyle doğrulanmalı.
 - Finans ve cari ekranları her zaman açık olan uçları kullanır (`/finance/*`, `/customers`, `/local-invoices`); bayraklı okuma modeline bağlanılmadı.
 
+### Denetim sonucu (11 Kasım 2026, build 1.1.0 / 50 öncesi)
+
+Her faz maddesi koda karşı tek tek denetlendi; yeni kod dört açıdan incelendi ve 41 hata doğrulandı.
+
+| Faz | Tamam | Kısmi | Yapılmadı |
+|---|---|---|---|
+| 0 | 10 | 2 | 4 |
+| 1 | 9 | 23 | 2 |
+| 2 | 10 | 0 | 0 |
+| 3 | 8 | 4 | 1 |
+| 4 | 3 | 0 | 1 |
+| 5 | 4 | 1 | 2 |
+
+Build öncesi düzeltilenler: tutar ayrıştırma (kritik), ana stok/fiyatın istenmeden tüm kanallara gönderilmesi, iOS'ta art arda iki sayfa açılması, etkin muhasebe programının yanlış çözülmesi, soğuk açılışta bildirim hedefi, arama metninde özel karakter, fatura listesinin 100 kayıtta kesilmesi, önbelleğin kullanıcılar arasında kalması, rol denetimi (sunucu izinleri, yazma izni, rota koruması), Panel grafiği ve bugünün cirosu, koyu tema kontrastı.
+
+Açık kalanlar (sonraki tur):
+
+- **Faz 1 — eski ekranlar:** sipariş, fatura ve teklif detayı, mağazalar, HepsiJet, raporlar, giriş ekranları yeni bileşen setine taşınmadı. Tema dışında 197 renk kodu, 35 sistem uyarı kutusu ve 12 punto altı 63 satır bu ekranlarda. Raporlar hâlâ 500 siparişi telefonda topluyor. Kaydırarak hızlı eylem yok.
+- **Faz 0:** push kaydını silme ve sipariş yanıtındaki eksik alanlar backend bekliyor; toplu siparişte çift bildirim olasılığı sürüyor.
+- **Faz 3:** fatura oluşturma, virman, taslak dışı faturada resmileştirme düğmesi.
+- **Faz 4:** İçeri Al.
+- **Faz 5:** davet et ekranı, Android yayın ayarı, otomatik testler.
+- **Düşük öncelikli doğrulanmış hatalar:** çok para birimli alacak/borcun TL gösterilmesi, aynı süzgeçle ikinci gelişte uygulanmaması, raporlarda çift yükleme ve dil karışıklığı, ListRow erişilebilirlik etiketinde sağdaki değerin okunmaması.
+
 ## 4. Web'de olup mobilde olmayanlar
 
 Öncelik, özelliğin telefonda ne kadar işe yaradığına göre verildi.
