@@ -21,6 +21,7 @@ export default function FinanceScreen() {
   const { colors } = useTheme();
   const [data, setData] = useState<FinanceOverview | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [failed, setFailed] = useState(false);
   const billing = canAccess(user, "billing");
   const customers = canAccess(user, "customers");
 
@@ -28,8 +29,10 @@ export default function FinanceScreen() {
     if (!token || !billing) return;
     try {
       setData(await getFinanceOverview(token));
+      setFailed(false);
     } catch {
       // Özet alınamazsa bağlantılar yine kullanılabilir.
+      setFailed(true);
     } finally {
       setRefreshing(false);
     }
@@ -60,6 +63,19 @@ export default function FinanceScreen() {
         contentContainerStyle={{ paddingBottom: spacing.xxl }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
       >
+        {billing && !data ? (
+          failed ? (
+            <Card padded style={[styles.block, { marginTop: spacing.xs }]}>
+              <Text style={[type.bodyStrong, { color: colors.textPrimary }]}>Finans özeti yüklenemedi</Text>
+              <Text style={[type.footnote, { color: colors.textSecondary, marginTop: 2 }]}>Bağlantınızı kontrol edip sayfayı aşağı çekerek yenileyin.</Text>
+            </Card>
+          ) : (
+            <View
+              accessibilityLabel="Finans özeti yükleniyor"
+              style={{ height: 168, marginHorizontal: spacing.lg, marginTop: spacing.xs, borderRadius: 28, backgroundColor: colors.backgroundElevated }}
+            />
+          )
+        ) : null}
         {billing && data ? (
           <>
             <HeroCard tone="emerald" style={{ marginTop: spacing.xs }}>

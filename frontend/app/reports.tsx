@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Image, RefreshControl, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Image, RefreshControl, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
 import { useFocusEffect } from "expo-router";
 import { FadeIn, FadeInUp, SafeAnimatedView } from "../src/components/SafeAnimatedView";
@@ -10,6 +10,7 @@ import { Card, SectionTitle } from "../src/ui/ListRow";
 import { Chip, ChipRow } from "../src/ui/Chip";
 import { canAccess } from "../src/auth/permissions";
 import { EmptyState } from "../src/components/EmptyState";
+import { Skeleton } from "../src/components/Skeleton";
 import { palette, radius, spacing, tabular, type } from "../src/theme/tokens";
 import type { Palette } from "../src/theme/tokens";
 import { getOrders, getSalesReportsOverview } from "../src/api";
@@ -31,7 +32,7 @@ import {
 } from "../src/components/reports/reportUtils";
 import type { Order, ReportsOverview } from "../src/types";
 
-type ReportsCache = { reports: ReportsOverview; orders: Order[]; rangeKey: string };
+type ReportsCache = { reports: ReportsOverview; orders: Order[]; rangeKey: string; previousRevenue?: number | null };
 
 // Sekmeye geri dönüldüğünde veri bu süreden eskiyse yeniden yüklenir.
 const STALE_MS = 2 * 60 * 1000;
@@ -44,6 +45,30 @@ const hero = palette.dark;
 function formatPct(pct: number) {
   const sign = pct >= 0 ? "+" : "-";
   return `${sign}%${Math.abs(pct).toFixed(1).replace(".", ",")}`;
+}
+
+// Sunucu dönem uzunluğuna göre günlük, haftalık ("2026-W40") ya da aylık ("2026-11") kova döndürür.
+type BucketKind = "day" | "week" | "month";
+const MONTHS_TR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+
+function bucketKindOf(key: string): BucketKind {
+  if (/^\d{4}-W\d{1,2}$/.test(key)) return "week";
+  if (/^\d{4}-\d{2}$/.test(key)) return "month";
+  return "day";
+}
+
+// Kova anahtarını okunur metne çevirir; ham anahtar ekrana basılmaz.
+function bucketHint(bucket: { date: string; label?: string }, kind: BucketKind) {
+  const key = String(bucket.date || "");
+  if (kind === "week") {
+    const [year, week] = key.split("-W");
+    return `${Number(week)}. hafta · ${year}`;
+  }
+  if (kind === "month") {
+    const month = MONTHS_TR[Number(key.slice(5, 7)) - 1];
+    return month ? `${month} ${key.slice(0, 4)}` : bucket.label || "-";
+  }
+  return formatDayLabelFull(key);
 }
 
 // Grafik ve gösterge için kanal rengi; tanınmayan kanallar sırayla nötr vurgu renklerini alır.
@@ -141,37 +166,57 @@ function ReportsContent() {
   const { colors, shadows } = useTheme();
   const { width: screenWidth } = useWindowDimensions();
   const [range, setRange] = useState<RangeT>(() => presetRanges().find((p) => p.key === "30d")!);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [reports, setReports] = useState<ReportsOverview | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [previousRevenue, setPreviousRevenue] = useState(0);
+  // null: önceki dönem bilinmiyor (istek başarısız ya da önbellekte yok); trend gösterilmez.
+  const [previousRevenue, setPreviousRevenue] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const loadSeq = useRef(0);
   const lastLoadedAt = useRef(0);
 
   const load = useCallback(async (silent = false) => {
-    if (!token) return;
+    if (!token) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     const seq = ++loadSeq.current;
     if (!silent) setLoading(true);
     // Offline cache — sadece aynı range key için
     if (!silent) {
       const cached = await loadCache<ReportsCache>("reports_cache");
+      // Daha yeni bir istek başladıysa göstergeleri o yönetir.
+      if (seq !== loadSeq.current) return;
       if (cached && cached.rangeKey === range.key && cached.reports) {
         setReports(cached.reports);
         setOrders(cached.orders || []);
+        setPreviousRevenue(typeof cached.previousRevenue === "number" ? cached.previousRevenue : null);
         setIsOffline(true);
         setLoading(false);
       }
     }
+    // Başarısız yüklemede eldeki (önbellek ya da önceki) rapor korunur; sıfırlarla ezilmez, önbelleğe yazılmaz.
+    let failed = false;
     try {
+      let apiFailed = false as boolean;
+      let ordersFailed = false as boolean;
       const days = rangeDays(range);
       const isApiWindow = ["7d", "30d", "90d", "thisMonth"].includes(range.key);
       const normalizedDays = periodDaysFromRangeKey(range.key, days);
       const apiResp = isApiWindow
-        ? await getSalesReportsOverview(token, normalizedDays, { startDate: range.start, endDate: range.end }).catch(() => null)
+        ? await getSalesReportsOverview(token, normalizedDays, { startDate: range.start, endDate: range.end }).catch(() => {
+            apiFailed = true;
+            return null;
+          })
         : null;
+      if (seq !== loadSeq.current) return;
+      if (apiFailed) {
+        failed = true;
+        return;
+      }
       const apiHasData =
         apiResp &&
         (Number(apiResp.total_revenue || 0) > 0 ||
@@ -179,36 +224,67 @@ function ReportsContent() {
           (apiResp.daily_sales || []).length > 0 ||
           (apiResp.channel_breakdown || []).length > 0);
 
-      const ordersRaw = await getOrders(token, undefined, { page: 1, perPage: 500, sortBy: "-order_date" }).catch(() => [] as Order[]);
+      const shouldUseApiDirectly = Boolean(apiHasData && isApiWindow);
+      // Sunucu dönemi hesaplayabiliyorsa siparişler telefona indirilmez; en çok satanlar ve önceki dönem de sunucudan gelir.
+      // Yalnızca özel tarih aralığında (sunucu bitiş tarihi desteklemez) son 500 sipariş telefonda toplanır.
+      let prevFromServer: number | null = null;
+      if (shouldUseApiDirectly) {
+        const spanMs = range.end.getTime() - range.start.getTime();
+        const prevStart = new Date(range.start.getTime() - spanMs - 1);
+        const wider = await getSalesReportsOverview(token, normalizedDays, { startDate: prevStart }).catch(() => null);
+        if (wider) prevFromServer = Math.max(0, Number(wider.total_revenue || 0) - Number(apiResp?.total_revenue || 0));
+      }
+      const ordersRaw = shouldUseApiDirectly
+        ? ([] as Order[])
+        : await getOrders(token, undefined, { page: 1, perPage: 500, sortBy: "-order_date" }).catch(() => {
+            ordersFailed = true;
+            return [] as Order[];
+          });
       if (seq !== loadSeq.current) return;
+      if (ordersFailed) {
+        failed = true;
+        return;
+      }
       const orderList = Array.isArray(ordersRaw) ? ordersRaw : [];
       setOrders(orderList);
 
-      let result: ReportsOverview | null = null;
-      const shouldUseApiDirectly = apiHasData && isApiWindow;
-      if (shouldUseApiDirectly) {
-        result = apiResp as ReportsOverview;
-      } else {
-        const fromOrders = buildFromOrders(orderList, range.start, range.end);
-        result = fromOrders;
-      }
-      if (seq !== loadSeq.current) return;
-      if (result && apiHasData && Array.isArray(apiResp?.status_breakdown)) {
+      const result: ReportsOverview = shouldUseApiDirectly
+        ? (apiResp as ReportsOverview)
+        : buildFromOrders(orderList, range.start, range.end);
+      if (apiHasData && Array.isArray(apiResp?.status_breakdown)) {
         result.status_breakdown = apiResp?.status_breakdown;
       }
+      // Sunucu yolunda "önceki dönem" isteği başarısızsa değer null kalır; sahte yüzde üretilmez.
+      const prevValue = shouldUseApiDirectly ? prevFromServer : computePreviousRevenue(orderList, range);
       setReports(result);
+      setPreviousRevenue(prevValue);
       setIsOffline(false);
-      if (result) {
-        await saveCache("reports_cache", { reports: result, orders: orderList, rangeKey: range.key });
+      await saveCache("reports_cache", { reports: result, orders: orderList, rangeKey: range.key, previousRevenue: prevValue });
+    } catch {
+      failed = true;
+    } finally {
+      // Yalnızca en güncel istek göstergeleri kapatır; eskiyen istek yenisinin durumuna dokunmaz.
+      if (seq === loadSeq.current) {
+        if (failed) setIsOffline(true);
+        setLoading(false);
+        setRefreshing(false);
       }
-
-      setPreviousRevenue(computePreviousRevenue(orderList, range));
-    } catch {}
-    finally {
-      setLoading(false);
-      setRefreshing(false);
     }
   }, [token, range]);
+
+  // Dönem değişince önceki dönemin rakamları yeni dönemin verisiymiş gibi görünmesin diye eldeki veri düşürülür.
+  const changeRange = useCallback(
+    (r: RangeT) => {
+      if (r.key === range.key && r.start.getTime() === range.start.getTime() && r.end.getTime() === range.end.getTime()) return;
+      setReports(null);
+      setOrders([]);
+      setPreviousRevenue(null);
+      setIsOffline(false);
+      setLoading(true);
+      setRange(r);
+    },
+    [range]
+  );
 
   // İlk açılışta ve dönem ya da oturum değiştiğinde yükler.
   useEffect(() => {
@@ -231,12 +307,30 @@ function ReportsContent() {
   const channelBreakdown = (reports?.channel_breakdown || []).slice().sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0));
   const dailyData = reports?.daily_sales || [];
 
-  const trendPct = previousRevenue > 0 ? ((totalRevenue - previousRevenue) / previousRevenue) * 100 : totalRevenue > 0 ? 100 : 0;
+  // Seçili dönem için henüz rapor yokken sıfırlar yerine yükleniyor durumu gösterilir.
+  const pending = loading && !reports;
+  const trendPct: number | null =
+    previousRevenue == null
+      ? null
+      : previousRevenue > 0
+        ? ((totalRevenue - previousRevenue) / previousRevenue) * 100
+        : totalRevenue > 0
+          ? 100
+          : 0;
   const sparkData = dailyData.map((d) => Number(d.revenue || 0));
   const topDay = dailyData.slice().sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0))[0];
+  const bucketKind = bucketKindOf(String(dailyData[0]?.date || ""));
+  const topBucketTitle = bucketKind === "week" ? "En verimli hafta" : bucketKind === "month" ? "En verimli ay" : "En verimli gün";
   const topChannel = channelBreakdown[0];
   // Top products from orders (within range)
   const topProducts = useMemo(() => {
+    // Sunucu en çok satanları veriyorsa onlar kullanılır; sunucunun sırası (adet, sonra ciro) korunur.
+    const server = (reports as { top_products?: { name?: string; sales?: number; revenue?: number }[] } | null)?.top_products;
+    if (Array.isArray(server) && server.length > 0 && orders.length === 0) {
+      return server
+        .map((p) => ({ name: String(p.name || "Ürün"), image: "", qty: Number(p.sales || 0), revenue: Number(p.revenue || 0) }))
+        .slice(0, 5);
+    }
     const map = new Map<string, { name: string; image: string; qty: number; revenue: number }>();
     for (const o of orders) {
       const ts = orderTimestamp(o);
@@ -259,8 +353,8 @@ function ReportsContent() {
         map.set(key, existing);
       }
     }
-    return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
-  }, [orders, range]);
+    return Array.from(map.values()).sort((a, b) => b.qty - a.qty || b.revenue - a.revenue).slice(0, 5);
+  }, [orders, range, reports]);
 
   const quickPills: RangeT[] = useMemo(() => {
     const all = presetRanges();
@@ -268,7 +362,9 @@ function ReportsContent() {
   }, []);
 
   const isCustomActive = !quickPills.find((p) => p.key === range.key);
-  const trendUp = trendPct >= 0;
+  const trendUp = (trendPct ?? 0) >= 0;
+  // Sıra adede göre olduğundan çubuk ölçeği gösterilen satırların en yüksek cirosuna göre alınır.
+  const maxProductRevenue = Math.max(1, ...topProducts.map((x) => x.revenue));
   const statusBreakdown = Array.isArray(reports?.status_breakdown) ? reports.status_breakdown : [];
   // Kart kenar boşluğu ve iç dolgusu düşüldükten sonra kalan grafik genişliği.
   const sparkWidth = Math.max(120, screenWidth - spacing.lg * 4);
@@ -276,7 +372,7 @@ function ReportsContent() {
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="reports-screen">
       <StackHeader title="Raporlar" subtitle="Satış ve kanal analizi" />
-      <NetworkErrorBanner visible={isOffline} offline />
+      <NetworkErrorBanner visible={isOffline && !!reports} offline />
       <ScrollView
         contentContainerStyle={{ paddingBottom: spacing.huge }}
         refreshControl={
@@ -297,7 +393,7 @@ function ReportsContent() {
               testID={`reports-period-${p.key}`}
               label={p.label.replace("Son ", "")}
               selected={range.key === p.key}
-              onPress={() => setRange(p)}
+              onPress={() => changeRange(p)}
             />
           ))}
           <Chip
@@ -308,207 +404,236 @@ function ReportsContent() {
           />
         </ChipRow>
 
-        <SafeAnimatedView entering={FadeIn.delay(100).duration(450)} style={[styles.heroCard, shadows.lg]}>
-          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-            <Svg width="100%" height="100%" viewBox="0 0 360 240" preserveAspectRatio="xMidYMid slice">
-              <Defs>
-                <LinearGradient id="rpHero" x1="0" y1="0" x2="1" y2="1">
-                  <Stop offset="0" stopColor={colors.heroGradientStart} stopOpacity="1" />
-                  <Stop offset="1" stopColor={colors.heroGradientEnd} stopOpacity="1" />
-                </LinearGradient>
-                <LinearGradient id="rpGlow" x1="0" y1="0" x2="1" y2="1">
-                  <Stop offset="0" stopColor={colors.heroAccent} stopOpacity="0.28" />
-                  <Stop offset="1" stopColor={colors.heroAccent} stopOpacity="0" />
-                </LinearGradient>
-              </Defs>
-              <Path d="M0,0 L360,0 L360,240 L0,240Z" fill="url(#rpHero)" />
-              <Path d="M0,0 L360,0 L360,140 L0,200 Z" fill="url(#rpGlow)" />
-            </Svg>
+        {pending ? (
+          <View style={styles.pendingWrap} accessible accessibilityRole="progressbar" accessibilityLabel="Rapor yükleniyor" testID="reports-loading">
+            <Skeleton height={220} borderRadius={radius.xl} />
+            <Skeleton width="40%" height={14} style={{ marginTop: spacing.sm }} />
+            <Skeleton height={168} borderRadius={radius.lg} />
+            <Skeleton width="40%" height={14} style={{ marginTop: spacing.sm }} />
+            <Skeleton height={168} borderRadius={radius.lg} />
           </View>
-
-          <Text style={[type.caption, { color: hero.textSecondary }]} numberOfLines={1}>
-            {`Toplam ciro · ${rangeLabel(range)}`}
-          </Text>
-          <AnimatedNumber testID="reports-total-revenue" value={totalRevenue} format={(n) => formatTry(n)} style={[type.largeTitle, tabular, styles.heroValue]} />
-
-          <View style={styles.heroTrendRow}>
-            <View style={[styles.heroTrendPill, { backgroundColor: trendUp ? hero.successBg : hero.errorBg }]}>
-              {trendUp ? <TrendUpIcon size={14} color={hero.success} /> : <TrendDownIcon size={14} color={hero.error} />}
-              <Text style={[type.caption, tabular, { color: trendUp ? hero.success : hero.error, fontWeight: "700" }]}>{formatPct(trendPct)}</Text>
-            </View>
-            <Text style={[type.caption, { color: hero.textSecondary, flex: 1 }]} numberOfLines={1}>
-              önceki döneme göre
-            </Text>
-          </View>
-
-          <View style={styles.heroSparkWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-            <Sparkline data={sparkData.length ? sparkData : [0, 0]} width={sparkWidth} height={70} color={colors.heroAccent} fillOpacity={0.3} />
-          </View>
-
-          <View style={styles.heroFooter}>
-            <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.heroFooterTint, { backgroundColor: hero.textPrimary }]} />
-            <HeroStat label="Sipariş" value={formatCompact(totalOrders)} />
-            <View style={[styles.heroFootDivider, { backgroundColor: hero.textTertiary }]} />
-            <HeroStat label="Ort. sepet" value={formatTry(aov)} />
-            <View style={[styles.heroFootDivider, { backgroundColor: hero.textTertiary }]} />
-            <HeroStat label="Mağaza" value={String(channelBreakdown.length)} />
-          </View>
-        </SafeAnimatedView>
-
-        {!loading && totalRevenue === 0 && totalOrders === 0 ? (
-          <SafeAnimatedView
-            entering={FadeInUp.delay(140).duration(400)}
-            style={[styles.notice, { backgroundColor: colors.warningBg, borderColor: colors.warning }]}
-          >
-            <ZapIcon size={16} color={colors.warning} />
-            <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>
-              Bu dönem için veri bulunamadı. Tarih aralığını genişletmeyi deneyin.
-            </Text>
-          </SafeAnimatedView>
-        ) : null}
-
-        <SafeAnimatedView entering={FadeInUp.delay(180).duration(450)}>
-          <SectionTitle title="Öne çıkanlar" />
-          <Card style={styles.block}>
-            <InsightRow
-              icon={<TrendUpIcon size={16} color={colors.success} />}
-              label="En güçlü mağaza"
-              value={topChannel ? `${topChannel.label || topChannel.provider}` : "Veri yok"}
-              hint={topChannel ? `${formatTry(topChannel.revenue)} · ${topChannel.orders} sipariş` : undefined}
-            />
-            <InsightRow
-              divider
-              icon={<CheckIcon size={16} color={colors.primary} />}
-              label="En verimli gün"
-              value={topDay ? formatTry(topDay.revenue) : "-"}
-              hint={topDay ? formatDayLabelFull(topDay.date) : undefined}
-            />
-            <InsightRow
-              divider
-              icon={trendUp ? <TrendUpIcon size={16} color={colors.success} /> : <TrendDownIcon size={16} color={colors.error} />}
-              label="Önceki döneme göre değişim"
-              value={formatPct(trendPct)}
-              hint={previousRevenue > 0 ? `Önceki dönem: ${formatTry(previousRevenue)}` : "Önceki dönemde veri yok"}
-              valueColor={trendUp ? colors.success : colors.error}
-            />
-          </Card>
-        </SafeAnimatedView>
-
-        <SafeAnimatedView entering={FadeInUp.delay(240).duration(450)}>
-          <SectionTitle
-            title="Mağaza dağılımı"
-            action={<Text style={[type.caption, tabular, { color: colors.textTertiary }]}>{`${channelBreakdown.length} mağaza`}</Text>}
+        ) : !reports ? (
+          <EmptyState
+            icon={<ChartIcon size={30} color={colors.textTertiary} />}
+            title="Rapor yüklenemedi"
+            description="Bağlantınızı kontrol edip yeniden deneyiniz."
+            actionLabel="Yeniden dene"
+            onAction={() => load()}
           />
-          <Card padded style={styles.block}>
-            {channelBreakdown.length === 0 ? (
-              <Text style={[type.footnote, { color: colors.textTertiary }]}>Bu dönem için mağaza verisi bulunamadı.</Text>
-            ) : (
-              <View style={styles.donutRow}>
-                <View style={styles.donutWrap}>
-                  <DonutChart
-                    size={DONUT_SIZE}
-                    strokeWidth={18}
-                    data={channelBreakdown.map((c, idx) => ({
-                      label: c.label || c.provider,
-                      value: Number(c.revenue || 0),
-                      color: channelColor(c.provider, idx, colors),
-                    }))}
-                  />
-                  <View pointerEvents="none" style={styles.donutCenter}>
-                    <Text style={[type.caption, { color: colors.textTertiary }]}>Toplam</Text>
-                    <Text style={[type.headline, tabular, { color: colors.textPrimary }]} numberOfLines={1}>
-                      {formatCompact(totalRevenue)}
-                    </Text>
-                  </View>
+        ) : (
+          <>
+            <SafeAnimatedView entering={FadeIn.delay(100).duration(450)} style={[styles.heroCard, shadows.lg]}>
+              <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+                <Svg width="100%" height="100%" viewBox="0 0 360 240" preserveAspectRatio="xMidYMid slice">
+                  <Defs>
+                    <LinearGradient id="rpHero" x1="0" y1="0" x2="1" y2="1">
+                      <Stop offset="0" stopColor={colors.heroGradientStart} stopOpacity="1" />
+                      <Stop offset="1" stopColor={colors.heroGradientEnd} stopOpacity="1" />
+                    </LinearGradient>
+                    <LinearGradient id="rpGlow" x1="0" y1="0" x2="1" y2="1">
+                      <Stop offset="0" stopColor={colors.heroAccent} stopOpacity="0.28" />
+                      <Stop offset="1" stopColor={colors.heroAccent} stopOpacity="0" />
+                    </LinearGradient>
+                  </Defs>
+                  <Path d="M0,0 L360,0 L360,240 L0,240Z" fill="url(#rpHero)" />
+                  <Path d="M0,0 L360,0 L360,140 L0,200 Z" fill="url(#rpGlow)" />
+                </Svg>
+              </View>
+
+              <Text style={[type.caption, { color: hero.textSecondary }]} numberOfLines={1}>
+                {`Toplam ciro · ${rangeLabel(range)}`}
+              </Text>
+              <AnimatedNumber testID="reports-total-revenue" value={totalRevenue} format={(n) => formatTry(n)} style={[type.largeTitle, tabular, styles.heroValue]} />
+
+              {trendPct != null ? (
+              <View style={styles.heroTrendRow}>
+                <View style={[styles.heroTrendPill, { backgroundColor: trendUp ? hero.successBg : hero.errorBg }]}>
+                  {trendUp ? <TrendUpIcon size={14} color={hero.success} /> : <TrendDownIcon size={14} color={hero.error} />}
+                  <Text style={[type.caption, tabular, { color: trendUp ? hero.success : hero.error, fontWeight: "700" }]}>{formatPct(trendPct)}</Text>
                 </View>
-                <View style={styles.legend}>
-                  {channelBreakdown.slice(0, 5).map((c, i) => {
-                    const pct = totalRevenue > 0 ? (Number(c.revenue || 0) / totalRevenue) * 100 : 0;
+                <Text style={[type.caption, { color: hero.textSecondary, flex: 1 }]} numberOfLines={1}>
+                  önceki döneme göre
+                </Text>
+              </View>
+            ) : null}
+
+            <View style={styles.heroSparkWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                <Sparkline data={sparkData.length ? sparkData : [0, 0]} width={sparkWidth} height={70} color={colors.heroAccent} fillOpacity={0.3} />
+              </View>
+
+              <View style={styles.heroFooter}>
+                <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.heroFooterTint, { backgroundColor: hero.textPrimary }]} />
+                <HeroStat label="Sipariş" value={formatCompact(totalOrders)} />
+                <View style={[styles.heroFootDivider, { backgroundColor: hero.textTertiary }]} />
+                <HeroStat label="Ort. sepet" value={formatTry(aov)} />
+                <View style={[styles.heroFootDivider, { backgroundColor: hero.textTertiary }]} />
+                <HeroStat label="Mağaza" value={String(channelBreakdown.length)} />
+              </View>
+            </SafeAnimatedView>
+
+            {!loading && totalRevenue === 0 && totalOrders === 0 ? (
+              <SafeAnimatedView
+                entering={FadeInUp.delay(140).duration(400)}
+                style={[styles.notice, { backgroundColor: colors.warningBg, borderColor: colors.warning }]}
+              >
+                <ZapIcon size={16} color={colors.warning} />
+                <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>
+                  Bu dönem için veri bulunamadı. Tarih aralığını genişletmeyi deneyin.
+                </Text>
+              </SafeAnimatedView>
+            ) : null}
+
+            <SafeAnimatedView entering={FadeInUp.delay(180).duration(450)}>
+              <SectionTitle title="Öne çıkanlar" />
+              <Card style={styles.block}>
+                <InsightRow
+                  icon={<TrendUpIcon size={16} color={colors.success} />}
+                  label="En güçlü mağaza"
+                  value={topChannel ? `${topChannel.label || topChannel.provider}` : "Veri yok"}
+                  hint={topChannel ? `${formatTry(topChannel.revenue)} · ${topChannel.orders} sipariş` : undefined}
+                />
+                <InsightRow
+                  divider
+                  icon={<CheckIcon size={16} color={colors.primary} />}
+                  label={topBucketTitle}
+                  value={topDay ? formatTry(topDay.revenue) : "-"}
+                  hint={topDay ? bucketHint(topDay, bucketKind) : undefined}
+                />
+                <InsightRow
+                  divider
+                  icon={
+                    trendPct == null ? (
+                      <TrendUpIcon size={16} color={colors.textTertiary} />
+                    ) : trendUp ? (
+                      <TrendUpIcon size={16} color={colors.success} />
+                    ) : (
+                      <TrendDownIcon size={16} color={colors.error} />
+                    )
+                  }
+                  label="Önceki döneme göre değişim"
+                  value={trendPct == null ? "—" : formatPct(trendPct)}
+                  hint={
+                    previousRevenue == null
+                      ? "Önceki dönem verisi alınamadı"
+                      : previousRevenue > 0
+                        ? `Önceki dönem: ${formatTry(previousRevenue)}`
+                        : "Önceki dönemde veri yok"
+                  }
+                  valueColor={trendPct == null ? colors.textTertiary : trendUp ? colors.success : colors.error}
+                />
+              </Card>
+            </SafeAnimatedView>
+
+            <SafeAnimatedView entering={FadeInUp.delay(240).duration(450)}>
+              <SectionTitle
+                title="Mağaza dağılımı"
+                action={<Text style={[type.caption, tabular, { color: colors.textTertiary }]}>{`${channelBreakdown.length} mağaza`}</Text>}
+              />
+              <Card padded style={styles.block}>
+                {channelBreakdown.length === 0 ? (
+                  <Text style={[type.footnote, { color: colors.textTertiary }]}>Bu dönem için mağaza verisi bulunamadı.</Text>
+                ) : (
+                  <View style={styles.donutRow}>
+                    <View style={styles.donutWrap}>
+                      <DonutChart
+                        size={DONUT_SIZE}
+                        strokeWidth={18}
+                        data={channelBreakdown.map((c, idx) => ({
+                          label: c.label || c.provider,
+                          value: Number(c.revenue || 0),
+                          color: channelColor(c.provider, idx, colors),
+                        }))}
+                      />
+                      <View pointerEvents="none" style={styles.donutCenter}>
+                        <Text style={[type.caption, { color: colors.textTertiary }]}>Toplam</Text>
+                        <Text style={[type.headline, tabular, { color: colors.textPrimary }]} numberOfLines={1}>
+                          {formatCompact(totalRevenue)}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.legend}>
+                      {channelBreakdown.slice(0, 5).map((c, i) => {
+                        const pct = totalRevenue > 0 ? (Number(c.revenue || 0) / totalRevenue) * 100 : 0;
+                        return (
+                          <View key={`${c.provider}-${i}`} style={styles.legendRow}>
+                            <View style={[styles.legendDot, { backgroundColor: channelColor(c.provider, i, colors) }]} />
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <Text style={[type.callout, { color: colors.textPrimary, fontWeight: "600" }]} numberOfLines={1}>
+                                {providerLabel(c.provider)}
+                              </Text>
+                              <Text style={[type.caption, tabular, { color: colors.textTertiary }]} numberOfLines={1}>
+                                {`${formatTry(c.revenue)} · %${pct.toFixed(1).replace(".", ",")}`}
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                )}
+              </Card>
+            </SafeAnimatedView>
+
+            <SafeAnimatedView entering={FadeInUp.delay(300).duration(450)}>
+              <SectionTitle title="En çok satanlar" action={<Text style={[type.caption, { color: colors.textTertiary }]}>İlk 5 ürün</Text>} />
+              <Card style={styles.block}>
+                {topProducts.length === 0 ? (
+                  <Text style={[type.footnote, { color: colors.textTertiary, padding: spacing.md }]}>Sipariş verisi yetersiz.</Text>
+                ) : (
+                  topProducts.map((p, idx) => {
+                    const pct = Math.min(100, Math.max(6, Math.round((p.revenue / maxProductRevenue) * 100)));
                     return (
-                      <View key={`${c.provider}-${i}`} style={styles.legendRow}>
-                        <View style={[styles.legendDot, { backgroundColor: channelColor(c.provider, i, colors) }]} />
+                      <View
+                        key={`${p.name}-${idx}`}
+                        accessible
+                        accessibilityLabel={`${p.name}, ${formatTry(p.revenue)}, ${p.qty} adet`}
+                        style={[styles.productRow, idx > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+                      >
+                        <View style={[styles.productImgWrap, { backgroundColor: colors.surfaceMuted, borderColor: colors.borderSubtle }]}>
+                          {p.image ? (
+                            <Image source={{ uri: p.image }} style={styles.productImg} resizeMode="cover" />
+                          ) : (
+                            <PackageIcon size={20} color={colors.textTertiary} />
+                          )}
+                        </View>
                         <View style={{ flex: 1, minWidth: 0 }}>
-                          <Text style={[type.callout, { color: colors.textPrimary, fontWeight: "600" }]} numberOfLines={1}>
-                            {providerLabel(c.provider)}
+                          <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={1}>
+                            {p.name}
                           </Text>
-                          <Text style={[type.caption, tabular, { color: colors.textTertiary }]} numberOfLines={1}>
-                            {`${formatTry(c.revenue)} · %${pct.toFixed(1).replace(".", ",")}`}
-                          </Text>
+                          <View style={[styles.productBarTrack, { backgroundColor: colors.surfaceMuted }]}>
+                            <View style={[styles.productBarFill, { width: `${pct}%`, backgroundColor: colors.primary }]} />
+                          </View>
+                        </View>
+                        <View style={{ alignItems: "flex-end" }}>
+                          <Text style={[type.bodyStrong, tabular, { color: colors.textPrimary }]}>{formatTry(p.revenue)}</Text>
+                          <Text style={[type.caption, tabular, { color: colors.textTertiary, marginTop: 2 }]}>{`${p.qty} adet`}</Text>
                         </View>
                       </View>
                     );
-                  })}
-                </View>
-              </View>
-            )}
-          </Card>
-        </SafeAnimatedView>
+                  })
+                )}
+              </Card>
+            </SafeAnimatedView>
 
-        <SafeAnimatedView entering={FadeInUp.delay(300).duration(450)}>
-          <SectionTitle title="En çok satanlar" action={<Text style={[type.caption, { color: colors.textTertiary }]}>İlk 5 ürün</Text>} />
-          <Card style={styles.block}>
-            {topProducts.length === 0 ? (
-              <Text style={[type.footnote, { color: colors.textTertiary, padding: spacing.md }]}>Sipariş verisi yetersiz.</Text>
-            ) : (
-              topProducts.map((p, idx) => {
-                const max = topProducts[0]?.revenue || 1;
-                const pct = Math.max(6, Math.round((p.revenue / max) * 100));
-                return (
-                  <View
-                    key={`${p.name}-${idx}`}
-                    accessible
-                    accessibilityLabel={`${p.name}, ${formatTry(p.revenue)}, ${p.qty} adet`}
-                    style={[styles.productRow, idx > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
-                  >
-                    <View style={[styles.productImgWrap, { backgroundColor: colors.surfaceMuted, borderColor: colors.borderSubtle }]}>
-                      {p.image ? (
-                        <Image source={{ uri: p.image }} style={styles.productImg} resizeMode="cover" />
-                      ) : (
-                        <PackageIcon size={20} color={colors.textTertiary} />
-                      )}
-                    </View>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={1}>
-                        {p.name}
-                      </Text>
-                      <View style={[styles.productBarTrack, { backgroundColor: colors.surfaceMuted }]}>
-                        <View style={[styles.productBarFill, { width: `${pct}%`, backgroundColor: colors.primary }]} />
+            {statusBreakdown.length > 0 ? (
+              <SafeAnimatedView entering={FadeInUp.delay(360).duration(450)}>
+                <SectionTitle title="Sipariş durumu" />
+                <Card padded style={styles.block}>
+                  <View style={styles.statusGrid}>
+                    {statusBreakdown.map((s, i) => (
+                      <View key={`${s.status}-${i}`} accessible style={[styles.statusCell, { backgroundColor: colors.surfaceMuted }]}>
+                        <Text style={[type.headline, tabular, { color: colors.textPrimary }]}>{s.count}</Text>
+                        <Text style={[type.caption, styles.statusLabel, { color: colors.textTertiary }]} numberOfLines={1}>
+                          {s.status}
+                        </Text>
                       </View>
-                    </View>
-                    <View style={{ alignItems: "flex-end" }}>
-                      <Text style={[type.bodyStrong, tabular, { color: colors.textPrimary }]}>{formatTry(p.revenue)}</Text>
-                      <Text style={[type.caption, tabular, { color: colors.textTertiary, marginTop: 2 }]}>{`${p.qty} adet`}</Text>
-                    </View>
+                    ))}
                   </View>
-                );
-              })
-            )}
-          </Card>
-        </SafeAnimatedView>
-
-        {statusBreakdown.length > 0 ? (
-          <SafeAnimatedView entering={FadeInUp.delay(360).duration(450)}>
-            <SectionTitle title="Sipariş durumu" />
-            <Card padded style={styles.block}>
-              <View style={styles.statusGrid}>
-                {statusBreakdown.map((s, i) => (
-                  <View key={`${s.status}-${i}`} accessible style={[styles.statusCell, { backgroundColor: colors.surfaceMuted }]}>
-                    <Text style={[type.headline, tabular, { color: colors.textPrimary }]}>{s.count}</Text>
-                    <Text style={[type.caption, styles.statusLabel, { color: colors.textTertiary }]} numberOfLines={1}>
-                      {s.status}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            </Card>
-          </SafeAnimatedView>
-        ) : null}
-
-        {loading ? (
-          <View style={{ paddingVertical: spacing.xl }}>
-            <ActivityIndicator color={colors.primary} accessibilityLabel="Yükleniyor" />
-          </View>
-        ) : null}
+                </Card>
+              </SafeAnimatedView>
+            ) : null}
+          </>
+        )}
       </ScrollView>
 
       <DateRangeModal
@@ -516,7 +641,7 @@ function ReportsContent() {
         onClose={() => setPickerOpen(false)}
         currentRange={range}
         onSelect={(r) => {
-          setRange(r);
+          changeRange(r);
           setPickerOpen(false);
         }}
       />
@@ -541,6 +666,7 @@ function HeroStat({ label, value }: { label: string; value: string }) {
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },
+  pendingWrap: { marginHorizontal: spacing.lg, marginTop: spacing.xs, gap: spacing.sm },
   heroCard: { marginHorizontal: spacing.lg, marginTop: spacing.xs, borderRadius: radius.xl, padding: spacing.lg, overflow: "hidden", minHeight: 220 },
   heroValue: { color: "#FFFFFF", marginTop: 2 },
   heroTrendRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, marginTop: spacing.xs },

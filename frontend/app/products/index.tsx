@@ -21,7 +21,7 @@ import type { CatalogProduct } from "../../src/types";
 const PER_PAGE = 30;
 
 export default function ProductsScreen() {
-  const params = useLocalSearchParams<{ q?: string }>();
+  const params = useLocalSearchParams<{ q?: string; t?: string }>();
   const { token } = useAuth();
   const { colors } = useTheme();
   const [search, setSearch] = useState("");
@@ -38,7 +38,7 @@ export default function ProductsScreen() {
   // Barkod okuyucudan dönen değer arama kutusuna yazılır.
   useEffect(() => {
     if (params.q) setSearch(String(params.q));
-  }, [params.q]);
+  }, [params.q, params.t]);
 
   const fetchPage = useCallback(
     async (nextPage: number, mode: "reset" | "more" | "refresh") => {

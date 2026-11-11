@@ -96,13 +96,15 @@ function useRoleGuard() {
   const { token, user, bootLoading } = useAuth();
   const { toast } = useFeedback();
   const first = String(segments[0] ?? "");
+  // Sekme ekranlarında rota adı ikinci parçadır.
+  const routeKey = first === "(tabs)" ? String((segments as string[])[1] ?? "") : first;
 
   useEffect(() => {
     if (!rootNavState?.key || bootLoading || !token || !user) return;
-    if (canOpenRoute(user, first)) return;
+    if (canOpenRoute(user, routeKey)) return;
     toast("Bu ekrana erişim yetkiniz yok.", "error");
     router.replace("/(tabs)/dashboard");
-  }, [rootNavState?.key, bootLoading, token, user, first, router, toast]);
+  }, [rootNavState?.key, bootLoading, token, user, routeKey, router, toast]);
 }
 
 function RootInner() {

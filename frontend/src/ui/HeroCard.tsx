@@ -17,29 +17,33 @@ export function HeroCard({ tone = "blue", children, style }: { tone?: keyof type
   const { shadows } = useTheme();
   const t = TONES[tone];
   const id = `hero-${tone}`;
+  // Gölge dış kutuda, kırpma iç kutuda: iOS aynı kutuda ikisini birlikte çizmez.
   return (
-    <View style={[styles.card, shadows.lg, style]}>
-      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-        <Svg width="100%" height="100%" preserveAspectRatio="none">
-          <Defs>
-            <LinearGradient id={`${id}-bg`} x1="0" y1="0" x2="1" y2="1">
-              <Stop offset="0" stopColor={t.from} />
-              <Stop offset="1" stopColor={t.to} />
-            </LinearGradient>
-            <LinearGradient id={`${id}-glow`} x1="0" y1="0" x2="1" y2="1">
-              <Stop offset="0" stopColor={t.glow} stopOpacity="0.28" />
-              <Stop offset="1" stopColor={t.glow} stopOpacity="0" />
-            </LinearGradient>
-          </Defs>
-          <Rect x="0" y="0" width="100%" height="100%" fill={`url(#${id}-bg)`} />
-          <Circle cx="88%" cy="6%" r="120" fill={`url(#${id}-glow)`} />
-        </Svg>
+    <View style={[styles.shadowWrap, { backgroundColor: t.to }, shadows.lg, style]}>
+      <View style={styles.card}>
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <Svg width="100%" height="100%" preserveAspectRatio="none">
+            <Defs>
+              <LinearGradient id={`${id}-bg`} x1="0" y1="0" x2="1" y2="1">
+                <Stop offset="0" stopColor={t.from} />
+                <Stop offset="1" stopColor={t.to} />
+              </LinearGradient>
+              <LinearGradient id={`${id}-glow`} x1="0" y1="0" x2="1" y2="1">
+                <Stop offset="0" stopColor={t.glow} stopOpacity="0.28" />
+                <Stop offset="1" stopColor={t.glow} stopOpacity="0" />
+              </LinearGradient>
+            </Defs>
+            <Rect x="0" y="0" width="100%" height="100%" fill={`url(#${id}-bg)`} />
+            <Circle cx="88%" cy="6%" r="120" fill={`url(#${id}-glow)`} />
+          </Svg>
+        </View>
+        {children}
       </View>
-      {children}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { marginHorizontal: spacing.lg, borderRadius: radius.xxl, padding: spacing.lg, overflow: "hidden" },
+  shadowWrap: { marginHorizontal: spacing.lg, borderRadius: radius.xxl },
+  card: { borderRadius: radius.xxl, padding: spacing.lg, overflow: "hidden" },
 });

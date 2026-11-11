@@ -17,6 +17,10 @@ export default function MenuScreen() {
   const { unread } = useNotifications();
   const { confirm } = useFeedback();
 
+  const canProducts = canAccess(user, "catalog") || canAccess(user, "inventory");
+  const canReports = canAccess(user, "reports");
+  const showOps = canProducts || canReports || canAccess(user, "catalog");
+
   const onLogout = async () => {
     const ok = await confirm({
       title: "Çıkış yapılsın mı?",
@@ -31,6 +35,8 @@ export default function MenuScreen() {
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="menu-screen">
       <TabHeader title="Menü" eyebrow={user?.company_name || undefined} />
       <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl }}>
+        {showOps ? (
+          <>
         <SectionTitle title="Operasyon" />
         <Card style={styles.block}>
           {canAccess(user, "catalog") || canAccess(user, "inventory") ? (
@@ -46,7 +52,7 @@ export default function MenuScreen() {
           {canAccess(user, "reports") ? (
             <ListRow
               testID="menu-reports"
-              divider
+              divider={canProducts}
               leading={<IconTile tint={colors.violetSoft}><ChartIcon size={18} color={colors.violet} /></IconTile>}
               title="Raporlar"
               subtitle="Satış, kanal ve ürün analizi"
@@ -57,7 +63,7 @@ export default function MenuScreen() {
           {canAccess(user, "catalog") ? (
             <ListRow
               testID="menu-jobs"
-              divider
+              divider={canProducts || canReports}
               leading={<IconTile tint={colors.infoBg}><RefreshIcon size={18} color={colors.info} /></IconTile>}
               title="Senkron işleri"
               subtitle="Ürün eşitleme sonuçları"
@@ -66,6 +72,8 @@ export default function MenuScreen() {
             />
           ) : null}
         </Card>
+          </>
+        ) : null}
 
         <SectionTitle title="Hesap" />
         <Card style={styles.block}>

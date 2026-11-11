@@ -21,6 +21,20 @@ const TABS: { name: TabName; label: string; Icon: typeof HomeIcon; accent: (c: P
   { name: "menu", label: "Menü", Icon: MenuIcon, accent: (c) => c.violet },
 ];
 
+function luminance(hex: string) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (v: number) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * f((n >> 16) & 255) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255);
+}
+
+// Vurgu rengi açıksa (koyu temadaki turuncu, sarı gibi) simge koyu çizilir.
+function inkOn(bg: string) {
+  return 1.05 / (luminance(bg) + 0.05) >= 3 ? "#FFFFFF" : "#0B1220";
+}
+
 function TabButton({ label, Icon, accent, active, onPress, testID }: { label: string; Icon: typeof HomeIcon; accent: string; active: boolean; onPress: () => void; testID: string }) {
   const { colors } = useTheme();
   const scale = useSharedValue(1);
@@ -49,7 +63,7 @@ function TabButton({ label, Icon, accent, active, onPress, testID }: { label: st
           animated,
         ]}
       >
-        <Icon size={22} color={active ? "#FFFFFF" : colors.textSecondary} strokeWidth={active ? 2.2 : 1.8} />
+        <Icon size={22} color={active ? inkOn(accent) : colors.textSecondary} strokeWidth={active ? 2.2 : 1.8} />
       </Animated.View>
       <Text numberOfLines={1} style={[styles.label, { color: active ? colors.textPrimary : colors.textTertiary, fontWeight: active ? "700" : "500" }]}>
         {label}

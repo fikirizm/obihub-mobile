@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
+import { printOrShare } from "../../src/pdf";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
@@ -70,13 +71,7 @@ export default function InvoiceDetail() {
       }
       const path = `${FileSystem.cacheDirectory}invoice-${invoice.id}.pdf`;
       await FileSystem.writeAsStringAsync(path, data, { encoding: FileSystem.EncodingType.Base64 });
-      try {
-        await Print.printAsync({ uri: path });
-      } catch {
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(path, { mimeType: "application/pdf" });
-        }
-      }
+      await printOrShare(path);
     } catch (e: any) {
       toast(e?.message || "PDF açılamadı.", "error");
     } finally {

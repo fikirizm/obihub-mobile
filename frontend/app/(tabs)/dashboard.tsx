@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
-import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -19,6 +18,7 @@ import { DashboardSkeleton } from "../../src/components/Skeleton";
 import { loadCache, saveCache } from "../../src/offlineCache";
 import { useFocusLoad } from "../../src/hooks/useFocusLoad";
 import { TabHeader } from "../../src/ui/Header";
+import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
 import { Button } from "../../src/ui/Button";
 import { Card, IconTile, ListRow, SectionTitle } from "../../src/ui/ListRow";
 import type { DashboardStats, Order, SalesChartPoint, SmartAlert, User } from "../../src/types";
@@ -144,24 +144,8 @@ export default function DashboardScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={colors.primary} />}
         >
           {/* Ciro kartı: bugün, dönem cirosu ve günlük grafik */}
-          <SafeAnimatedView entering={FadeInDown.duration(420)} style={[styles.hero, shadows.lg]}>
-            <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-              <Svg width="100%" height="100%" preserveAspectRatio="none">
-                <Defs>
-                  <LinearGradient id="dashHero" x1="0" y1="0" x2="1" y2="1">
-                    <Stop offset="0" stopColor={colors.heroGradientEnd} />
-                    <Stop offset="1" stopColor={colors.heroGradientStart} />
-                  </LinearGradient>
-                  <LinearGradient id="dashGlow" x1="0" y1="0" x2="1" y2="1">
-                    <Stop offset="0" stopColor={colors.heroAccent} stopOpacity="0.28" />
-                    <Stop offset="1" stopColor={colors.heroAccent} stopOpacity="0" />
-                  </LinearGradient>
-                </Defs>
-                <Rect x="0" y="0" width="100%" height="100%" fill="url(#dashHero)" />
-                <Circle cx="88%" cy="6%" r="120" fill="url(#dashGlow)" />
-              </Svg>
-            </View>
-
+          <SafeAnimatedView entering={FadeInDown.duration(420)}>
+          <HeroCard tone="blue" style={{ marginTop: spacing.xs }}>
             <View style={styles.heroTop}>
               <View style={styles.liveChip}>
                 <View style={styles.liveDot} />
@@ -229,6 +213,7 @@ export default function DashboardScreen() {
                 </Text>
               </View>
             </View>
+          </HeroCard>
           </SafeAnimatedView>
 
           {/* Bekleyen ve kargodaki siparişler */}
@@ -353,13 +338,9 @@ export default function DashboardScreen() {
   );
 }
 
-// Ciro kartı her iki temada da koyu zeminlidir; üzerindeki renkler sabittir.
-const ON_HERO = { text: "#FFFFFF", soft: "#CBD5E1", faint: "rgba(255,255,255,0.14)", live: "#4ADE80" };
-
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },
-  hero: { marginHorizontal: spacing.lg, marginTop: spacing.xs, borderRadius: radius.xxl, padding: spacing.lg, overflow: "hidden" },
   heroTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
   liveChip: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: ON_HERO.faint, borderRadius: 9999, paddingHorizontal: 12, height: 30 },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: ON_HERO.live },
@@ -368,7 +349,7 @@ const styles = StyleSheet.create({
   rangeBtn: { height: 30, paddingHorizontal: 14, borderRadius: 9999, alignItems: "center", justifyContent: "center" },
   rangeBtnActive: { backgroundColor: ON_HERO.text },
   rangeText: { color: ON_HERO.soft, fontSize: 13, fontWeight: "600" },
-  rangeTextActive: { color: "#0B1220" },
+  rangeTextActive: { color: ON_HERO.ink },
   heroValue: { color: ON_HERO.text, fontSize: 40, lineHeight: 46, fontWeight: "800", letterSpacing: -1.2 },
   heroSub: { color: ON_HERO.soft, fontSize: 14, fontWeight: "500", marginTop: 2 },
   chartWrap: { marginTop: spacing.md, minHeight: 64 },

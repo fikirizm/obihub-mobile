@@ -2,21 +2,17 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import { Stack, useLocalSearchParams } from "expo-router";
+import { printOrShare } from "../../src/pdf";
 import * as Haptics from "expo-haptics";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
-import * as FileSystem from "expo-file-system/legacy";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import {
   createHepsiJetShipment,
   enqueueOrderCloudPrint,
-  getHepsiJetLabelWithProducts,
-  getHepsiburadaOrderLabel,
   getOrderDetail,
-  getShippingLabel,
-  getTrendyolOrderLabel,
 } from "../../src/api";
 import {
   displayOrderNo,
@@ -24,7 +20,6 @@ import {
   formatOrderDateTime,
   formatTry,
   getOrderTrackingNo,
-  providerKey,
   providerLabel,
   relativeDateLabel,
   statusKindFromOrder,
@@ -35,6 +30,7 @@ import { PlatformLogo } from "../../src/components/PlatformLogo";
 import { CloudIcon, PackageIcon, PrinterIcon, TruckIcon } from "../../src/components/Icons";
 import { Button } from "../../src/ui/Button";
 import { useFeedback } from "../../src/ui/Feedback";
+import { fetchOrderLabelFile } from "../../src/labels";
 import { StackHeader } from "../../src/ui/Header";
 import { Card, ListRow, SectionTitle } from "../../src/ui/ListRow";
 import { saveCache, loadCache } from "../../src/offlineCache";
@@ -87,43 +83,9 @@ export default function OrderDetail() {
 
   const provider = providerHint || (order ? String(order.integration_provider || order.provider || order.channel || "") : "");
 
-  // Etiket PDF'ini cihaza yazar; dosya yolunu döndürür. Etiket yoksa nedenini açıklayan hata fırlatır.
   const fetchLabelFile = async (): Promise<string> => {
     if (!token || !order) throw new Error("Oturum bulunamadı.");
-    const path = `${FileSystem.cacheDirectory}order-${order.id}.pdf`;
-    const writeBase64 = async (data: string) => {
-      await FileSystem.writeAsStringAsync(path, data, { encoding: FileSystem.EncodingType.Base64 });
-      return path;
-    };
-    const k = providerKey(provider);
-    if (k === "trendyol") {
-      const r = await getTrendyolOrderLabel(token, order.id);
-      const data = r?.data || r?.label_data || "";
-      if (data) return writeBase64(data);
-      throw new Error("Trendyol bu sipariş için etiket döndürmedi.");
-    }
-    if (k === "hepsiburada") {
-      const r = await getHepsiburadaOrderLabel(token, order.id);
-      const data = r?.data || r?.data_base64 || "";
-      if (data) return writeBase64(data);
-      // Hepsiburada bazı paketlerde dosya yerine indirme bağlantısı verir.
-      if (r?.url && /^https:\/\//i.test(r.url)) {
-        const dl = await FileSystem.downloadAsync(r.url, path);
-        if (dl.status >= 200 && dl.status < 300) return path;
-      }
-      throw new Error("Hepsiburada bu sipariş için etiket döndürmedi.");
-    }
-    // Diğer kanallar (WooCommerce, n11 vb.): etiket, sipariş için oluşturulmuş kargo gönderisinden gelir.
-    const info = await getShippingLabel(token, order.id);
-    const barcode = String(info?.barcode || info?.cargo_barcodes?.[0]?.barcode || "").trim();
-    const cargoProvider = String(info?.cargo_provider || "").trim().toLowerCase();
-    if (!barcode && cargoProvider !== "yurtici") {
-      throw new Error("Bu sipariş için henüz kargo gönderisi oluşturulmamış. Önce web panelden gönderi oluşturun.");
-    }
-    const r = await getHepsiJetLabelWithProducts(token, order.id, barcode || undefined);
-    const data = r?.data || r?.data_base64 || "";
-    if (data) return writeBase64(data);
-    throw new Error(r?.message || "Kargo firması bu gönderi için etiket döndürmedi.");
+    return fetchOrderLabelFile(token, order.id, provider);
   };
 
   const handlePrint = async () => {
@@ -140,13 +102,7 @@ export default function OrderDetail() {
         return;
       }
       setPrintStatus("Yazıcıya gönderiliyor...");
-      try {
-        await Print.printAsync({ uri: path });
-      } catch {
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(path, { mimeType: "application/pdf" });
-        }
-      }
+      await printOrShare(path);
       setPrintStatus(null);
     } catch (e: any) {
       toast(e?.message || "Yazdırma başarısız.", "error");

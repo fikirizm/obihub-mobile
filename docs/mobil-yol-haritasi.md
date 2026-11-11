@@ -91,6 +91,15 @@ Açık kalanlar (sonraki tur):
 - **Faz 5:** davet et ekranı, Android yayın ayarı, otomatik testler.
 - **Düşük öncelikli doğrulanmış hatalar:** çok para birimli alacak/borcun TL gösterilmesi, aynı süzgeçle ikinci gelişte uygulanmaması, raporlarda çift yükleme ve dil karışıklığı, ListRow erişilebilirlik etiketinde sağdaki değerin okunmaması.
 
+### Faz 1 tamamlama ve görünüm düzeltmesi (11 Kasım 2026, build 51)
+
+- Görünüm geri bildirimi üzerine: üst çubukta logo, karşılama, bildirim, tema ve çıkış düğmeleri; alt çubukta renkli altı sekme (Panel, Mağaza, Sipariş, Finans, HepsiJet, Menü); Panel ve Finans'ta gradyan kartlar. Raporlar Menü'ye taşındı.
+- Eski ekranlar (sipariş, fatura, teklif, mağaza, HepsiJet, raporlar, giriş) temaya taşındı: sistem uyarı kutusu ve 12 punto altı yazı kalmadı.
+- Sipariş listesinde kaydırarak etiket yazdırma; raporlar 7/30/90 gün ve "bu ay" için sunucu verisini kullanıyor.
+- Bildirim merkezine destek yanıtları; Panel'e vadesi geçen alacak.
+- Build öncesi inceleme 21 bulgu doğruladı (kritik/yüksek yok); tamamı düzeltildi.
+- Faz 1'de açık kalan: kargo hatası bildirimi (sunucunun push göndermesi gerekir).
+
 ## 4. Web'de olup mobilde olmayanlar
 
 Öncelik, özelliğin telefonda ne kadar işe yaradığına göre verildi.

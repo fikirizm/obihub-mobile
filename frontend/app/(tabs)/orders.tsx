@@ -1,14 +1,19 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Platform, RefreshControl, StyleSheet, Text, View } from "react-native";
+import ReanimatedSwipeable, { type SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
+import * as Haptics from "expo-haptics";
 import { useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, type } from "../../src/theme/tokens";
 import { getIntegrations, getOrdersPage } from "../../src/api";
 import { providerLabel } from "../../src/utils";
-import { InboxIcon } from "../../src/components/Icons";
+import { InboxIcon, PrinterIcon } from "../../src/components/Icons";
+import { PressableScale } from "../../src/components/KPICard";
+import { printOrderLabel } from "../../src/labels";
+import { useFeedback } from "../../src/ui/Feedback";
 import { EmptyState } from "../../src/components/EmptyState";
-import { OrderRow } from "../../src/components/OrderRow";
+import { OrderRow, orderProvider } from "../../src/components/OrderRow";
 import { OrderCardSkeleton } from "../../src/components/Skeleton";
 import { useDebounce } from "../../src/hooks/useDebounce";
 import { TabHeader } from "../../src/ui/Header";
@@ -29,6 +34,41 @@ const FILTERS: { key: FilterKey; label: string; statuses: string[] }[] = [
 
 const PER_PAGE = 30;
 
+// Sipariş satırını sola kaydırınca "Etiket" eylemi açılır (yalnızca cihazda).
+function SwipeableOrder({ order, divider, onPrint, busy }: { order: Order; divider: boolean; onPrint: (o: Order) => void; busy: boolean }) {
+  const { colors } = useTheme();
+  const ref = useRef<SwipeableMethods>(null);
+  if (Platform.OS === "web") return <OrderRow order={order} divider={divider} />;
+  return (
+    <ReanimatedSwipeable
+      ref={ref}
+      friction={2}
+      rightThreshold={36}
+      overshootRight={false}
+      renderRightActions={() => (
+        <PressableScale
+          testID={`order-print-${order.id}`}
+          accessibilityRole="button"
+          accessibilityLabel="Etiketi yazdır"
+          disabled={busy}
+          onPress={() => {
+            ref.current?.close();
+            onPrint(order);
+          }}
+          style={[styles.swipeAction, { backgroundColor: colors.primary }]}
+        >
+          {busy ? <ActivityIndicator color="#FFFFFF" /> : <PrinterIcon size={20} color="#FFFFFF" />}
+          <Text style={styles.swipeText}>Etiket</Text>
+        </PressableScale>
+      )}
+    >
+      <View style={{ backgroundColor: colors.surface }}>
+        <OrderRow order={order} divider={divider} />
+      </View>
+    </ReanimatedSwipeable>
+  );
+}
+
 export default function OrdersScreen() {
   const params = useLocalSearchParams<{ filter?: string; t?: string }>();
   const { token } = useAuth();
@@ -47,6 +87,29 @@ export default function OrdersScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestId = useRef(0);
+  const { toast } = useFeedback();
+  const [printingId, setPrintingId] = useState<string | null>(null);
+
+  const printLabel = useCallback(
+    async (order: Order) => {
+      if (!token) return;
+      if (printingId) {
+        toast("Bir etiket hazırlanıyor, lütfen bekleyin.");
+        return;
+      }
+      setPrintingId(order.id);
+      toast("Etiket hazırlanıyor…");
+      try {
+        const printed = await printOrderLabel(token, order.id, orderProvider(order));
+        if (printed) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      } catch (e: any) {
+        toast(e?.message || "Etiket alınamadı.", "error");
+      } finally {
+        setPrintingId(null);
+      }
+    },
+    [token, printingId, toast]
+  );
 
   // Panel'deki kısayollar süzgeçle gelir (ör. bekleyen siparişler).
   useEffect(() => {
@@ -157,7 +220,7 @@ export default function OrdersScreen() {
                 index === orders.length - 1 && { borderBottomWidth: 1 },
               ]}
             >
-              <OrderRow order={item} divider={index > 0} />
+              <SwipeableOrder order={item} divider={index > 0} onPrint={printLabel} busy={printingId === item.id} />
             </View>
           )}
           ListEmptyComponent={
@@ -187,6 +250,8 @@ export default function OrdersScreen() {
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
   list: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing.xxl },
+  swipeAction: { width: 88, alignItems: "center", justifyContent: "center", gap: 4 },
+  swipeText: { color: "#FFFFFF", fontSize: 13, fontWeight: "600" },
   first: { borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, overflow: "hidden" },
   last: { borderBottomLeftRadius: radius.lg, borderBottomRightRadius: radius.lg, overflow: "hidden" },
 });

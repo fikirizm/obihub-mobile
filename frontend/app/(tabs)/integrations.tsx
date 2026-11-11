@@ -21,6 +21,14 @@ import type { Integration, Order } from "../../src/types";
 
 type IntegCache = { list: Integration[]; orderCounts: Record<string, { all: number; pending: number; shipped: number }> };
 
+// Sunucudaki entegrasyon durumları: success, failed, pending.
+function statusOf(status: string | undefined, colors: { success: string; error: string; warning: string }) {
+  const k = String(status || "").trim().toLowerCase();
+  if (k === "success") return { label: "Bağlı", color: colors.success };
+  if (k === "failed") return { label: "Bağlantı sorunu", color: colors.error };
+  return { label: "Kurulum bekliyor", color: colors.warning };
+}
+
 export default function IntegrationsScreen() {
   const { token } = useAuth();
   const { colors } = useTheme();
@@ -128,9 +136,9 @@ export default function IntegrationsScreen() {
                         {name}
                       </Text>
                       <View style={styles.metaRow}>
-                        <View style={[styles.statusDot, { backgroundColor: colors.success }]} />
+                        <View style={[styles.statusDot, { backgroundColor: statusOf(item.status, colors).color }]} />
                         <Text style={[type.footnote, styles.metaText, { color: colors.textSecondary }]} numberOfLines={1}>
-                          {providerLabel(provider)} · Bağlı
+                          {providerLabel(provider)} · {statusOf(item.status, colors).label}
                         </Text>
                       </View>
                       <View style={styles.badgeRow}>

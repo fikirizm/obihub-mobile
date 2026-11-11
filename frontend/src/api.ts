@@ -267,6 +267,7 @@ export async function getSalesReportsOverview(
   const daily_sales = Array.isArray(timelineSource)
     ? timelineSource.map((x: any) => ({
         date: String(x?.date ?? x?.key ?? "-"),
+        label: x?.label ? String(x.label) : undefined,
         revenue: Number(x?.revenue ?? x?.amount ?? 0),
         orders: Number(x?.orders ?? x?.count ?? 0),
       }))
@@ -714,7 +715,7 @@ export async function getFinanceOverview(token: string) {
   const byCur = d?.by_currency && typeof d.by_currency === "object" ? d.by_currency : null;
   const tl = byCur ? byCur.TRY || byCur.TRL || null : null;
   const multiCurrency = Boolean(byCur) && Object.keys(byCur).some((c) => c !== "TRY" && c !== "TRL");
-  const pick = (key: string) => Number((multiCurrency && tl ? tl[key] : d?.[key]) || 0);
+  const pick = (key: string) => Number((multiCurrency ? tl?.[key] : d?.[key]) || 0);
   return {
     cash_balance: Number(d?.cash_balance || 0),
     receivable: pick("receivable"),

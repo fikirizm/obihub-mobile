@@ -1,3 +1,4 @@
+import { printOrShare } from "../../src/pdf";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -224,13 +225,7 @@ export default function HepsiJetScreen() {
     try {
       const path = await fetchLabelFile(s);
       if (!path) return;
-      try {
-        await Print.printAsync({ uri: path });
-      } catch {
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(path, { mimeType: "application/pdf" });
-        }
-      }
+      await printOrShare(path);
     } catch (e: any) {
       toast(e?.message || "Etiket açılamadı.", "error");
     } finally {

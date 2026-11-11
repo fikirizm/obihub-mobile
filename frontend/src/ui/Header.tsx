@@ -87,7 +87,7 @@ export function TabHeader({ title, eyebrow, subtitle }: { title: string; eyebrow
       <SafeAnimatedView entering={FadeInDown.duration(350)} style={styles.titleBlock}>
         {lead ? (
           <Text style={[type.caption, styles.eyebrow, { color: colors.primary }]} numberOfLines={1}>
-            {lead}
+            {lead.toLocaleUpperCase("tr-TR")}
           </Text>
         ) : null}
         <Text accessibilityRole="header" style={[type.largeTitle, { color: colors.textPrimary }]} numberOfLines={1}>
@@ -132,12 +132,12 @@ const styles = StyleSheet.create({
   tabWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
   barRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   identity: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.xs },
-  logoTile: { width: 42, height: 42, borderRadius: radius.md, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  logoTile: { width: 44, height: 44, borderRadius: radius.md, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   logo: { width: 28, height: 28 },
   titleBlock: { marginTop: spacing.md },
-  eyebrow: { fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 2 },
+  eyebrow: { fontWeight: "700", letterSpacing: 0.4, marginBottom: 2 },
   stackWrap: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
-  iconBtn: { width: 42, height: 42, borderRadius: radius.md, alignItems: "center", justifyContent: "center", borderWidth: 1 },
+  iconBtn: { width: 44, height: 44, borderRadius: radius.md, alignItems: "center", justifyContent: "center", borderWidth: 1 },
   rightSlot: { minWidth: 44, alignItems: "flex-end" },
   badge: {
     position: "absolute",

@@ -170,7 +170,7 @@ export type ReportsOverview = {
   total_orders?: number;
   average_order_value?: number;
   status_breakdown?: Array<{ status: string; count: number }>;
-  daily_sales?: Array<{ date: string; revenue: number; orders: number }>;
+  daily_sales?: Array<{ date: string; label?: string; revenue: number; orders: number }>;
   channel_breakdown?: Array<{ provider: string; label: string; revenue: number; orders: number }>;
 };
 

@@ -9,7 +9,7 @@ import { getAccountingSettings, getMe, getOrders, getSupportNotifications, login
 import { displayOrderNo, formatOrderDateTime, isNewOrderStatus, providerLabel } from "../utils";
 import { clearCatalogCache } from "../catalogCache";
 import { clearAllCache } from "../offlineCache";
-import { addNotifications, clearNotificationsStore, hydrateNotifications } from "../notifications/store";
+import { addNotifications, clearNotificationsStore, hydrateNotifications, syncSupportRead } from "../notifications/store";
 import type { Order, User } from "../types";
 
 type AuthContextValue = {
@@ -406,7 +406,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // Destek ekibinden gelen okunmamış yanıtlar bildirim merkezine eklenir (ayrıca sesli bildirim üretilmez).
         getSupportNotifications(token)
-          .then((rows) =>
+          .then((rows) => {
+            syncSupportRead(rows.map((r) => String(r.ticket_id || "")).filter(Boolean));
             addNotifications(
               rows
                 .filter((r) => r.ticket_id)
@@ -418,8 +419,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   ticketId: r.ticket_id,
                   ts: r.last_super_message_at ? new Date(r.last_super_message_at).getTime() || Date.now() : Date.now(),
                 }))
-            )
-          )
+            );
+          })
           .catch(() => {});
 
         if (newOrders.length > 0) {

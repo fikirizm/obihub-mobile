@@ -18,7 +18,7 @@ export default function ScanScreen() {
     if (handled.current || !data) return;
     handled.current = true;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    router.dismissTo({ pathname: "/products", params: { q: data } });
+    router.dismissTo({ pathname: "/products", params: { q: data, t: String(Date.now()) } });
   };
 
   return (

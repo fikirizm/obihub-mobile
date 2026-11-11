@@ -85,3 +85,14 @@ export function useNotifications() {
   const list = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   return { list, unread: list.reduce((n, x) => n + (x.read ? 0 : 1), 0) };
 }
+
+// Sunucuda okunmamış yanıtı kalmayan destek taleplerinin bildirimlerini okundu sayar
+// (talep Destek ekranından açıldığında bildirim merkezi de güncellenir).
+export function syncSupportRead(activeTicketIds: string[]) {
+  const active = new Set(activeTicketIds);
+  const stale = (n: AppNotification) => n.kind === "support" && !n.read && !(n.ticketId && active.has(n.ticketId));
+  if (!items.some(stale)) return;
+  items = items.map((n) => (stale(n) ? { ...n, read: true } : n));
+  emit();
+  persist();
+}
