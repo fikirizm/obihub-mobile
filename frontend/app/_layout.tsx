@@ -9,6 +9,7 @@ import { ThemeProvider, useTheme } from "../src/theme/ThemeProvider";
 import { AuthProvider, useAuth } from "../src/auth/AuthProvider";
 import { SubscriptionLockOverlay } from "../src/components/SubscriptionLockOverlay";
 import { FeedbackProvider } from "../src/ui/Feedback";
+import { AppLockProvider } from "../src/security/AppLock";
 import { DataCacheProvider } from "../src/context/DataCacheContext";
 
 function navigateToOrder(
@@ -102,7 +103,9 @@ export default function RootLayout() {
           <AuthProvider>
             <DataCacheProvider>
               <FeedbackProvider>
-                <RootInner />
+                <AppLockProvider>
+                  <RootInner />
+                </AppLockProvider>
               </FeedbackProvider>
             </DataCacheProvider>
           </AuthProvider>

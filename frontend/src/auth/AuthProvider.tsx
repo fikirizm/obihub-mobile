@@ -22,6 +22,8 @@ type AuthContextValue = {
   retrySubscription: () => Promise<void>;
   // Paraşüt bağlantısı: true/false bilinir, null henüz öğrenilemedi (ekranlar gizlenmez).
   parasutConnected: boolean | null;
+  // Etkin muhasebe programı ("parasut", "bizimhesap" ...); bilinmiyorsa null.
+  accountingProvider: string | null;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -198,6 +200,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [bootLoading, setBootLoading] = useState(true);
   const [subscriptionLock, setSubscriptionLock] = useState<string | null>(null);
   const [parasutConnected, setParasutConnected] = useState<boolean | null>(null);
+  const [accountingProvider, setAccountingProvider] = useState<string | null>(null);
   // Ön plandaki yoklama ile push işleyicisinin ortak kullandığı "bildirimi verilmiş sipariş" kümesi.
   const seenOrderIdsRef = useRef<Set<string>>(new Set());
 
@@ -268,6 +271,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setSubscriptionLock(null);
     setParasutConnected(null);
+    setAccountingProvider(null);
     clearNotificationsStore();
     Notifications.setBadgeCountAsync(0).catch(() => {});
   }, []);
@@ -289,6 +293,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const settings = await getAccountingSettings(authToken);
       const connected = Boolean(settings?.parasut?.connected) || settings?.provider === "parasut";
       setParasutConnected(connected);
+      setAccountingProvider(settings?.provider ? String(settings.provider) : null);
       await Storage.setItemAsync(PARASUT_CONNECTED_KEY, connected ? "1" : "0");
     } catch {
       // Öğrenilemedi: son bilinen değer kalır.
@@ -480,6 +485,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       subscriptionLock,
       retrySubscription,
       parasutConnected,
+      accountingProvider,
     }),
     [
       token,
@@ -491,6 +497,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       subscriptionLock,
       retrySubscription,
       parasutConnected,
+      accountingProvider,
     ]
   );
 

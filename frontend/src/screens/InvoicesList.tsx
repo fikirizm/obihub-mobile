@@ -6,7 +6,7 @@ import { SafeAnimatedView } from "../components/SafeAnimatedView";
 import { useAuth } from "../auth/AuthProvider";
 import { useTheme } from "../theme/ThemeProvider";
 import { fontWeight, radius, spacing } from "../theme/tokens";
-import { getInvoices } from "../api";
+import { getAccountingInvoices } from "../api";
 import { formatTry } from "../utils";
 import { PressableScale } from "../components/KPICard";
 import { StatusBadge } from "../components/StatusBadge";
@@ -20,7 +20,7 @@ import { useDebounce } from "../hooks/useDebounce";
 import type { Invoice } from "../types";
 
 // Finans sekmesine gömülen Paraşüt fatura listesi.
-export function InvoicesList() {
+export function InvoicesList({ source = "parasut" }: { source?: "parasut" | "bizimhesap" }) {
   const { token } = useAuth();
   const { colors, mode, shadows } = useTheme();
   const [list, setList] = useState<Invoice[]>([]);
@@ -38,7 +38,7 @@ export function InvoicesList() {
     if (!token) return;
     if (!silent) setLoading(true);
     if (!silent) {
-      const cached = await loadCache<Invoice[]>("invoices_list");
+      const cached = await loadCache<Invoice[]>(`invoices_list_${source}`);
       if (cached && cached.length > 0) {
         setList(cached);
         setIsOffline(true);
@@ -46,21 +46,20 @@ export function InvoicesList() {
       }
     }
     try {
-      const data = await getInvoices(token, { page: 1, perPage: 600 });
-      const invoices = Array.isArray(data?.invoices) ? data.invoices : [];
+      const invoices = await getAccountingInvoices(token, source, { page: 1, perPage: 600 });
       setList(invoices);
       setIsOffline(false);
-      await saveCache("invoices_list", invoices);
+      await saveCache(`invoices_list_${source}`, invoices);
     } catch {
       if (list.length === 0 && !silent) {
-        const cached = await loadCache<Invoice[]>("invoices_list");
+        const cached = await loadCache<Invoice[]>(`invoices_list_${source}`);
         if (cached) { setList(cached); setIsOffline(true); }
       }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [token]);
+  }, [token, source]);
 
   const debouncedSearch = useDebounce(search, 300);
 
@@ -216,7 +215,7 @@ export function InvoicesList() {
               description={
                 search.trim()
                   ? `"${search.trim()}" için eşleşen fatura bulunamadı. Farklı bir arama dene.`
-                  : "Bu dönemde Paraşüt'te oluşturulmuş fatura bulunmuyor. Başka bir ayı seç veya filtreyi temizle."
+                  : "Bu dönemde muhasebe programında fatura bulunmuyor. Başka bir ay seçin."
               }
               actionLabel={search.trim() ? "Aramayı Temizle" : undefined}
               onAction={search.trim() ? () => setSearch("") : undefined}
@@ -228,7 +227,8 @@ export function InvoicesList() {
               <SafeAnimatedView entering={FadeInDown.delay(index * 35).springify().damping(18)}>
                 <PressableScale
                   testID={`invoice-${item.id}`}
-                  onPress={() => router.push({ pathname: "/invoices/[id]", params: { id: item.id } })}
+                  // BizimHesap faturalarının detay ucu yoktur.
+                  onPress={source === "parasut" ? () => router.push({ pathname: "/invoices/[id]", params: { id: item.id } }) : undefined}
                   style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}
                 >
                   <View style={[styles.iconBox, { backgroundColor: isOfficial ? colors.successBg : colors.warningBg }]}>

@@ -48,6 +48,25 @@ Eksik temel parçalar:
 - Cihazda denenmedi: etiket yazdırma, HepsiJet desi ve müşteri formu, bildirim tekilleştirme.
 - Ertelendi: 9 (Panel rakamları) Faz 1'e alındı; sunucudaki panel uçları tarih ve durum mantığında mobilden farklı, körlemesine geçiş rakamları değiştirir. 7 ve 8 backend değişikliği bekliyor.
 
+### Faz 1–5 durumu (11 Kasım 2026, sürüm 1.1.0)
+
+Yazıldı ve tarayıcıda sahte API ile (`dev/mock-api.js`) denendi; gerçek hesapla ve cihazda denenmedi.
+
+| Faz | Yapılan | Kapsam dışı bırakılan |
+|---|---|---|
+| 1 | Dört sekme + menü, ortak bileşen seti, yeni Panel (sunucu uçları), bildirim merkezi, ayarlar, onaylı çıkış | Eski detay ekranları (sipariş, fatura, teklif, HepsiJet) yeni bileşenlere tam taşınmadı |
+| 2 | Tüm siparişler (arama, süzgeç, sayfalama), kargo gönderisi oluşturma, ürün arama, barkod okuma, ana ve kanal stok/fiyat düzenleme, senkron işleri | Ürün adı/barkod düzenleme, stok hareket geçmişi |
+| 3 | Finans özeti, ObiHub satış faturaları (tahsilat, resmileştirme), Paraşüt/BizimHesap faturaları, cari hesaplar (ekstre, tahsilat), kasa ve bankalar (gelir/gider), Paraşüt gider faturaları | Fatura oluşturma, virman, yeni hesap/cari, BizimHesap gider faturaları |
+| 4 | Gelen e-faturalar (Paraşüt, BenimPOS, Turkcell), PDF görüntüleme | İçeri Al (web pilotu sürüyor, uçlar bayraklı), kalıcı gelen kutusu |
+| 5 | Destek talepleri, abonelik durumu, biyometrik kilit, role göre ekran gösterimi | Android yayını, otomatik testler |
+
+Bilinmesi gerekenler:
+
+- Barkod okuma ve biyometrik kilit yeni native paket ekledi (`expo-camera`, `expo-local-authentication`); OTA güncelleme yetmez, yeni build gerekir. Sürüm bu yüzden 1.1.0.
+- Panel artık "bu ay / geçen ay" yerine "son 7 / 30 gün" gösterir; rakamlar web paneliyle aynı uçlardan gelir.
+- Cari bakiyesinde artı değer alacak, eksi değer borç olarak yorumlandı; gerçek veriyle doğrulanmalı.
+- Finans ve cari ekranları her zaman açık olan uçları kullanır (`/finance/*`, `/customers`, `/local-invoices`); bayraklı okuma modeline bağlanılmadı.
+
 ## 4. Web'de olup mobilde olmayanlar
 
 Öncelik, özelliğin telefonda ne kadar işe yaradığına göre verildi.

@@ -36,7 +36,9 @@ import {
 import { PressableScale } from "../../src/components/KPICard";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
-import { ArrowLeftIcon, CloudIcon, PackageIcon, PrinterIcon } from "../../src/components/Icons";
+import { ArrowLeftIcon, CloudIcon, PackageIcon, PrinterIcon, TruckIcon } from "../../src/components/Icons";
+import { Button } from "../../src/ui/Button";
+import { useFeedback } from "../../src/ui/Feedback";
 import { saveCache, loadCache } from "../../src/offlineCache";
 import type { Order } from "../../src/types";
 
@@ -54,6 +56,8 @@ export default function OrderDetail() {
   const [printBusy, setPrintBusy] = useState(false);
   const [cloudBusy, setCloudBusy] = useState(false);
   const [printStatus, setPrintStatus] = useState<string | null>(null);
+  const [shipBusy, setShipBusy] = useState(false);
+  const { toast, confirm } = useFeedback();
 
   const load = async (silent = false) => {
     if (!token || !orderId) return;
@@ -152,6 +156,42 @@ export default function OrderDetail() {
       setPrintStatus(null);
     } finally {
       setPrintBusy(false);
+    }
+  };
+
+  // Web panelindeki kuralla aynı: pazaryerinin kendi kargosu olan kanallarda ve gönderisi olan siparişte gösterilmez.
+  const canCreateShipment = (() => {
+    if (!order) return false;
+    const status = String(order.status || "").toLowerCase();
+    if (status === "cancelled" || status === "deleted") return false;
+    const channel = String(order.channel || provider || "").toLowerCase();
+    if (["trendyol", "hepsiburada", "idefix", "pazarama"].some((c) => channel.includes(c))) return false;
+    if (channel.includes("n11")) return !order.n11_cargo_tracking;
+    const hasBarcode = (order.cargo_barcodes || []).some((b) => b?.barcode) || Boolean(order.cargo_tracking);
+    return !hasBarcode;
+  })();
+
+  const handleCreateShipment = async () => {
+    if (!token || !order) return;
+    const ok = await confirm({
+      title: "Kargo gönderisi oluşturulsun mu?",
+      message: "Sipariş için kargo firmasında gönderi açılır ve barkod üretilir.",
+      confirmLabel: "Gönderi oluştur",
+    });
+    if (!ok) return;
+    setShipBusy(true);
+    try {
+      const r = await createHepsiJetShipment(token, order.id);
+      if (r?.success) {
+        toast(r.barcode ? `Gönderi oluşturuldu: ${r.barcode}` : r.message || "Gönderi oluşturuldu", "success");
+        await load(true);
+      } else {
+        toast(r?.message || "Gönderi oluşturulamadı.", "error");
+      }
+    } catch (e: any) {
+      toast(e?.message || "Gönderi oluşturulamadı.", "error");
+    } finally {
+      setShipBusy(false);
     }
   };
 
@@ -305,6 +345,21 @@ export default function OrderDetail() {
             )}
           </PressableScale>
         </SafeAnimatedView>
+
+        {canCreateShipment ? (
+          <Button
+            testID="create-shipment-btn"
+            label="Kargo gönderisi oluştur"
+            variant="secondary"
+            icon={<TruckIcon size={18} color={colors.textPrimary} />}
+            busy={shipBusy}
+            onPress={handleCreateShipment}
+            style={{ marginBottom: spacing.sm }}
+          />
+        ) : null}
+        {order.cargo_error_message && String(order.cargo_status || "") === "error" ? (
+          <Text style={{ color: colors.error, fontSize: 13, marginBottom: spacing.sm }}>Son kargo denemesi: {order.cargo_error_message}</Text>
+        ) : null}
 
         {/* Print status indicator */}
         {printStatus ? (

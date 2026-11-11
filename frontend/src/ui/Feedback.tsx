@@ -1,6 +1,6 @@
 // Kısa bildirim (toast) ve onay alt sayfası. Sistem uyarı kutularının yerini alır.
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { AccessibilityInfo, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { AccessibilityInfo, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import Animated, { FadeInDown, FadeOutDown, SlideInDown, SlideOutDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,9 +17,28 @@ type ConfirmOptions = {
   destructive?: boolean;
 };
 
+type NumberPromptOptions = {
+  title: string;
+  message?: string;
+  initial: number;
+  decimal?: boolean;
+  suffix?: string;
+  confirmLabel?: string;
+  // Verilirse tutarın altında açıklama alanı gösterilir.
+  noteLabel?: string;
+};
+
+type ChooseOptions<T extends string> = { title: string; message?: string; options: { value: T; label: string }[] };
+
 type FeedbackValue = {
   toast: (message: string, kind?: ToastKind) => void;
   confirm: (options: ConfirmOptions) => Promise<boolean>;
+  // Sayı ister; vazgeçilirse null döner.
+  promptNumber: (options: NumberPromptOptions) => Promise<number | null>;
+  // Tutar ve açıklama ister; vazgeçilirse null döner.
+  promptEntry: (options: NumberPromptOptions) => Promise<{ amount: number; note: string } | null>;
+  // Seçeneklerden birini seçtirir; vazgeçilirse null döner.
+  choose: <T extends string>(options: ChooseOptions<T>) => Promise<T | null>;
 };
 
 const FeedbackContext = createContext<FeedbackValue | undefined>(undefined);
@@ -30,6 +49,59 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
   const [toastState, setToastState] = useState<{ id: number; message: string; kind: ToastKind } | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmOptions | null>(null);
   const resolver = useRef<((v: boolean) => void) | null>(null);
+  const [numberState, setNumberState] = useState<NumberPromptOptions | null>(null);
+  const [numberText, setNumberText] = useState("");
+  const numberResolver = useRef<((v: number | null) => void) | null>(null);
+  const [noteText, setNoteText] = useState("");
+  const noteRef = useRef("");
+  const [chooseState, setChooseState] = useState<ChooseOptions<string> | null>(null);
+  const chooseResolver = useRef<((v: string | null) => void) | null>(null);
+
+  const choose = useCallback(<T extends string>(options: ChooseOptions<T>) => {
+    return new Promise<T | null>((resolve) => {
+      chooseResolver.current?.(null);
+      chooseResolver.current = resolve as (v: string | null) => void;
+      setChooseState(options as ChooseOptions<string>);
+    });
+  }, []);
+
+  const settleChoice = useCallback((value: string | null) => {
+    chooseResolver.current?.(value);
+    chooseResolver.current = null;
+    setChooseState(null);
+  }, []);
+
+  const promptNumber = useCallback((options: NumberPromptOptions) => {
+    return new Promise<number | null>((resolve) => {
+      numberResolver.current?.(null);
+      numberResolver.current = resolve;
+      setNumberText(options.decimal ? (options.initial ? options.initial.toFixed(2).replace(".", ",") : "") : String(Math.round(options.initial)));
+      setNoteText("");
+      noteRef.current = "";
+      setNumberState(options);
+    });
+  }, []);
+
+  const promptEntry = useCallback(
+    async (options: NumberPromptOptions) => {
+      const amount = await promptNumber({ ...options, noteLabel: options.noteLabel || "Açıklama" });
+      if (amount === null) return null;
+      return { amount, note: noteRef.current.trim() };
+    },
+    [promptNumber]
+  );
+
+  const parsedNumber = (() => {
+    const n = Number(numberText.replace(/\./g, "").replace(",", "."));
+    if (numberText.trim() === "" || !Number.isFinite(n) || n < 0) return null;
+    return numberState?.decimal ? Math.round(n * 100) / 100 : Math.round(n);
+  })();
+
+  const settleNumber = useCallback((value: number | null) => {
+    numberResolver.current?.(value);
+    numberResolver.current = null;
+    setNumberState(null);
+  }, []);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const toast = useCallback((message: string, kind: ToastKind = "info") => {
@@ -59,7 +131,10 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
     if (timer.current) clearTimeout(timer.current);
   }, []);
 
-  const value = useMemo(() => ({ toast, confirm }), [toast, confirm]);
+  const value = useMemo(
+    () => ({ toast, confirm, promptNumber, promptEntry, choose }),
+    [toast, confirm, promptNumber, promptEntry, choose]
+  );
   const toastColor = toastState?.kind === "success" ? colors.success : toastState?.kind === "error" ? colors.error : colors.textPrimary;
 
   return (
@@ -108,6 +183,90 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
           </Animated.View>
         ) : null}
       </Modal>
+      <Modal visible={Boolean(numberState)} transparent animationType="fade" onRequestClose={() => settleNumber(null)} statusBarTranslucent>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+          <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={() => settleNumber(null)} accessibilityLabel="Kapat" />
+          {numberState ? (
+            <Animated.View
+              entering={SlideInDown.duration(220)}
+              exiting={SlideOutDown.duration(180)}
+              testID="number-sheet"
+              accessibilityViewIsModal
+              style={[styles.sheet, { backgroundColor: colors.surface, paddingBottom: insets.bottom + spacing.md }]}
+            >
+              <View style={[styles.grabber, { backgroundColor: colors.border }]} />
+              <Text accessibilityRole="header" style={[type.title, { color: colors.textPrimary, textAlign: "center" }]}>
+                {numberState.title}
+              </Text>
+              {numberState.message ? (
+                <Text style={[type.body, { color: colors.textSecondary, textAlign: "center", marginTop: spacing.xs }]}>{numberState.message}</Text>
+              ) : null}
+              <View style={[styles.numberWrap, { borderColor: colors.primary, backgroundColor: colors.surfaceMuted }]}>
+                <TextInput
+                  testID="number-input"
+                  value={numberText}
+                  onChangeText={(t) => setNumberText(t.replace(numberState.decimal ? /[^0-9.,]/g : /[^0-9]/g, ""))}
+                  keyboardType={numberState.decimal ? "decimal-pad" : "number-pad"}
+                  autoFocus
+                  selectTextOnFocus
+                  accessibilityLabel={numberState.title}
+                  style={[styles.numberInput, { color: colors.textPrimary }]}
+                />
+                {numberState.suffix ? <Text style={[type.headline, { color: colors.textTertiary }]}>{numberState.suffix}</Text> : null}
+              </View>
+              {numberState.noteLabel ? (
+                <TextInput
+                  testID="number-note"
+                  value={noteText}
+                  onChangeText={(t) => {
+                    setNoteText(t);
+                    noteRef.current = t;
+                  }}
+                  placeholder={numberState.noteLabel}
+                  placeholderTextColor={colors.textTertiary}
+                  accessibilityLabel={numberState.noteLabel}
+                  maxLength={140}
+                  style={[styles.noteInput, { color: colors.textPrimary, borderColor: colors.border, backgroundColor: colors.surfaceMuted }]}
+                />
+              ) : null}
+              <Button
+                testID="number-accept"
+                label={numberState.confirmLabel || "Kaydet"}
+                disabled={parsedNumber === null}
+                onPress={() => settleNumber(parsedNumber)}
+                style={{ marginTop: spacing.lg }}
+              />
+              <Button testID="number-cancel" label="Vazgeç" variant="secondary" onPress={() => settleNumber(null)} style={{ marginTop: spacing.xs }} />
+            </Animated.View>
+          ) : null}
+        </KeyboardAvoidingView>
+      </Modal>
+      <Modal visible={Boolean(chooseState)} transparent animationType="fade" onRequestClose={() => settleChoice(null)} statusBarTranslucent>
+        <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={() => settleChoice(null)} accessibilityLabel="Kapat" />
+        {chooseState ? (
+          <Animated.View
+            entering={SlideInDown.duration(220)}
+            exiting={SlideOutDown.duration(180)}
+            testID="choose-sheet"
+            accessibilityViewIsModal
+            style={[styles.sheet, { backgroundColor: colors.surface, paddingBottom: insets.bottom + spacing.md }]}
+          >
+            <View style={[styles.grabber, { backgroundColor: colors.border }]} />
+            <Text accessibilityRole="header" style={[type.title, { color: colors.textPrimary, textAlign: "center" }]}>
+              {chooseState.title}
+            </Text>
+            {chooseState.message ? (
+              <Text style={[type.body, { color: colors.textSecondary, textAlign: "center", marginTop: spacing.xs }]}>{chooseState.message}</Text>
+            ) : null}
+            <View style={{ marginTop: spacing.md, gap: spacing.xs }}>
+              {chooseState.options.map((o) => (
+                <Button key={o.value} testID={`choose-${o.value}`} label={o.label} variant="secondary" onPress={() => settleChoice(o.value)} />
+              ))}
+            </View>
+            <Button testID="choose-cancel" label="Vazgeç" variant="ghost" onPress={() => settleChoice(null)} style={{ marginTop: spacing.xs }} />
+          </Animated.View>
+        ) : null}
+      </Modal>
     </FeedbackContext.Provider>
   );
 }
@@ -143,5 +302,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
   },
+  numberWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    borderWidth: 1.5,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.lg,
+    height: 60,
+  },
+  numberInput: { flex: 1, fontSize: 26, fontWeight: "700", fontVariant: ["tabular-nums"], paddingVertical: 0, height: 60 },
+  noteInput: { borderWidth: 1, borderRadius: radius.md, paddingHorizontal: spacing.md, height: 48, fontSize: 15, marginTop: spacing.sm },
   grabber: { width: 36, height: 4, borderRadius: 2, alignSelf: "center", marginBottom: spacing.md },
 });

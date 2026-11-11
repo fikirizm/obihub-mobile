@@ -1,7 +1,8 @@
 import React from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import Constants from "expo-constants";
 import { useAuth } from "../src/auth/AuthProvider";
+import { useAppLock } from "../src/security/AppLock";
 import { useTheme } from "../src/theme/ThemeProvider";
 import { spacing, type } from "../src/theme/tokens";
 import { StackHeader } from "../src/ui/Header";
@@ -32,7 +33,8 @@ function Value({ children }: { children: React.ReactNode }) {
 export default function SettingsScreen() {
   const { user, logout } = useAuth();
   const { colors, mode, setMode } = useTheme();
-  const { confirm } = useFeedback();
+  const { confirm, toast } = useFeedback();
+  const appLock = useAppLock();
 
   const onLogout = async () => {
     const ok = await confirm({
@@ -66,6 +68,30 @@ export default function SettingsScreen() {
             { value: "dark", label: "Koyu" },
           ]}
         />
+
+        {appLock.supported ? (
+          <>
+            <SectionTitle title="Güvenlik" />
+            <Card style={styles.block}>
+              <ListRow
+                title="Biyometrik kilit"
+                subtitle="Açılışta Face ID veya parmak izi iste"
+                trailing={
+                  <Switch
+                    testID="settings-app-lock"
+                    accessibilityLabel="Biyometrik kilit"
+                    value={appLock.enabled}
+                    onValueChange={async (v) => {
+                      const ok = await appLock.setEnabled(v);
+                      if (!ok) toast("Kimlik doğrulanamadı, ayar değişmedi.", "error");
+                    }}
+                    trackColor={{ true: colors.primary, false: colors.border }}
+                  />
+                }
+              />
+            </Card>
+          </>
+        ) : null}
 
         <SectionTitle title="Uygulama" />
         <Card style={styles.block}>

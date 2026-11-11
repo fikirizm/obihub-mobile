@@ -54,6 +54,10 @@ export type Order = {
   hb_package_id?: string;
 
   // Kargo / Shipping
+  cargo_provider?: string;
+  cargo_barcodes?: { barcode?: string }[];
+  cargo_error_message?: string;
+  n11_cargo_tracking?: string;
   cargo_status?: string;
   cargo_tracking?: string;
   cargo_tracking_number?: string;
@@ -263,3 +267,157 @@ export type SmartAlert = {
 };
 
 export type OrdersPage = { items: Order[]; total: number; page: number; totalPages: number };
+
+export type ChannelRef = { id: string; name: string; platform: string };
+
+export type CatalogProduct = {
+  id: string;
+  name: string;
+  sku?: string;
+  barcode?: string;
+  image_url?: string;
+  stock: number;
+  price: number;
+  channelStocks: { integration_id: string; stock: number; active?: boolean }[];
+  channelPrices: { integration_id: string; price: number; active?: boolean }[];
+};
+
+export type SyncJob = {
+  id: string;
+  product_name?: string;
+  sku?: string;
+  provider?: string;
+  provider_label?: string;
+  integration_name?: string;
+  status: string;
+  message?: string;
+  timestamp?: string;
+  retryable?: boolean;
+};
+
+export type FinanceOverview = {
+  cash_balance: number;
+  receivable: number;
+  overdue_receivable: number;
+  payable: number;
+  overdue_payable: number;
+  month_cash_in: number;
+  month_cash_out: number;
+  today?: string;
+  upcoming: { kind: "receivable" | "payable"; date?: string; amount: number; currency?: string; title?: string; reference?: string }[];
+};
+
+export type CashAccount = {
+  id: string;
+  name: string;
+  account_type?: string;
+  currency?: string;
+  balance: number;
+  bank_name?: string;
+  iban?: string;
+  is_default?: boolean;
+};
+
+export type CashEntry = {
+  id: string;
+  entry_type: "income" | "expense" | "transfer_in" | "transfer_out" | string;
+  amount: number;
+  entry_date?: string;
+  category?: string;
+  description?: string;
+  counterparty_name?: string;
+  running_balance?: number;
+  related_account_name?: string;
+};
+
+export type Party = {
+  id: string;
+  name?: string;
+  company_name?: string;
+  full_name?: string;
+  phone?: string;
+  email?: string;
+  source?: "registered" | "orders" | string;
+  balance: number;
+  contact_role?: string;
+};
+
+export type PartyLedgerRow = { id: string; date?: string; description?: string; reference?: string; debit?: number; credit?: number; balance?: number };
+
+export type LocalInvoice = {
+  id: string;
+  invoice_number?: string;
+  invoice_type?: string;
+  status?: string;
+  display_status?: string;
+  is_overdue?: boolean;
+  customer_name?: string;
+  issue_date?: string;
+  due_date?: string;
+  currency?: string;
+  subtotal?: number;
+  discount_amount?: number;
+  vat_amount?: number;
+  total?: number;
+  paid_amount?: number;
+  remaining_amount?: number;
+  notes?: string;
+  items?: { name?: string; description?: string; product_name?: string; quantity?: number; unit_price?: number; vat_rate?: number; total?: number }[];
+  payments?: { id?: string; amount?: number; date?: string; method?: string }[];
+  parasut_invoice_id?: string;
+  edoc_state?: string;
+  edoc_error?: string;
+};
+
+export type ExpenseInvoice = {
+  id: string;
+  invoice_no?: string;
+  description?: string;
+  supplier_name?: string;
+  issue_date?: string;
+  due_date?: string;
+  gross_total?: number | string;
+  currency?: string;
+  status?: string;
+};
+
+export type IncomingSource = "parasut" | "benimpos" | "turkcell-efatura";
+
+export type IncomingInvoice = {
+  id: string;
+  invoice_no?: string;
+  sender_name?: string;
+  sender_tax_no?: string;
+  issue_date?: string;
+  gross_total?: number | string;
+  currency?: string;
+  status?: string;
+  import_status?: string;
+};
+
+export type SupportTicket = {
+  id: string;
+  ticket_code?: string;
+  topic?: string;
+  subject?: string;
+  status?: string;
+  last_message_preview?: string;
+  last_message_at?: string;
+  unread_from_support?: boolean | number;
+};
+
+export type SupportMessage = { id: string; sender_role?: "user" | "super" | "system" | string; sender_name?: string; message?: string; created_at?: string };
+
+export type TrialStatus = {
+  plan?: string;
+  is_trial?: boolean;
+  billing_cycle?: string;
+  expires_at?: string | null;
+  days_left?: number | null;
+  subscription_status?: string;
+};
+
+export type UsageSummary = {
+  limits?: Record<string, number>;
+  usage?: Record<string, number>;
+};

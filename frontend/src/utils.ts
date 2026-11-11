@@ -344,3 +344,23 @@ export function getOrderTrackingNo(order: Order): string {
   }
   return deepFindTracking(order);
 }
+
+// Para birimiyle tutar. Backend bazı uçlarda TL için "TRL" döndürür.
+export function formatMoney(amount: number | string | undefined | null, currency?: string | null) {
+  const cur = String(currency || "TRY").toUpperCase().replace("TRL", "TRY");
+  if (cur === "TRY") return formatTry(amount);
+  const n = Number(amount || 0);
+  try {
+    return new Intl.NumberFormat("tr-TR", { style: "currency", currency: cur }).format(Number.isFinite(n) ? n : 0);
+  } catch {
+    return `${formatNumber(n, 2)} ${cur}`;
+  }
+}
+
+// "2026-11-11" veya ISO tarihini "11 Kas 2026" biçiminde gösterir.
+export function formatDate(value?: string | null) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value).slice(0, 10);
+  return new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "short", year: "numeric" }).format(d);
+}

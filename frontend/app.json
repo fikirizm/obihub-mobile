@@ -2,7 +2,7 @@
   "expo": {
     "name": "obihub",
     "slug": "frontend",
-    "version": "1.0.15",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "frontend",
@@ -19,7 +19,7 @@
           "remote-notification"
         ]
       },
-      "runtimeVersion": "1.0.15"
+      "runtimeVersion": "1.1.0"
     },
     "androidStatusBar": {
       "backgroundColor": "#000000",
@@ -62,7 +62,20 @@
           "color": "#22C55E"
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Ürün barkodlarını okutmak için kameraya erişim gerekir.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Uygulama kilidini Face ID ile açmak için izin gerekir."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

@@ -2,6 +2,8 @@
 // Override via EXPO_PUBLIC_OBIHUB_API_URL env if needed.
 
 import type {
+  CatalogProduct,
+  ChannelRef,
   DashboardStats,
   HepsiJetManualCustomer,
   HepsiJetManualShipment,
@@ -13,6 +15,7 @@ import type {
   ReportsOverview,
   SalesChartPoint,
   SmartAlert,
+  SyncJob,
   User,
 } from "./types";
 
@@ -151,8 +154,9 @@ export async function getShippingLabel(token: string, orderId: string) {
 }
 
 export async function createHepsiJetShipment(token: string, orderId: string) {
+  // Başarısızlıkta da HTTP 200 döner; `success` alanına bakılmalıdır. Sipariş için iç kimlik (order.id) gönderilir.
   return request<{ success?: boolean; message?: string; barcode?: string }>(
-    `/hepsijet/create-shipment/${orderId}`,
+    `/hepsijet/create-shipment/${encodeURIComponent(orderId)}`,
     { method: "POST" },
     token
   );
@@ -542,4 +546,328 @@ export async function getSalesChart(token: string, days: number) {
 export async function getSmartAlerts(token: string) {
   const data = await request<SmartAlert[]>("/dashboard/smart-alerts", { method: "GET" }, token);
   return Array.isArray(data) ? data : [];
+}
+
+// Sunucu arama metnini düzenli ifade olarak kullanır; özel karakterler kaçırılır.
+function escapeSearch(text: string) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Ürün listesi: stok ve fiyat iki ayrı uçtan gelir, ürün kimliğiyle birleştirilir.
+// Adına rağmen bu uçlar yerel ürün verisini okur; Paraşüt bağlantısı gerekmez.
+export async function getCatalog(
+  token: string,
+  options: { page?: number; perPage?: number; search?: string } = {}
+): Promise<{ products: CatalogProduct[]; channels: ChannelRef[]; total: number; page: number; perPage: number }> {
+  const page = Math.max(1, options.page ?? 1);
+  const perPage = Math.min(100, Math.max(1, options.perPage ?? 30));
+  const qs = new URLSearchParams();
+  qs.set("page", String(page));
+  qs.set("per_page", String(perPage));
+  const search = (options.search || "").trim();
+  if (search) qs.set("search", escapeSearch(search));
+  const [stock, prices] = await Promise.all([
+    request<any>(`/parasut/product-stock?${qs.toString()}`, { method: "GET" }, token),
+    request<any>(`/parasut/product-prices?${qs.toString()}`, { method: "GET" }, token).catch(() => null),
+  ]);
+  const priceById = new Map<string, any>();
+  (Array.isArray(prices?.products) ? prices.products : []).forEach((p: any) => priceById.set(String(p.id), p));
+  const products: CatalogProduct[] = (Array.isArray(stock?.products) ? stock.products : []).map((p: any) => {
+    const pr = priceById.get(String(p.id));
+    return {
+      id: String(p.id),
+      name: String(p.name || "Ürün"),
+      sku: p.sku || undefined,
+      barcode: p.barcode || undefined,
+      image_url: p.image_url || undefined,
+      stock: Number(p.stock || 0),
+      price: Number(pr?.price || 0),
+      channelStocks: (Array.isArray(p.integration_stocks) ? p.integration_stocks : []).map((x: any) => ({
+        integration_id: String(x.integration_id),
+        stock: Number(x.stock || 0),
+        active: x.active,
+      })),
+      channelPrices: (Array.isArray(pr?.integration_prices) ? pr.integration_prices : []).map((x: any) => ({
+        integration_id: String(x.integration_id),
+        price: Number(x.price || 0),
+        active: x.active,
+      })),
+    };
+  });
+  const channels: ChannelRef[] = (Array.isArray(stock?.integrations) ? stock.integrations : []).map((i: any) => ({
+    id: String(i.id),
+    name: String(i.name || i.platform || ""),
+    platform: String(i.platform || ""),
+  }));
+  return { products, channels, total: Number(stock?.total ?? products.length), page, perPage };
+}
+
+// Ana stoğu mutlak değere ayarlar. Kanal eşitlemesi yalnızca verilen hedeflere yapılır.
+export async function setProductStock(token: string, productId: string, stock: number, syncTargets: string[]) {
+  return request<{ message?: string; new_stock?: number; synced_providers?: string[]; skipped_providers?: Record<string, string> }>(
+    "/stock/adjust",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        product_id: productId,
+        quantity: Math.max(0, Math.round(stock)),
+        movement_type: "adjustment",
+        reason: "Mobil uygulamadan güncelleme",
+        sync_woocommerce: false,
+        sync_all: false,
+        sync_targets: syncTargets,
+      }),
+    },
+    token
+  );
+}
+
+export async function setChannelStock(token: string, productId: string, integrationId: string, stock: number) {
+  return request<{ message?: string; stock?: number }>(
+    "/stock/channel-set",
+    { method: "POST", body: JSON.stringify({ product_id: productId, integration_id: integrationId, stock: Math.max(0, Math.round(stock)) }) },
+    token
+  );
+}
+
+export async function setProductPrice(token: string, productId: string, price: number) {
+  return request<{ message?: string; new_price?: number }>(
+    "/price/adjust",
+    { method: "POST", body: JSON.stringify({ product_id: productId, price, currency: "TRY", sync_all: false, sync_targets: [] }) },
+    token
+  );
+}
+
+export async function setChannelPrice(token: string, productId: string, integrationId: string, price: number) {
+  return request<{ message?: string; price?: number }>(
+    "/price/channel-set",
+    { method: "POST", body: JSON.stringify({ product_id: productId, integration_id: integrationId, price, currency: "TRY" }) },
+    token
+  );
+}
+
+export async function getSyncJobs(token: string, options: { page?: number; status?: "success" | "failed" } = {}) {
+  const qs = new URLSearchParams();
+  qs.set("page", String(options.page ?? 1));
+  qs.set("per_page", "25");
+  if (options.status) qs.set("status", options.status);
+  const payload = await request<any>(`/integration-jobs?${qs.toString()}`, { method: "GET" }, token);
+  const items: SyncJob[] = Array.isArray(payload?.items) ? payload.items : [];
+  return { items, total: Number(payload?.total ?? items.length) };
+}
+
+export async function retrySyncJobs(token: string, jobIds: string[]) {
+  return request<{ success?: boolean; attempted?: number; success_count?: number; failed_count?: number }>(
+    "/integration-jobs/retry",
+    { method: "POST", body: JSON.stringify({ job_ids: jobIds }) },
+    token
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Finans, cari, kasa, faturalar (Faz 3)
+// ---------------------------------------------------------------------------
+import type {
+  CashAccount,
+  CashEntry,
+  ExpenseInvoice,
+  FinanceOverview,
+  IncomingInvoice,
+  IncomingSource,
+  LocalInvoice,
+  Party,
+  PartyLedgerRow,
+  SupportMessage,
+  SupportTicket,
+  TrialStatus,
+  UsageSummary,
+} from "./types";
+
+type Paged<T> = { items: T[]; total: number; hasMore: boolean };
+
+function paged<T>(payload: any, key: string, page: number, perPage: number): Paged<T> {
+  const items: T[] = Array.isArray(payload?.[key]) ? payload[key] : Array.isArray(payload?.items) ? payload.items : [];
+  const total = Number(payload?.total ?? payload?.totalCount ?? items.length);
+  return { items, total, hasMore: page * perPage < total && items.length > 0 };
+}
+
+export async function getFinanceOverview(token: string) {
+  const d = await request<any>("/finance/overview", { method: "GET" }, token);
+  return {
+    cash_balance: Number(d?.cash_balance || 0),
+    receivable: Number(d?.receivable || 0),
+    overdue_receivable: Number(d?.overdue_receivable || 0),
+    payable: Number(d?.payable || 0),
+    overdue_payable: Number(d?.overdue_payable || 0),
+    month_cash_in: Number(d?.month_cash_in || 0),
+    month_cash_out: Number(d?.month_cash_out || 0),
+    today: d?.today,
+    upcoming: Array.isArray(d?.upcoming) ? d.upcoming : [],
+  } as FinanceOverview;
+}
+
+export async function getCashAccounts(token: string) {
+  const d = await request<any>("/finance/accounts", { method: "GET" }, token);
+  return (Array.isArray(d?.items) ? d.items : []) as CashAccount[];
+}
+
+export async function getCashAccount(token: string, accountId: string) {
+  const d = await request<any>(`/finance/accounts/${encodeURIComponent(accountId)}`, { method: "GET" }, token);
+  return { account: d?.account as CashAccount, entries: (Array.isArray(d?.items) ? d.items : []) as CashEntry[] };
+}
+
+export async function createCashEntry(
+  token: string,
+  body: { account_id: string; entry_type: "income" | "expense"; amount: number; entry_date: string; description?: string }
+) {
+  return request<any>("/finance/entries", { method: "POST", body: JSON.stringify({ ...body, source_type: "manual" }) }, token);
+}
+
+export async function getParties(
+  token: string,
+  options: { page?: number; search?: string; balanceStatus?: "receivable" | "payable" | "open" } = {}
+) {
+  const page = options.page ?? 1;
+  const perPage = 30;
+  const qs = new URLSearchParams({ page: String(page), per_page: String(perPage), sort: "balance_desc" });
+  if (options.search) qs.set("search", options.search);
+  if (options.balanceStatus) qs.set("balance_status", options.balanceStatus);
+  const d = await request<any>(`/customers?${qs.toString()}`, { method: "GET" }, token);
+  const res = paged<Party>(d, "items", page, perPage);
+  return { ...res, summary: (d?.summary || {}) as { total_receivable?: number; total_payable?: number; total_contacts?: number } };
+}
+
+export async function getPartyLedger(token: string, partyId: string) {
+  const d = await request<any>(`/customers/${encodeURIComponent(partyId)}/ledger`, { method: "GET" }, token);
+  return { rows: (Array.isArray(d?.items) ? d.items : []) as PartyLedgerRow[], balance: Number(d?.balance || 0) };
+}
+
+export async function collectPartyPayment(token: string, partyId: string, body: { amount: number; payment_method: string; note?: string; payment_date: string }) {
+  return request<any>(`/customers/${encodeURIComponent(partyId)}/payments`, { method: "POST", body: JSON.stringify(body) }, token);
+}
+
+export async function getLocalInvoices(token: string, options: { page?: number; search?: string; status?: string } = {}) {
+  const page = options.page ?? 1;
+  const perPage = 30;
+  const qs = new URLSearchParams({ page: String(page), per_page: String(perPage), invoice_type: "satis" });
+  if (options.search) qs.set("search", options.search);
+  if (options.status) qs.set("status", options.status);
+  return paged<LocalInvoice>(await request<any>(`/local-invoices?${qs.toString()}`, { method: "GET" }, token), "items", page, perPage);
+}
+
+export async function getLocalInvoiceSummary(token: string) {
+  return request<{ total_remaining?: number; overdue_amount?: number; overdue_count?: number; collected_month?: number }>(
+    "/local-invoices/summary",
+    { method: "GET" },
+    token
+  );
+}
+
+export async function getLocalInvoice(token: string, id: string) {
+  return request<LocalInvoice>(`/local-invoices/${encodeURIComponent(id)}`, { method: "GET" }, token);
+}
+
+export async function officializeLocalInvoice(token: string, id: string) {
+  return request<{ ok?: boolean; message?: string; edoc_state?: string; pending?: boolean }>(
+    `/local-invoices/${encodeURIComponent(id)}/resmilestir`,
+    { method: "POST" },
+    token
+  );
+}
+
+export async function addLocalInvoicePayment(token: string, id: string, body: { amount: number; date: string; method: string; notes?: string }) {
+  return request<{ ok?: boolean; remaining_amount?: number; status?: string }>(
+    `/local-invoices/${encodeURIComponent(id)}/payment`,
+    { method: "POST", body: JSON.stringify(body) },
+    token
+  );
+}
+
+// Muhasebe programındaki satış faturaları. Paraşüt ve BizimHesap aynı satır biçimini döndürür.
+export async function getAccountingInvoices(token: string, source: "parasut" | "bizimhesap", options?: { page?: number; perPage?: number }) {
+  const qs = new URLSearchParams();
+  qs.set("page", String(options?.page ?? 1));
+  qs.set("per_page", String(Math.min(options?.perPage ?? 100, source === "bizimhesap" ? 100 : 600)));
+  const payload = await request<any>(`/${source}/invoices?${qs.toString()}`, { method: "GET" }, token);
+  return (Array.isArray(payload?.invoices) ? payload.invoices : []) as Invoice[];
+}
+
+export async function getParasutExpenseInvoices(token: string, page = 1) {
+  const perPage = 30;
+  const d = await request<any>(`/parasut/expense-invoices?page=${page}&per_page=${perPage}`, { method: "GET" }, token);
+  return paged<ExpenseInvoice>(d, "invoices", page, perPage);
+}
+
+// ---------------------------------------------------------------------------
+// Gelen e-faturalar (Faz 4)
+// ---------------------------------------------------------------------------
+
+// Web paneliyle aynı sıra: kayıtlı kaynak, etkin muhasebe programı, ilk bağlı kaynak. BizimHesap gelen faturayı desteklemez.
+export async function resolveIncomingSource(token: string): Promise<{ source: IncomingSource | null; connected: IncomingSource[] }> {
+  const [acc, turkcell, saved] = await Promise.all([
+    request<any>("/settings/accounting", { method: "GET" }, token).catch(() => null),
+    request<any>("/turkcell-efatura/status", { method: "GET" }, token).catch(() => null),
+    request<any>("/settings/incoming-einvoice-source", { method: "GET" }, token).catch(() => null),
+  ]);
+  const connected: IncomingSource[] = [];
+  if (acc?.parasut?.connected) connected.push("parasut");
+  if (acc?.benimpos?.connected) connected.push("benimpos");
+  if (turkcell?.connected) connected.push("turkcell-efatura");
+  const wanted = [saved?.source, acc?.provider].map((x) => String(x || ""));
+  const source = (wanted.find((w) => connected.includes(w as IncomingSource)) as IncomingSource | undefined) ?? connected[0] ?? null;
+  return { source, connected };
+}
+
+export async function getIncomingInvoices(token: string, source: IncomingSource, page = 1) {
+  const perPage = 30;
+  if (source === "turkcell-efatura") {
+    const d = await request<any>(`/turkcell-efatura/inbox?page=${page}&page_size=${perPage}`, { method: "GET" }, token);
+    return paged<IncomingInvoice>(d, "items", page, perPage);
+  }
+  const d = await request<any>(`/${source}/incoming-e-invoices?page=${page}&per_page=${perPage}`, { method: "GET" }, token);
+  return paged<IncomingInvoice>(d, "invoices", page, perPage);
+}
+
+// PDF yalnızca Paraşüt ve Turkcell kaynaklarında vardır.
+export async function getIncomingInvoicePdf(token: string, source: IncomingSource, id: string) {
+  const path =
+    source === "turkcell-efatura"
+      ? `/turkcell-efatura/inbox/${encodeURIComponent(id)}/pdf`
+      : `/parasut/incoming-e-invoices/${encodeURIComponent(id)}/pdf`;
+  const d = await request<{ data_base64?: string; data?: string }>(path, { method: "GET" }, token);
+  return d?.data_base64 || d?.data || "";
+}
+
+// ---------------------------------------------------------------------------
+// Destek ve abonelik (Faz 5)
+// ---------------------------------------------------------------------------
+
+export async function getSupportTickets(token: string, page = 1) {
+  const perPage = 30;
+  return paged<SupportTicket>(await request<any>(`/support/tickets?page=${page}&per_page=${perPage}`, { method: "GET" }, token), "items", page, perPage);
+}
+
+export async function createSupportTicket(token: string, body: { topic: string; subject?: string; message: string }) {
+  return request<{ success?: boolean; ticket_id?: string; ticket_code?: string; message?: string }>(
+    "/support/tickets",
+    { method: "POST", body: JSON.stringify({ ...body, source: "mobile" }) },
+    token
+  );
+}
+
+export async function getSupportTicket(token: string, id: string) {
+  const d = await request<any>(`/support/tickets/${encodeURIComponent(id)}`, { method: "GET" }, token);
+  return { ticket: d?.ticket as SupportTicket, messages: (Array.isArray(d?.messages) ? d.messages : []) as SupportMessage[] };
+}
+
+export async function replySupportTicket(token: string, id: string, message: string) {
+  return request<{ success?: boolean }>(`/support/tickets/${encodeURIComponent(id)}/messages`, { method: "POST", body: JSON.stringify({ message }) }, token);
+}
+
+export async function getTrialStatus(token: string) {
+  return request<TrialStatus>("/billing/trial-status", { method: "GET" }, token);
+}
+
+export async function getUsageSummary(token: string) {
+  return request<UsageSummary>("/usage/summary", { method: "GET" }, token);
 }
