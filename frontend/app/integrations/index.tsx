@@ -6,7 +6,7 @@ import { FadeInDown } from "react-native-reanimated";
 import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
-import { AppTopBar } from "../../src/components/AppTopBar";
+import { StackHeader } from "../../src/ui/Header";
 import { fontWeight, radius, spacing } from "../../src/theme/tokens";
 import { getIntegrations, getOrders } from "../../src/api";
 import { providerKey, providerLabel, providerColor, isNewOrderStatus, statusKindFromOrder } from "../../src/utils";
@@ -82,49 +82,8 @@ export default function IntegrationsScreen() {
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="integrations-screen">
-      <AppTopBar />
+      <StackHeader title="Mağazalar" subtitle={`${totalConnected} bağlı mağaza`} />
       <NetworkErrorBanner visible={isOffline} offline />
-      <View style={{ paddingHorizontal: spacing.lg, paddingTop: 4 }}>
-        <Text style={[styles.eyebrow, { color: colors.primary }]}>BAĞLI MAĞAZALAR</Text>
-        <Text style={[styles.title, { color: colors.textPrimary }]}>Entegrasyonlar</Text>
-      </View>
-
-      {/* Premium hero overview */}
-      <SafeAnimatedView entering={FadeInDown.duration(400)} style={[styles.heroCard, shadows.lg]}>
-        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-          <Svg width="100%" height="100%" viewBox="0 0 360 140" preserveAspectRatio="xMidYMid slice">
-            <Defs>
-              <LinearGradient id="intHero" x1="0" y1="0" x2="1" y2="1">
-                <Stop offset="0" stopColor="#0F172A" stopOpacity="1" />
-                <Stop offset="1" stopColor="#1E3A8A" stopOpacity="0.95" />
-              </LinearGradient>
-              <LinearGradient id="intGlow" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0" stopColor="#60A5FA" stopOpacity="0.3" />
-                <Stop offset="1" stopColor="#60A5FA" stopOpacity="0" />
-              </LinearGradient>
-            </Defs>
-            <Path d="M0,0 L360,0 L360,140 L0,140Z" fill="url(#intHero)" />
-            <Path d="M0,0 L360,0 L360,90 L0,140 Z" fill="url(#intGlow)" />
-          </Svg>
-        </View>
-        <View style={styles.heroContent}>
-          <View style={styles.heroLeft}>
-            <View style={styles.heroChip}>
-              <SparkleIcon size={11} color="#93C5FD" />
-              <Text style={styles.heroChipText}>HEPSİ TEK PANELDE</Text>
-            </View>
-            <Text style={styles.heroTitle}>{totalConnected} Aktif Mağaza</Text>
-            <Text style={styles.heroSub}>Sipariş yönetmek için bir mağaza seç ve detaya in.</Text>
-          </View>
-          <View style={styles.heroLogos}>
-            {(["trendyol", "hepsiburada", "n11", "woo"] as const).slice(0, 4).map((p, i) => (
-              <View key={p} style={[styles.heroLogoWrap, { transform: [{ translateX: i * -10 }] }]}>
-                <PlatformLogo provider={p} size="sm" />
-              </View>
-            ))}
-          </View>
-        </View>
-      </SafeAnimatedView>
 
       {loading ? (
         <ScrollView

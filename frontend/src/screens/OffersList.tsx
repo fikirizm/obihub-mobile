@@ -11,22 +11,21 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import Animated, { FadeInDown } from "react-native-reanimated";
-import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
-import { useAuth } from "../../src/auth/AuthProvider";
-import { useTheme } from "../../src/theme/ThemeProvider";
-import { AppTopBar } from "../../src/components/AppTopBar";
-import { fontWeight, radius, spacing } from "../../src/theme/tokens";
-import { getSalesOffers } from "../../src/api";
-import { formatTry } from "../../src/utils";
-import { PressableScale } from "../../src/components/KPICard";
-import { FileTextIcon, SearchIcon } from "../../src/components/Icons";
-import { InvoiceCardSkeleton } from "../../src/components/Skeleton";
-import { EmptyState } from "../../src/components/EmptyState";
-import { NetworkErrorBanner } from "../../src/components/NetworkErrorBanner";
-import { saveCache, loadCache } from "../../src/offlineCache";
-import { useFocusLoad } from "../../src/hooks/useFocusLoad";
-import { useDebounce } from "../../src/hooks/useDebounce";
-import type { SalesOffer } from "../../src/types";
+import { SafeAnimatedView } from "../components/SafeAnimatedView";
+import { useAuth } from "../auth/AuthProvider";
+import { useTheme } from "../theme/ThemeProvider";
+import { fontWeight, radius, spacing } from "../theme/tokens";
+import { getSalesOffers } from "../api";
+import { formatTry } from "../utils";
+import { PressableScale } from "../components/KPICard";
+import { FileTextIcon, SearchIcon } from "../components/Icons";
+import { InvoiceCardSkeleton } from "../components/Skeleton";
+import { EmptyState } from "../components/EmptyState";
+import { NetworkErrorBanner } from "../components/NetworkErrorBanner";
+import { saveCache, loadCache } from "../offlineCache";
+import { useFocusLoad } from "../hooks/useFocusLoad";
+import { useDebounce } from "../hooks/useDebounce";
+import type { SalesOffer } from "../types";
 
 const STATUS_COLORS: Record<string, { bg: string; text: string; label: string }> = {
   accepted:  { bg: "#DCFCE7", text: "#16A34A", label: "Onaylı" },
@@ -42,7 +41,8 @@ function statusStyle(status?: string) {
   return STATUS_COLORS[status || ""] ?? { bg: "#F1F5F9", text: "#64748B", label: status || "—" };
 }
 
-export default function OffersScreen() {
+// Finans sekmesine gömülen Paraşüt teklif listesi.
+export function OffersList() {
   const { token } = useAuth();
   const { colors, shadows } = useTheme();
   const [list, setList] = useState<SalesOffer[]>([]);
@@ -126,13 +126,8 @@ export default function OffersScreen() {
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]}>
-      <AppTopBar />
       <NetworkErrorBanner visible={isOffline} offline />
 
-      <View style={{ paddingHorizontal: spacing.lg, paddingTop: 4 }}>
-        <Text style={[styles.eyebrow, { color: "#D97706" }]}>TEKLİFLER</Text>
-        <Text style={[styles.title, { color: colors.textPrimary }]}>Paraşüt</Text>
-      </View>
 
       <View style={styles.summaryRow}>
         <View style={[styles.sumCell, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>
@@ -150,7 +145,7 @@ export default function OffersScreen() {
       <View
         style={[
           styles.searchWrap,
-          { backgroundColor: colors.surface, borderColor: searchFocus ? "#D97706" : colors.borderSubtle },
+          { backgroundColor: colors.surface, borderColor: searchFocus ? colors.primary : colors.borderSubtle },
         ]}
       >
         <SearchIcon size={18} color={colors.textTertiary} />

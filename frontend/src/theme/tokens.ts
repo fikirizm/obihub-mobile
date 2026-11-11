@@ -194,3 +194,20 @@ export const shadow = {
 };
 
 export type ThemeMode = "light" | "dark";
+
+// Metin ölçeği. En küçük yazı 12 punto; para tutarları `tabular` ile eş genişlikli rakam kullanır.
+export const type = {
+  largeTitle: { fontSize: 30, lineHeight: 36, fontWeight: "700" as const, letterSpacing: -0.8 },
+  title: { fontSize: 22, lineHeight: 28, fontWeight: "700" as const, letterSpacing: -0.5 },
+  headline: { fontSize: 17, lineHeight: 22, fontWeight: "600" as const, letterSpacing: -0.3 },
+  body: { fontSize: 15, lineHeight: 21, fontWeight: "400" as const },
+  bodyStrong: { fontSize: 15, lineHeight: 21, fontWeight: "600" as const },
+  callout: { fontSize: 14, lineHeight: 19, fontWeight: "500" as const },
+  footnote: { fontSize: 13, lineHeight: 18, fontWeight: "400" as const },
+  caption: { fontSize: 12, lineHeight: 16, fontWeight: "500" as const },
+};
+
+export const tabular = { fontVariant: ["tabular-nums" as const] };
+
+// Dokunma hedefi alt sınırı (Apple HIG).
+export const hitTarget = 44;

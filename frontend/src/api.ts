@@ -2,13 +2,17 @@
 // Override via EXPO_PUBLIC_OBIHUB_API_URL env if needed.
 
 import type {
+  DashboardStats,
   HepsiJetManualCustomer,
   HepsiJetManualShipment,
   Integration,
   Invoice,
   LoginResponse,
   Order,
+  OrdersPage,
   ReportsOverview,
+  SalesChartPoint,
+  SmartAlert,
   User,
 } from "./types";
 
@@ -489,4 +493,53 @@ export type AccountingSettings = {
 
 export async function getAccountingSettings(token: string) {
   return request<AccountingSettings>("/settings/accounting", { method: "GET" }, token);
+}
+
+// Sayfalı sipariş listesi. Sunucu tek durum değeri süzdüğü için birden çok durum ayrı çağrılarla birleştirilir.
+export async function getOrdersPage(
+  token: string,
+  options: { page?: number; perPage?: number; search?: string; statuses?: string[]; integrationId?: string } = {}
+): Promise<OrdersPage> {
+  const page = options.page ?? 1;
+  const perPage = options.perPage ?? 30;
+  const fetchOne = async (status?: string) => {
+    const qs = new URLSearchParams();
+    qs.set("page", String(page));
+    qs.set("per_page", String(perPage));
+    qs.set("sort_by", "-order_date");
+    if (options.search) qs.set("search", options.search);
+    if (options.integrationId) qs.set("integration_id", options.integrationId);
+    if (status) qs.set("status", status);
+    const payload = await request<any>(`/orders?${qs.toString()}`, { method: "GET" }, token);
+    const items: Order[] = Array.isArray(payload) ? payload : Array.isArray(payload?.items) ? payload.items : [];
+    const total = Number(payload?.total ?? items.length);
+    return { items, total, totalPages: Number(payload?.total_pages ?? Math.ceil(total / perPage)) };
+  };
+  const statuses = options.statuses && options.statuses.length > 0 ? options.statuses : [undefined];
+  const parts = await Promise.all(statuses.map((s) => fetchOne(s)));
+  const seen = new Set<string>();
+  const items = parts
+    .flatMap((p) => p.items)
+    .filter((o) => (seen.has(o.id) ? false : (seen.add(o.id), true)))
+    .sort((a, b) => String(b.order_date || b.created_at || "").localeCompare(String(a.order_date || a.created_at || "")));
+  return {
+    items,
+    total: parts.reduce((n, p) => n + p.total, 0),
+    page,
+    totalPages: Math.max(1, ...parts.map((p) => p.totalPages)),
+  };
+}
+
+export async function getDashboardStats(token: string) {
+  return request<DashboardStats>("/dashboard/stats", { method: "GET" }, token);
+}
+
+export async function getSalesChart(token: string, days: number) {
+  const data = await request<SalesChartPoint[]>(`/dashboard/sales-chart?days=${days}`, { method: "GET" }, token);
+  return Array.isArray(data) ? data : [];
+}
+
+export async function getSmartAlerts(token: string) {
+  const data = await request<SmartAlert[]>("/dashboard/smart-alerts", { method: "GET" }, token);
+  return Array.isArray(data) ? data : [];
 }

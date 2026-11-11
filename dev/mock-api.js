@@ -5,10 +5,31 @@ const http = require("http");
 const state = { session: "ok", parasut: "1" };
 const now = () => new Date().toISOString();
 
-const orders = [
-  { id: "o1", channel: "woocommerce", integration_id: "i1", integration_provider: "woocommerce", channel_order_id: "WC-1001", customer_name: "Test Müşteri", total_amount: 1250.5, status: "processing", order_date: now(), created_at: now(), items: [{ product_name: "Deneme Ürün", quantity: 2, unit_price: 625.25 }] },
-  { id: "o2", channel: "trendyol", integration_id: "i2", integration_provider: "trendyol", channel_order_id: "TY-2002", customer_name: "İkinci Müşteri", total_amount: 349.9, status: "shipped", order_date: now(), created_at: now(), items: [] },
+const NAMES = ["Ayşe Yılmaz", "Mehmet Demir", "Elif Kaya", "Can Öztürk", "Zeynep Arslan", "Burak Şahin", "Selin Aydın"];
+const CHANNELS = [
+  { integration_id: "i1", provider: "woocommerce", prefix: "WC" },
+  { integration_id: "i2", provider: "trendyol", prefix: "TY" },
+  { integration_id: "i3", provider: "hepsiburada", prefix: "HB" },
 ];
+const STATUSES = ["pending", "processing", "shipped", "shipped", "delivered", "delivered", "delivered", "cancelled"];
+const orders = Array.from({ length: 74 }, (_, i) => {
+  const ch = CHANNELS[i % CHANNELS.length];
+  const when = new Date(Date.now() - i * 5 * 3600 * 1000).toISOString();
+  return {
+    id: `o${i + 1}`,
+    channel: ch.provider,
+    integration_id: ch.integration_id,
+    integration_provider: ch.provider,
+    channel_order_id: `${ch.prefix}-${1000 + i}`,
+    customer_name: NAMES[i % NAMES.length],
+    total_amount: Math.round((149.9 + ((i * 137) % 2400)) * 100) / 100,
+    currency: "TRY",
+    status: STATUSES[i % STATUSES.length],
+    order_date: when,
+    created_at: when,
+    items: [{ product_name: "Deneme Ürün", sku: `SKU-${i}`, quantity: 1 + (i % 3), unit_price: 149.9 }],
+  };
+});
 
 function send(res, status, body) {
   res.writeHead(status, {
@@ -40,9 +61,53 @@ http
       return send(res, 200, state.parasut === "1"
         ? { provider: "parasut", parasut: { connected: true, status: "connected" }, bizimhesap: null }
         : { provider: "bizimhesap", parasut: null, bizimhesap: { connected: true } });
-    if (path === "/orders") return send(res, 200, { items: orders, total: orders.length, page: 1, per_page: 100, total_pages: 1 });
-    if (path.startsWith("/orders/")) return send(res, 200, orders.find((o) => path.endsWith(o.id)) || orders[0]);
-    if (path === "/integrations") return send(res, 200, [{ id: "i1", name: "Deneme Mağaza", provider: "woocommerce", status: "active" }]);
+    if (path === "/orders") {
+      const q = url.searchParams;
+      const page = Number(q.get("page") || 1);
+      const per = Number(q.get("per_page") || 15);
+      const search = (q.get("search") || "").toLocaleLowerCase("tr-TR");
+      let rows = orders.filter(
+        (o) =>
+          (!q.get("status") || o.status === q.get("status")) &&
+          (!q.get("integration_id") || o.integration_id === q.get("integration_id")) &&
+          (!search || o.customer_name.toLocaleLowerCase("tr-TR").includes(search) || o.channel_order_id.toLowerCase().includes(search))
+      );
+      const total = rows.length;
+      rows = rows.slice((page - 1) * per, page * per);
+      return send(res, 200, { items: rows, total, page, per_page: per, total_pages: Math.max(1, Math.ceil(total / per)) });
+    }
+    if (path.startsWith("/orders/")) return send(res, 200, orders.find((o) => path.endsWith("/" + o.id)) || orders[0]);
+    if (path === "/dashboard/stats")
+      return send(res, 200, {
+        total_orders: orders.length,
+        pending_orders: orders.filter((o) => ["pending", "processing"].includes(o.status)).length,
+        shipped_orders: orders.filter((o) => o.status === "shipped").length,
+        total_revenue: 184250.4, total_products: 320, low_stock_count: 4, orders_today: 5, revenue_today: 6480.75,
+      });
+    if (path === "/dashboard/sales-chart") {
+      const days = Number(url.searchParams.get("days") || 7);
+      return send(res, 200, Array.from({ length: days }, (_, i) => ({
+        date: new Date(Date.now() - (days - 1 - i) * 86400000).toISOString().slice(0, 10),
+        total: 3200 + ((i * 977) % 5200), count: 4 + ((i * 3) % 9),
+      })));
+    }
+    if (path === "/dashboard/smart-alerts")
+      return send(res, 200, [
+        { type: "low_stock", severity: "warning", title: "4 ürün düşük stokta", desc: "Stok seviyesi 5 adedin altına düşen ürünler var.", action_path: "/stok" },
+        { type: "stale_orders", severity: "warning", title: "2 sipariş 3 gündür bekliyor", desc: "Beklemede olan siparişleri kontrol edin.", action_path: "/siparisler" },
+      ]);
+    if (path === "/integrations") return send(res, 200, [
+      { id: "i1", name: "Deneme Mağaza", provider: "woocommerce", status: "active" },
+      { id: "i2", name: "Trendyol", provider: "trendyol", status: "active" },
+      { id: "i3", name: "Hepsiburada", provider: "hepsiburada", status: "active" },
+    ]);
+    if (path === "/parasut/invoices")
+      return send(res, 200, { invoices: Array.from({ length: 6 }, (_, i) => ({
+        id: `inv${i}`, invoice_no: `OBI2026${String(100 + i)}`, issue_date: new Date(Date.now() - i * 86400000).toISOString().slice(0, 10),
+        gross_total: 1200 + i * 310.5, contact_name: NAMES[i % NAMES.length], can_officialize: i % 2 === 0,
+      })), total: 6, page: 1, per_page: 600 });
+    if (path === "/parasut/sales-offers") return send(res, 200, { offers: [], total: 0 });
+    if (path === "/reports/overview") return send(res, 200, { summary: { total_revenue: 84250, total_orders: 212, avg_order_value: 397.4 }, channels: [], timeline: [] });
     if (path === "/parasut/product-stock") return send(res, 200, { products: [] });
     if (path === "/push-token") return send(res, 200, { ok: true });
     return send(res, 200, {});

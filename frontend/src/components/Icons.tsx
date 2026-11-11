@@ -266,3 +266,45 @@ export const MailIcon = ({ size = 20, color = "#0F172A", strokeWidth = 2 }: Icon
 );
 
 export { Svg, Path, Circle, Rect, Line, G };
+
+export const MenuIcon = ({ size = 24, color = "#0F172A", strokeWidth = 2 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Rect x="3.5" y="3.5" width="7" height="7" rx="2" stroke={color} strokeWidth={strokeWidth} />
+    <Rect x="13.5" y="3.5" width="7" height="7" rx="2" stroke={color} strokeWidth={strokeWidth} />
+    <Rect x="3.5" y="13.5" width="7" height="7" rx="2" stroke={color} strokeWidth={strokeWidth} />
+    <Rect x="13.5" y="13.5" width="7" height="7" rx="2" stroke={color} strokeWidth={strokeWidth} />
+  </Svg>
+);
+
+export const BagIcon = ({ size = 24, color = "#0F172A", strokeWidth = 2 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M5 8h14l-1 12H6L5 8Z" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round" />
+    <Path d="M9 8V7a3 3 0 0 1 6 0v1" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+  </Svg>
+);
+
+export const SettingsIcon = ({ size = 24, color = "#0F172A", strokeWidth = 2 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Circle cx="12" cy="12" r="3" stroke={color} strokeWidth={strokeWidth} />
+    <Path
+      d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+    />
+  </Svg>
+);
+
+export const AlertIcon = ({ size = 24, color = "#0F172A", strokeWidth = 2 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M12 4 3 19.5h18L12 4Z" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round" />
+    <Path d="M12 10v4.5M12 17v.2" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+  </Svg>
+);
+
+export const UserIcon = ({ size = 24, color = "#0F172A", strokeWidth = 2 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Circle cx="12" cy="8" r="4" stroke={color} strokeWidth={strokeWidth} />
+    <Path d="M4.5 20.5c1-3.6 4-5.5 7.5-5.5s6.500 1.900 7.500 5.500" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+  </Svg>
+);

@@ -7,6 +7,7 @@ import { Platform } from "react-native";
 import * as Storage from "../storage";
 import { getAccountingSettings, getMe, getOrders, login as apiLogin, registerPushToken, setSessionHandlers } from "../api";
 import { displayOrderNo, formatOrderDateTime, isNewOrderStatus, providerLabel } from "../utils";
+import { addNotifications, clearNotificationsStore, hydrateNotifications } from "../notifications/store";
 import type { Order, User } from "../types";
 
 type AuthContextValue = {
@@ -16,8 +17,6 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshMe: () => Promise<void>;
-  unreadNotifications: number;
-  clearNotifications: () => void;
   // Aboneliği kilitli hesapta backend'in döndürdüğü açıklama; kilit yoksa null.
   subscriptionLock: string | null;
   retrySubscription: () => Promise<void>;
@@ -113,6 +112,24 @@ async function downloadImageToCache(url: string, key: string): Promise<string | 
   }
 }
 
+// Yeni siparişleri bildirim merkezine yazar.
+function recordOrderNotifications(orders: Order[]) {
+  addNotifications(
+    orders.map((o) => {
+      const provider = String(o.integration_provider || o.provider || o.channel || "");
+      return {
+        id: `order-${o.id}`,
+        kind: "order" as const,
+        title: `Yeni sipariş · ${providerLabel(provider)}`,
+        body: [o.customer_name, `#${displayOrderNo(o)}`, formatAmount(Number(o.total_amount || 0))].filter(Boolean).join(" · "),
+        orderId: o.id,
+        provider,
+        ts: Date.now(),
+      };
+    })
+  );
+}
+
 async function scheduleOrderNotification(orders: Order[]) {
   const first = orders[0];
   const count = orders.length;
@@ -179,7 +196,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [bootLoading, setBootLoading] = useState(true);
-  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [subscriptionLock, setSubscriptionLock] = useState<string | null>(null);
   const [parasutConnected, setParasutConnected] = useState<boolean | null>(null);
   // Ön plandaki yoklama ile push işleyicisinin ortak kullandığı "bildirimi verilmiş sipariş" kümesi.
@@ -252,6 +268,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setSubscriptionLock(null);
     setParasutConnected(null);
+    clearNotificationsStore();
+    Notifications.setBadgeCountAsync(0).catch(() => {});
   }, []);
 
   // Oturumu sona eren (401) ve aboneliği kilitlenen (403) çağrıları tek yerden yakala.
@@ -309,11 +327,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, [token]);
 
-  const clearNotifications = useCallback(() => {
-    setUnreadNotifications(0);
-    Notifications.setBadgeCountAsync(0).catch(() => {});
-  }, []);
-
   // Foreground notification handler
   useEffect(() => {
     Notifications.setNotificationHandler({
@@ -328,7 +341,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             return { shouldShowBanner: false, shouldShowList: false, shouldPlaySound: false, shouldSetBadge: false };
           }
           seen.add(orderId);
-          setUnreadNotifications((v) => v + 1);
+          addNotifications([
+            {
+              id: `order-${orderId}`,
+              kind: "order",
+              title: String(notification.request.content.title || "Yeni sipariş").replace(/^💰\s*/, ""),
+              body: String(notification.request.content.body || ""),
+              orderId,
+              provider: String((notification.request.content.data as Record<string, unknown> | null)?.provider || ""),
+              ts: Date.now(),
+            },
+          ]);
           Storage.setItemAsync(SEEN_ORDER_IDS_KEY, JSON.stringify(Array.from(seen).slice(-300))).catch(() => {});
         }
         return { shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: true };
@@ -357,7 +380,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (newOrders.length > 0) {
           newOrders.forEach((o) => seen.add(o.id));
-          setUnreadNotifications((v) => v + newOrders.length);
+          recordOrderNotifications(newOrders);
           await scheduleOrderNotification(newOrders);
           const keep = Array.from(seen).slice(-300);
           await Storage.setItemAsync(SEEN_ORDER_IDS_KEY, JSON.stringify(keep));
@@ -367,6 +390,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     (async () => {
       try {
+        await hydrateNotifications();
         if (Platform.OS === "android") {
           await Notifications.setNotificationChannelAsync(ORDERS_CHANNEL_ID, {
             name: "Yeni Siparişler",
@@ -453,8 +477,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login,
       logout,
       refreshMe,
-      unreadNotifications,
-      clearNotifications,
       subscriptionLock,
       retrySubscription,
       parasutConnected,
@@ -466,8 +488,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login,
       logout,
       refreshMe,
-      unreadNotifications,
-      clearNotifications,
       subscriptionLock,
       retrySubscription,
       parasutConnected,

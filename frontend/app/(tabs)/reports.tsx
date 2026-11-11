@@ -15,7 +15,7 @@ import { FadeIn, FadeInDown, FadeInUp } from "react-native-reanimated";
 import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
-import { AppTopBar } from "../../src/components/AppTopBar";
+import { TabHeader } from "../../src/ui/Header";
 import { fontWeight, radius, spacing } from "../../src/theme/tokens";
 import { getOrders, getSalesReportsOverview } from "../../src/api";
 import { formatCompact, formatTry, providerColor, providerLabel, orderTimestamp } from "../../src/utils";
@@ -231,7 +231,7 @@ export default function ReportsScreen() {
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="reports-screen">
-      <AppTopBar />
+      <TabHeader title="Raporlar" />
       <NetworkErrorBanner visible={isOffline} offline />
       <ScrollView
         contentContainerStyle={{ paddingBottom: 120 }}
@@ -246,14 +246,6 @@ export default function ReportsScreen() {
           />
         }
       >
-        <SafeAnimatedView entering={FadeInDown.duration(450)} style={{ paddingHorizontal: spacing.lg, paddingTop: 4 }}>
-          <View style={styles.titleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.eyebrow, { color: colors.primary }]}>RAPOR & ANALİTİK</Text>
-              <Text style={[styles.title, { color: colors.textPrimary }]}>Satış kontrol odası</Text>
-            </View>
-          </View>
-        </SafeAnimatedView>
 
         {/* HERO CARD */}
         <SafeAnimatedView entering={FadeIn.delay(100).duration(450)} style={[styles.heroCard, shadows.lg]}>

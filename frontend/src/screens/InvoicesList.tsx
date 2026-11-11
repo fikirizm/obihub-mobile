@@ -2,25 +2,25 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import Animated, { FadeInDown } from "react-native-reanimated";
-import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
-import { useAuth } from "../../src/auth/AuthProvider";
-import { useTheme } from "../../src/theme/ThemeProvider";
-import { AppTopBar } from "../../src/components/AppTopBar";
-import { fontWeight, radius, spacing } from "../../src/theme/tokens";
-import { getInvoices } from "../../src/api";
-import { formatTry } from "../../src/utils";
-import { PressableScale } from "../../src/components/KPICard";
-import { StatusBadge } from "../../src/components/StatusBadge";
-import { CheckIcon, ClockIcon, ReceiptIcon, SearchIcon } from "../../src/components/Icons";
-import { InvoiceCardSkeleton } from "../../src/components/Skeleton";
-import { EmptyState } from "../../src/components/EmptyState";
-import { NetworkErrorBanner } from "../../src/components/NetworkErrorBanner";
-import { saveCache, loadCache } from "../../src/offlineCache";
-import { useFocusLoad } from "../../src/hooks/useFocusLoad";
-import { useDebounce } from "../../src/hooks/useDebounce";
-import type { Invoice } from "../../src/types";
+import { SafeAnimatedView } from "../components/SafeAnimatedView";
+import { useAuth } from "../auth/AuthProvider";
+import { useTheme } from "../theme/ThemeProvider";
+import { fontWeight, radius, spacing } from "../theme/tokens";
+import { getInvoices } from "../api";
+import { formatTry } from "../utils";
+import { PressableScale } from "../components/KPICard";
+import { StatusBadge } from "../components/StatusBadge";
+import { CheckIcon, ClockIcon, ReceiptIcon, SearchIcon } from "../components/Icons";
+import { InvoiceCardSkeleton } from "../components/Skeleton";
+import { EmptyState } from "../components/EmptyState";
+import { NetworkErrorBanner } from "../components/NetworkErrorBanner";
+import { saveCache, loadCache } from "../offlineCache";
+import { useFocusLoad } from "../hooks/useFocusLoad";
+import { useDebounce } from "../hooks/useDebounce";
+import type { Invoice } from "../types";
 
-export default function InvoicesScreen() {
+// Finans sekmesine gömülen Paraşüt fatura listesi.
+export function InvoicesList() {
   const { token } = useAuth();
   const { colors, mode, shadows } = useTheme();
   const [list, setList] = useState<Invoice[]>([]);
@@ -122,12 +122,7 @@ export default function InvoicesScreen() {
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="invoices-screen">
-      <AppTopBar />
       <NetworkErrorBanner visible={isOffline} offline />
-      <View style={{ paddingHorizontal: spacing.lg, paddingTop: 4 }}>
-        <Text style={[styles.eyebrow, { color: colors.primary }]}>FATURALAR</Text>
-        <Text style={[styles.title, { color: colors.textPrimary }]}>Paraşüt</Text>
-      </View>
 
       <View style={styles.summaryRow}>
         <View style={[styles.sumCell, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }, shadows.sm]}>

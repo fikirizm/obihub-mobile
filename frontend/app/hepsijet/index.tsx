@@ -18,7 +18,7 @@ import { FadeInDown, FadeInUp } from "react-native-reanimated";
 import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
-import { AppTopBar } from "../../src/components/AppTopBar";
+import { StackHeader } from "../../src/ui/Header";
 import { fontWeight, radius, spacing } from "../../src/theme/tokens";
 import {
   createHepsiJetManualCustomer,
@@ -326,7 +326,7 @@ export default function HepsiJetScreen() {
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="hepsijet-screen">
-      <AppTopBar />
+      <StackHeader title="HepsiJet Kargo" subtitle="Manuel gönderi ve etiket" />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView
           contentContainerStyle={{ paddingBottom: 140 }}
@@ -343,8 +343,6 @@ export default function HepsiJetScreen() {
           }
         >
           <View style={{ paddingHorizontal: spacing.lg, paddingTop: 4 }}>
-            <Text style={[styles.eyebrow, { color: colors.hepsijet }]}>HEPSİJET MANUEL</Text>
-            <Text style={[styles.title, { color: colors.textPrimary }]}>Manuel Etiket</Text>
             <Text style={[styles.sub, { color: colors.textSecondary }]}>
               Pazaryeri dışı gönderilerin için müşteri kaydı oluştur, barkodlu etiketini yazdır.
             </Text>

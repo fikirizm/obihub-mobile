@@ -8,6 +8,7 @@ import * as Notifications from "expo-notifications";
 import { ThemeProvider, useTheme } from "../src/theme/ThemeProvider";
 import { AuthProvider, useAuth } from "../src/auth/AuthProvider";
 import { SubscriptionLockOverlay } from "../src/components/SubscriptionLockOverlay";
+import { FeedbackProvider } from "../src/ui/Feedback";
 import { DataCacheProvider } from "../src/context/DataCacheContext";
 
 function navigateToOrder(
@@ -100,7 +101,9 @@ export default function RootLayout() {
         <ThemeProvider>
           <AuthProvider>
             <DataCacheProvider>
-              <RootInner />
+              <FeedbackProvider>
+                <RootInner />
+              </FeedbackProvider>
             </DataCacheProvider>
           </AuthProvider>
         </ThemeProvider>

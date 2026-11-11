@@ -1,5 +1,5 @@
 import React from "react";
-import { Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
+import { AccessibilityRole, AccessibilityState, Pressable, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { SafeAnimatedView } from "./SafeAnimatedView";
 import { useTheme } from "../theme/ThemeProvider";
@@ -14,12 +14,22 @@ export function PressableScale({
   disabled,
   style,
   testID,
+  accessibilityRole,
+  accessibilityLabel,
+  accessibilityState,
+  accessibilityHint,
+  hitSlop,
 }: {
   children: React.ReactNode;
   onPress?: () => void;
   disabled?: boolean;
   style?: StyleProp<ViewStyle>;
   testID?: string;
+  accessibilityRole?: AccessibilityRole;
+  accessibilityLabel?: string;
+  accessibilityState?: AccessibilityState;
+  accessibilityHint?: string;
+  hitSlop?: number;
 }) {
   const scale = useSharedValue(1);
   const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
@@ -29,6 +39,11 @@ export function PressableScale({
       testID={testID}
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole={accessibilityRole ?? (onPress ? "button" : undefined)}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={accessibilityState}
+      accessibilityHint={accessibilityHint}
+      hitSlop={hitSlop}
       onPressIn={() => (scale.value = withTiming(0.97, { duration: 90 }))}
       onPressOut={() => (scale.value = withTiming(1, { duration: 140 }))}
       style={[animatedStyle, style as any, disabled && { opacity: 0.55 }]}

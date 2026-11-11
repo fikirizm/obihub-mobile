@@ -3,6 +3,10 @@ export type User = {
   email: string;
   company_name: string;
   full_name: string;
+  role?: string;
+  subscription_plan?: string;
+  subscription_status?: string;
+  subscription_expires_at?: string | null;
 };
 
 export type LoginResponse = {
@@ -235,3 +239,27 @@ export type OfferPayment = {
   contact_email?: string;
   email_sent?: boolean;
 };
+
+export type DashboardStats = {
+  total_orders: number;
+  pending_orders: number;
+  shipped_orders: number;
+  total_revenue: number;
+  total_products: number;
+  low_stock_count: number;
+  orders_today: number;
+  revenue_today: number;
+};
+
+export type SalesChartPoint = { date: string; total: number; count: number };
+
+export type SmartAlert = {
+  type: string;
+  severity: "warning" | "error" | "info" | string;
+  title: string;
+  desc?: string;
+  action_label?: string;
+  action_path?: string;
+};
+
+export type OrdersPage = { items: Order[]; total: number; page: number; totalPages: number };
