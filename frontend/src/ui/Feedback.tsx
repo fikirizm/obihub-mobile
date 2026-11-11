@@ -208,7 +208,9 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
         ) : null}
       </Modal>
       <Modal visible={Boolean(numberState)} transparent animationType="fade" onRequestClose={() => settleNumber(null)} statusBarTranslucent>
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        {/* Sayfa akış içinde ve alta yaslıdır: klavye açılınca KeyboardAvoidingView onu klavyenin üstüne iter.
+            Mutlak konumlu (bottom: 0) bir sayfa bu itmeden etkilenmez ve klavyenin altında kalır. */}
+        <KeyboardAvoidingView style={styles.keyboardWrap} behavior={Platform.OS === "ios" ? "padding" : "height"}>
           <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={() => settleNumber(null)} accessibilityLabel="Kapat" />
           {numberState ? (
             <Animated.View
@@ -216,7 +218,7 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
               exiting={SlideOutDown.duration(180)}
               testID="number-sheet"
               accessibilityViewIsModal
-              style={[styles.sheet, { backgroundColor: colors.surface, paddingBottom: insets.bottom + spacing.md }]}
+              style={[styles.sheetInFlow, { backgroundColor: colors.surface, paddingBottom: Math.max(insets.bottom, spacing.sm) + spacing.sm }]}
             >
               <View style={[styles.grabber, { backgroundColor: colors.border }]} />
               <Text accessibilityRole="header" style={[type.title, { color: colors.textPrimary, textAlign: "center" }]}>
@@ -280,14 +282,17 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
                   style={[styles.noteInput, { color: colors.textPrimary, borderColor: colors.border, backgroundColor: colors.surfaceMuted }]}
                 />
               ) : null}
-              <Button
-                testID="number-accept"
-                label={numberState.confirmLabel || "Kaydet"}
-                disabled={parsedNumber === null}
-                onPress={() => settleNumber(parsedNumber)}
-                style={{ marginTop: spacing.lg }}
-              />
-              <Button testID="number-cancel" label="Vazgeç" variant="secondary" onPress={() => settleNumber(null)} style={{ marginTop: spacing.xs }} />
+              {/* Düğmeler yan yana: klavye açıkken küçük ekranlarda da sayfa sığar. */}
+              <View style={styles.numberActions}>
+                <Button testID="number-cancel" label="Vazgeç" variant="secondary" onPress={() => settleNumber(null)} style={{ flex: 1 }} />
+                <Button
+                  testID="number-accept"
+                  label={numberState.confirmLabel || "Kaydet"}
+                  disabled={parsedNumber === null}
+                  onPress={() => settleNumber(parsedNumber)}
+                  style={{ flex: 1 }}
+                />
+              </View>
             </Animated.View>
           ) : null}
         </KeyboardAvoidingView>
@@ -343,6 +348,14 @@ const styles = StyleSheet.create({
   },
   toastDot: { width: 8, height: 8, borderRadius: 4 },
   backdrop: { ...StyleSheet.absoluteFillObject },
+  numberActions: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg },
+  keyboardWrap: { flex: 1, justifyContent: "flex-end" },
+  sheetInFlow: {
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+  },
   sheet: {
     position: "absolute",
     left: 0,
@@ -360,7 +373,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
-    marginTop: spacing.lg,
+    marginTop: spacing.md,
     height: 60,
   },
   numberInput: { flex: 1, fontSize: 26, fontWeight: "700", fontVariant: ["tabular-nums"], paddingVertical: 0, height: 60 },
