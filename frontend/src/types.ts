@@ -21,6 +21,8 @@ export type Integration = {
   name: string;
   provider: string;
   status: string;
+  // Sunucudaki tür: store, marketplace, cargo, accounting.
+  kind?: string;
 };
 
 export type Order = {
@@ -307,7 +309,7 @@ export type FinanceOverview = {
   // TL dışında para biriminde alacak/borç var mı.
   multiCurrency?: boolean;
   today?: string;
-  upcoming: { kind: "receivable" | "payable"; date?: string; amount: number; currency?: string; title?: string; reference?: string }[];
+  upcoming: { kind: "receivable" | "payable"; date?: string | null; amount: number; currency?: string; title?: string; reference?: string }[];
 };
 
 export type CashAccount = {
@@ -342,6 +344,8 @@ export type Party = {
   email?: string;
   source?: "registered" | "orders" | string;
   balance: number;
+  // Carinin para birimi; bakiye bu para biriminde tutulur (boşsa TL).
+  currency?: string;
   contact_role?: string;
 };
 

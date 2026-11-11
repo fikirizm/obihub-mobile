@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
-import { getIntegrations, getOrders, syncIntegrationOrders } from "../../src/api";
+import { getIntegrations, getOrders, getOrdersPage, getOrderStats, syncIntegrationOrders } from "../../src/api";
+import type { OrderStats } from "../../src/api";
+import { useDebounce } from "../../src/hooks/useDebounce";
 import {
   displayOrderNo,
   displayOrderStatus,
@@ -34,10 +36,10 @@ import { SearchField } from "../../src/ui/SearchField";
 import { saveCache, loadCache } from "../../src/offlineCache";
 import type { Integration, Order } from "../../src/types";
 
-type IntegDetailCache = { orders: Order[]; integration: Integration | null };
+type IntegDetailCache = { orders: Order[]; integration: Integration | null; stats?: OrderStats | null };
 
 const SYNC_COOLDOWN_MS = 60_000;
-// Tek istekte çekilen sipariş sayısı (load içindeki perPage ile aynı).
+// Ekranda tutulan en yeni sipariş sayısı (load içindeki perPage ile aynı).
 const PAGE_SIZE = 200;
 
 // Duruma göre satırın sol simgesi.
@@ -88,6 +90,14 @@ export default function IntegrationOrders() {
   const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search.trim(), 350);
+  // Sunucunun tüm siparişler üzerinden verdiği sayılar; alınamazsa null kalır ve "—" gösterilir.
+  const [stats, setStats] = useState<OrderStats | null>(null);
+  // Aramada, ekrandaki son siparişlerin dışında kalan eşleşmeler sunucudan gelir.
+  const [remoteHits, setRemoteHits] = useState<Order[]>([]);
+  // Uzak sonuçların ait olduğu arama metni; metin değişince eski sonuçlar listeye karışmaz.
+  const [remoteQuery, setRemoteQuery] = useState("");
+  const searchSeq = useRef(0);
   const [syncBusy, setSyncBusy] = useState(false);
   const [cooldownEnd, setCooldownEnd] = useState(0);
   const [tickNow, setTickNow] = useState(Date.now());
@@ -107,21 +117,25 @@ export default function IntegrationOrders() {
       if (cached) {
         setOrders(cached.orders);
         setIntegration(cached.integration);
+        if (cached.stats) setStats(cached.stats);
         setIsOffline(true);
         setLoading(false);
       }
     }
     try {
-      const [list, ints] = await Promise.all([
-        getOrders(token, integrationId, { page: 1, perPage: 200, sortBy: "-created_at" }),
+      // Sipariş tarihine göre en yeni kayıtlar (created_at kaydın sisteme düştüğü andır, sipariş tarihi değildir).
+      const [list, ints, st] = await Promise.all([
+        getOrders(token, integrationId, { page: 1, perPage: PAGE_SIZE, sortBy: "-order_date" }),
         getIntegrations(token).catch(() => [] as Integration[]),
+        getOrderStats(token, integrationId).catch(() => null),
       ]);
       const fetchedOrders = Array.isArray(list) ? list : [];
       const found = (ints || []).find((i) => i.id === integrationId) || null;
       setOrders(fetchedOrders);
       setIntegration(found);
+      setStats(st);
       setIsOffline(false);
-      await saveCache(cacheKey, { orders: fetchedOrders, integration: found });
+      await saveCache(cacheKey, { orders: fetchedOrders, integration: found, stats: st });
     } catch {
       // Yüklenemezse eldeki (önbellekteki) kayıtlar kalır.
     } finally {
@@ -135,17 +149,38 @@ export default function IntegrationOrders() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, integrationId]);
 
+  useEffect(() => {
+    const seq = ++searchSeq.current;
+    if (!token || !integrationId || debouncedSearch.length < 2) {
+      setRemoteHits([]);
+      return;
+    }
+    getOrdersPage(token, { page: 1, perPage: 50, search: debouncedSearch, integrationId })
+      .then((res) => {
+        if (seq !== searchSeq.current) return;
+        setRemoteHits(res.items);
+        setRemoteQuery(debouncedSearch);
+      })
+      .catch(() => {
+        if (seq === searchSeq.current) setRemoteHits([]);
+      });
+  }, [token, integrationId, debouncedSearch]);
+
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const list = !q
-      ? orders
-      : orders.filter((o) => {
-          const no = String(o.channel_order_id || "").toLowerCase();
-          const customer = String(o.customer_name || "").toLowerCase();
-          return no.includes(q) || customer.includes(q);
-        });
-    return [...list].sort((a, b) => orderTimestamp(b) - orderTimestamp(a));
-  }, [orders, search]);
+    const q = search.trim().toLocaleLowerCase("tr-TR");
+    if (!q) return [...orders].sort((a, b) => orderTimestamp(b) - orderTimestamp(a));
+    // Ekranda görünen sipariş numarası (ör. Trendyol sipariş numarası) da aranır.
+    const local = orders.filter((o) =>
+      [o.channel_order_id, o.trendyol_order_number, displayOrderNo(o), o.customer_name].some((v) =>
+        String(v || "").toLocaleLowerCase("tr-TR").includes(q)
+      )
+    );
+    const seen = new Set(local.map((o) => o.id));
+    // Uzak sonuçlar yalnızca o anki arama metnine aitse eklenir.
+    const remote = remoteQuery === search.trim() ? remoteHits : [];
+    const merged = [...local, ...remote.filter((o) => !seen.has(o.id))];
+    return merged.sort((a, b) => orderTimestamp(b) - orderTimestamp(a));
+  }, [orders, search, remoteHits, remoteQuery]);
 
   const provider = providerHint || integration?.provider || integration?.name || "";
   const remainingMs = Math.max(0, cooldownEnd - tickNow);
@@ -179,19 +214,13 @@ export default function IntegrationOrders() {
   const channelLabel = providerLabel(provider) || storeName;
   const lastIndex = filtered.length - 1;
 
-  // Kahraman kartındaki sayılar eldeki (yüklenmiş) siparişlerden türetilir; ek istek yapılmaz.
-  const counts = useMemo(() => {
-    let pending = 0;
-    let shipping = 0;
-    for (const o of orders) {
-      const kind = statusKindFromOrder(o, provider);
-      if (kind === "warning") pending += 1;
-      else if (kind === "info") shipping += 1;
-    }
-    return { total: orders.length, pending, shipping };
-  }, [orders, provider]);
-  const pendingData = loading && orders.length === 0;
-  const totalText = pendingData ? "—" : counts.total >= PAGE_SIZE ? `${PAGE_SIZE}+` : String(counts.total);
+  // Kahraman kartındaki sayılar sunucunun mağaza özetinden gelir (Panel ve Siparişler ile aynı kaynak).
+  // Özet alınamadıysa eldeki kayıtlardan tahmin yürütülmez; "—" gösterilir.
+  const totalText = stats ? String(stats.total || 0) : "—";
+  const pendingText = stats ? String(Number(stats.pending || 0) + Number(stats.processing || 0)) : "—";
+  const shippingText = stats ? String(stats.shipped || 0) : "—";
+  const searching = search.trim().length > 0;
+  const hasOlder = !searching && orders.length >= PAGE_SIZE && (!stats || Number(stats.total || 0) > orders.length);
 
   const kindColor: Record<StatusKind, { fg: string; bg: string }> = {
     success: { fg: colors.success, bg: colors.successBg },
@@ -215,8 +244,8 @@ export default function IntegrationOrders() {
         subtitle={channelLabel !== storeName ? channelLabel : undefined}
         stats={[
           { label: "Toplam", value: totalText },
-          { label: "Bekleyen", value: pendingData ? "—" : String(counts.pending) },
-          { label: "Kargoda", value: pendingData ? "—" : String(counts.shipping) },
+          { label: "Bekleyen", value: pendingText },
+          { label: "Kargoda", value: shippingText },
         ]}
       />
 
@@ -245,7 +274,7 @@ export default function IntegrationOrders() {
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]}>
-      <StackHeader title={storeName} subtitle={`${filtered.length} sipariş`} />
+      <StackHeader title={storeName} subtitle={`${searching || !stats ? filtered.length : stats.total || 0} sipariş`} />
       <NetworkErrorBanner visible={isOffline} offline />
 
       <FlatList
@@ -256,6 +285,13 @@ export default function IntegrationOrders() {
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         ListHeaderComponent={listHeader}
+        ListFooterComponent={
+          hasOlder && !loading ? (
+            <Text style={[type.caption, tabular, styles.olderNote, { color: colors.textTertiary }]}>
+              En yeni {PAGE_SIZE} sipariş listeleniyor. Daha eski bir siparişi bulmak için arama kutusunu kullanın.
+            </Text>
+          ) : null
+        }
         ListEmptyComponent={
           loading ? (
             <RowsSkeleton surface={colors.surface} border={colors.borderSubtle} divider={colors.border} />
@@ -344,6 +380,7 @@ const styles = StyleSheet.create({
   syncNote: { paddingTop: spacing.xs, textAlign: "center" },
   syncDisabled: { opacity: 0.6 },
   searchGap: { height: spacing.sm },
+  olderNote: { textAlign: "center", paddingHorizontal: spacing.xl, paddingTop: spacing.md },
   list: { paddingTop: spacing.xs, paddingBottom: spacing.huge },
   rowShell: { marginHorizontal: spacing.lg, borderLeftWidth: 1, borderRightWidth: 1, overflow: "hidden" },
   first: { borderTopWidth: 1, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg },

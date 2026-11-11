@@ -558,29 +558,75 @@ export default function HepsiJetScreen() {
   );
 }
 
-function shipmentStatusText(statusRaw?: string) {
-  const s = String(statusRaw || "").toLowerCase();
-  if (!s) return "Bilinmiyor";
-  if (s.includes("delivered") || s.includes("teslim")) return "Teslim edildi";
-  if (s.includes("kurye") || s.includes("out_for_delivery") || s.includes("dagitima")) return "Kurye dağıtıma çıktı";
-  if (s.includes("sube") || s.includes("şube") || s.includes("branch")) return "Teslimat şubesinde";
-  if (s.includes("transit") || s.includes("kargo") || s.includes("ship") || s.includes("transfer") || s.includes("yolda")) return "Dağıtım sürecinde";
-  if (s.includes("pickup") || s.includes("accepted") || s.includes("accept") || s.includes("created")) return "Teslim alınacak";
-  if (s.includes("cancel")) return "İptal";
-  return statusRaw || "Bilinmiyor";
+// Durum metni HepsiJet'ten ham gelir; Türkçe harfler sadeleştirilip karşılaştırılır.
+function foldStatus(statusRaw?: string) {
+  return String(statusRaw || "")
+    .toLocaleLowerCase("tr-TR")
+    .replace(/\u0307/g, "")
+    .replace(/ı/g, "i")
+    .replace(/ğ/g, "g")
+    .replace(/ş/g, "s")
+    .replace(/ö/g, "o")
+    .replace(/ü/g, "u")
+    .replace(/ç/g, "c")
+    .trim();
 }
 
-// Rozet rengi, durum metniyle aynı eşleştirme sırasını izler.
+type ShipmentStage = "failed" | "delivered" | "courier" | "branch" | "transit" | "pickup" | "cancelled" | "unknown";
+
+// Yalnızca "teslim edildi" teslim sayılır; "teslimat şubesinde", "teslim alınacak" ve
+// "teslim edilemedi" ayrı durumlardır (web paneliyle aynı eşleştirme).
+function shipmentStage(statusRaw?: string): ShipmentStage {
+  const s = foldStatus(statusRaw);
+  if (!s) return "unknown";
+  if (s.includes("teslim edilemedi") || s.includes("undelivered") || s.includes("not delivered")) return "failed";
+  if (s.includes("teslim edildi") || s.includes("delivered")) return "delivered";
+  if (s.includes("kurye") || s.includes("out_for_delivery") || s.includes("dagitima")) return "courier";
+  if (s.includes("sube") || s.includes("branch")) return "branch";
+  if (s.includes("teslim alinacak") || s.includes("pickup") || s.includes("accept") || s.includes("created")) return "pickup";
+  if (s.includes("cancel") || s.includes("iptal")) return "cancelled";
+  if (s.includes("transit") || s.includes("kargo") || s.includes("ship") || s.includes("transfer") || s.includes("yolda") || s.includes("dagitim")) return "transit";
+  return "unknown";
+}
+
+function shipmentStatusText(statusRaw?: string) {
+  switch (shipmentStage(statusRaw)) {
+    case "failed":
+      return "Teslim edilemedi";
+    case "delivered":
+      return "Teslim edildi";
+    case "courier":
+      return "Kurye dağıtıma çıktı";
+    case "branch":
+      return "Teslimat şubesinde";
+    case "transit":
+      return "Dağıtım sürecinde";
+    case "pickup":
+      return "Teslim alınacak";
+    case "cancelled":
+      return "İptal";
+    default:
+      return String(statusRaw || "").trim() || "Bilinmiyor";
+  }
+}
+
+// Rozet rengi, durum metniyle aynı eşleştirmeyi kullanır.
 function shipmentStatusKind(statusRaw?: string): StatusKind {
-  const s = String(statusRaw || "").toLowerCase();
-  if (!s) return "neutral";
-  if (s.includes("delivered") || s.includes("teslim")) return "success";
-  if (s.includes("kurye") || s.includes("out_for_delivery") || s.includes("dagitima")) return "info";
-  if (s.includes("sube") || s.includes("şube") || s.includes("branch")) return "info";
-  if (s.includes("transit") || s.includes("kargo") || s.includes("ship") || s.includes("transfer") || s.includes("yolda")) return "info";
-  if (s.includes("pickup") || s.includes("accepted") || s.includes("accept") || s.includes("created")) return "warning";
-  if (s.includes("cancel")) return "error";
-  return "neutral";
+  switch (shipmentStage(statusRaw)) {
+    case "delivered":
+      return "success";
+    case "courier":
+    case "branch":
+    case "transit":
+      return "info";
+    case "pickup":
+      return "warning";
+    case "failed":
+    case "cancelled":
+      return "error";
+    default:
+      return "neutral";
+  }
 }
 
 function IconAction({

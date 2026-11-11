@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
-import { useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
@@ -10,11 +10,12 @@ import { recallChannels, recallProduct, rememberCatalog } from "../../src/catalo
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { palette, radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatTry } from "../../src/utils";
-import { ArrowRightIcon, LinkIcon, PackageIcon, ZapIcon } from "../../src/components/Icons";
+import { ArrowRightIcon, LinkIcon, PackageIcon, TagIcon, ZapIcon } from "../../src/components/Icons";
 import { EmptyState } from "../../src/components/EmptyState";
 import { PressableScale } from "../../src/components/KPICard";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
 import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
+import { StockMovements } from "../../src/components/StockMovements";
 import { DetailHero } from "../../src/ui/DetailHero";
 import { useFeedback } from "../../src/ui/Feedback";
 import { StackHeader } from "../../src/ui/Header";
@@ -24,6 +25,17 @@ import type { CatalogProduct, ChannelRef } from "../../src/types";
 
 // Koyu gradyan üzerinde okunabilen uyarı kırmızısı (koyu tema paletinden).
 const HERO_BAD = palette.dark.error;
+
+// Yenilemede ürün aranırken okunacak en çok sayfa (sayfa başına 100 ürün).
+const RELOAD_MAX_PAGES = 5;
+const UNSENT_NOTE = "Pazaryerine gönderilmedi";
+const BASE_SENT_NOTE = "Pazaryerine ana fiyat gönderildi";
+
+type SyncOutcome = { message?: string; synced_providers?: string[]; skipped_providers?: Record<string, string> };
+
+function samePrice(a: number, b: number) {
+  return Math.abs(a - b) < 0.005;
+}
 
 // Özet kartındaki rakam hücresi. Düzenlenebiliyorsa hücrenin kendisi dokunulabilir olur.
 function HeroStat({
@@ -158,30 +170,64 @@ export default function ProductDetailScreen() {
   const [channels, setChannels] = useState<ChannelRef[]>(() => recallChannels());
   const [refreshing, setRefreshing] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  // Bu ekranda ana değer değiştiği hâlde pazaryerine gönderilmemiş kanal satırları (kanal kimlikleri).
+  const [unsent, setUnsent] = useState<{ stock: string[]; price: string[] }>({ stock: [], price: [] });
+  // Toplu gönderimde pazaryerine ana fiyat giden, ancak kanala özel fiyat kaydı eski kalan satırlar (kanal kimlikleri).
+  const [baseSent, setBaseSent] = useState<string[]>([]);
   const canEdit = canManage(user, "inventory");
+  // Ad / SKU / barkod ürün kartı bilgisidir: katalog yönetme izni ister.
+  const canEditInfo = canManage(user, "catalog");
+  // Değişince "Stok hareketleri" bölümü yeniden okunur.
+  const [movementsKey, setMovementsKey] = useState(0);
 
-  const reload = useCallback(async () => {
-    if (!token || !product) return;
-    try {
-      const res = await getCatalog(token, { search: product.sku || product.barcode || product.name, perPage: 50 });
-      rememberCatalog(res.products, res.channels);
-      const fresh = res.products.find((p) => p.id === product.id);
+  // Bilgi düzenleme ekranından dönüldüğünde yeni ad ve kodlar önbellekten alınır.
+  useFocusEffect(
+    useCallback(() => {
+      const cached = recallProduct(id);
+      if (!cached) return;
+      setProduct((prev) =>
+        prev && (prev.name !== cached.name || prev.sku !== cached.sku || prev.barcode !== cached.barcode)
+          ? { ...prev, name: cached.name, sku: cached.sku, barcode: cached.barcode }
+          : prev
+      );
+    }, [id])
+  );
+
+  // Ürünü sunucudan yeniden okur. Tek ürün ucu olmadığı için listede aranır: en ayırt edici kodla (barkod, SKU, ad)
+  // ve ürün bulunana ya da sonuçlar bitene kadar sayfa sayfa. Okunamazsa `notify` ile kullanıcıya bildirilir.
+  const reload = useCallback(
+    async (notify: boolean): Promise<CatalogProduct | null> => {
+      if (!token || !product) return null;
+      let fresh: CatalogProduct | null = null;
+      try {
+        const search = product.barcode || product.sku || product.name;
+        for (let page = 1; page <= RELOAD_MAX_PAGES && !fresh; page += 1) {
+          const res = await getCatalog(token, { search, page, perPage: 100 });
+          rememberCatalog(res.products, res.channels);
+          if (res.channels.length > 0) setChannels(res.channels);
+          fresh = res.products.find((p) => p.id === product.id) || null;
+          if (res.products.length === 0 || page * 100 >= res.total) break;
+        }
+      } catch {
+        fresh = null;
+      } finally {
+        setRefreshing(false);
+      }
       if (fresh) setProduct(fresh);
-      if (res.channels.length > 0) setChannels(res.channels);
-    } catch {
-      // Yenilenemedi: eldeki değerler gösterilmeye devam eder.
-    } finally {
-      setRefreshing(false);
-    }
-  }, [token, product]);
+      else if (notify) toast("Güncel değerler okunamadı. Ekrandaki değerler eski olabilir.", "error");
+      return fresh;
+    },
+    [token, product, toast]
+  );
 
   // Değişikliği sunucuya yazar. Başarılıysa yazılan değer ekrana hemen uygulanır; ardından liste yeniden okunur.
-  const run = async (
+  // Sonuç: başarılıysa sunucu yanıtı ve yeniden okunan ürün, değilse null.
+  const run = async <R extends SyncOutcome>(
     key: string,
-    action: () => Promise<{ message?: string; skipped_providers?: Record<string, string> }>,
+    action: () => Promise<R>,
     apply: (p: CatalogProduct) => CatalogProduct,
-    done: string
-  ) => {
+    done: string | ((res: R) => { message: string; kind: "success" | "error" })
+  ): Promise<{ res: R; fresh: CatalogProduct | null } | null> => {
     setBusyKey(key);
     try {
       const res = await action();
@@ -193,14 +239,21 @@ export default function ProductDetailScreen() {
       });
       const skipped = Object.keys(res?.skipped_providers || {});
       if (skipped.length > 0) toast(`Kaydedildi, ancak şu kanallara gönderilemedi: ${skipped.join(", ")}`, "error");
-      else toast(done, "success");
-      await reload();
+      else if (typeof done === "string") toast(done, "success");
+      else {
+        const d = done(res);
+        toast(d.message, d.kind);
+      }
+      const fresh = await reload(skipped.length === 0);
+      return { res, fresh };
     } catch (e: any) {
       toast(e?.message || "Güncellenemedi.", "error");
-      // Sunucu yerel değeri yazıp kanal hatası döndürmüş olabilir; güncel durumu oku.
-      await reload();
+      // Sunucu yerel değeri yazıp kanal hatası döndürmüş olabilir; güncel durumu oku (hata iletisinin üstüne yazmadan).
+      await reload(false);
+      return null;
     } finally {
       setBusyKey(null);
+      setMovementsKey((k) => k + 1);
     }
   };
 
@@ -228,8 +281,16 @@ export default function ProductDetailScreen() {
       suffix: "adet",
     });
     if (v === null || v === product.stock) return;
+    // Kanala özel değeri olmayan satırlar ana stoğu yansıtır; bu değişiklik pazaryerine gitmediği için işaretlenir.
+    const mirrored = product.channelStocks.filter((x) => x.stock === product.stock).map((x) => x.integration_id);
     // Web panelindeki gibi: ana stok yalnızca muhasebe programına yansıtılır.
-    await run("stock", () => setProductStock(token, product.id, v, [accountingProvider || SYNC_NONE]), (p) => ({ ...p, stock: v }), "Stok güncellendi");
+    const out = await run(
+      "stock",
+      () => setProductStock(token, product.id, v, [accountingProvider || SYNC_NONE]),
+      (p) => ({ ...p, stock: v }),
+      mirrored.length > 0 ? "Stok güncellendi. Pazaryeri stokları değişmedi." : "Stok güncellendi"
+    );
+    if (out) setUnsent((u) => ({ ...u, stock: Array.from(new Set([...u.stock, ...mirrored])) }));
   };
 
   const editBasePrice = async () => {
@@ -250,31 +311,80 @@ export default function ProductDetailScreen() {
     const v = entry.amount;
     const pushAll = entry.method === "all";
     if (v === product.price && !pushAll) return;
-    await run("price", () => setProductPrice(token, product.id, v, pushAll), (p) => ({ ...p, price: v }), pushAll ? "Fiyat güncellendi ve kanallara gönderildi" : "Fiyat güncellendi");
+    if (!pushAll) {
+      // Kanala özel fiyatı olmayan satırlar ana fiyatı yansıtır; bu değişiklik pazaryerine gitmediği için işaretlenir.
+      const mirrored = product.channelPrices.filter((x) => samePrice(x.price, product.price)).map((x) => x.integration_id);
+      const out = await run(
+        "price",
+        () => setProductPrice(token, product.id, v, false),
+        (p) => ({ ...p, price: v }),
+        mirrored.length > 0 ? "Fiyat güncellendi. Pazaryeri fiyatları değişmedi." : "Fiyat güncellendi"
+      );
+      if (out) setUnsent((u) => ({ ...u, price: Array.from(new Set([...u.price, ...mirrored])) }));
+      return;
+    }
+    // Sunucu toplu gönderimde her kanala göndermez (ör. İdefix, Pazarama); yanıttaki `synced_providers` esas alınır.
+    const sentTo = (res: SyncOutcome) => {
+      const synced = new Set((res.synced_providers || []).map((s) => String(s).toLowerCase()));
+      return (ch: ChannelRef) => synced.has(ch.platform.toLowerCase());
+    };
+    // Kanala özel fiyatı olmayan satırlar ana fiyatı yansıtır; gönderilmeyen kanalda satır yeni fiyatı gösterse de pazaryeri eski kalır.
+    const mirroredIds = product.channelPrices.filter((x) => samePrice(x.price, product.price)).map((x) => x.integration_id);
+    const missedOf = (res: SyncOutcome) => {
+      const sent = sentTo(res);
+      return channels.filter((ch) => mirroredIds.includes(ch.id) && !sent(ch));
+    };
+    const out = await run(
+      "price",
+      () => setProductPrice(token, product.id, v, true),
+      (p) => ({ ...p, price: v }),
+      (res) => {
+        const missed = missedOf(res);
+        return missed.length > 0
+          ? { message: `Fiyat güncellendi, ancak şu kanallara gönderilmedi: ${missed.map((ch) => ch.name).join(", ")}`, kind: "error" }
+          : { message: "Fiyat güncellendi ve kanallara gönderildi", kind: "success" };
+      }
+    );
+    if (!out) return;
+    const sent = sentTo(out.res);
+    const sentIds = channels.filter(sent).map((ch) => ch.id);
+    const missedIds = missedOf(out.res).map((ch) => ch.id);
+    setUnsent((u) => ({ ...u, price: Array.from(new Set([...u.price.filter((cid) => !sentIds.includes(cid)), ...missedIds])) }));
+    // Sunucu toplu gönderimde kanala özel fiyat kaydını güncellemez. Kayıt burada yeniden gönderilmez (ikinci istek
+    // Trendyol liste fiyatını ezer); satırı eski kalan kanallar yalnızca ekranda işaretlenir.
+    const stale = (out.fresh?.channelPrices || product.channelPrices)
+      .filter((x) => sentIds.includes(x.integration_id) && !samePrice(x.price, v))
+      .map((x) => x.integration_id);
+    setBaseSent((prev) => Array.from(new Set([...prev.filter((cid) => !sentIds.includes(cid) && !missedIds.includes(cid)), ...stale])));
   };
 
   const editChannelStock = async (ch: ChannelRef, current: number) => {
     if (!token) return;
     const v = await promptNumber({ title: `${ch.name} stoğu`, message: product.name, initial: current, suffix: "adet" });
     if (v === null || v === current) return;
-    await run(
+    const out = await run(
       `cs-${ch.id}`,
       () => setChannelStock(token, product.id, ch.id, v),
       (p) => ({ ...p, channelStocks: p.channelStocks.map((x) => (x.integration_id === ch.id ? { ...x, stock: v } : x)) }),
       `${ch.name} stoğu güncellendi`
     );
+    if (out) setUnsent((u) => ({ ...u, stock: u.stock.filter((cid) => cid !== ch.id) }));
   };
 
   const editChannelPrice = async (ch: ChannelRef, current: number) => {
     if (!token) return;
     const v = await promptNumber({ title: `${ch.name} fiyatı`, message: product.name, initial: current, decimal: true, suffix: "₺" });
     if (v === null || v === current) return;
-    await run(
+    const out = await run(
       `cp-${ch.id}`,
       () => setChannelPrice(token, product.id, ch.id, v),
       (p) => ({ ...p, channelPrices: p.channelPrices.map((x) => (x.integration_id === ch.id ? { ...x, price: v } : x)) }),
       `${ch.name} fiyatı güncellendi`
     );
+    if (out) {
+      setUnsent((u) => ({ ...u, price: u.price.filter((cid) => cid !== ch.id) }));
+      setBaseSent((prev) => prev.filter((cid) => cid !== ch.id));
+    }
   };
 
   const hasImage = Boolean(product.image_url && /^https?:\/\//i.test(product.image_url));
@@ -293,7 +403,7 @@ export default function ProductDetailScreen() {
       <StackHeader title="Ürün" />
       <ScrollView
         contentContainerStyle={{ paddingTop: spacing.xs, paddingBottom: spacing.huge }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); reload(); }} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); setMovementsKey((k) => k + 1); reload(true); }} tintColor={colors.primary} />}
       >
         <DetailHero
           tone="blue"
@@ -355,6 +465,21 @@ export default function ProductDetailScreen() {
               </Text>
             </View>
           ) : null}
+          {canEditInfo ? (
+            <PressableScale
+              testID="product-edit-info"
+              onPress={() => router.push({ pathname: "/products/edit", params: { id: product.id } } as any)}
+              accessibilityRole="button"
+              accessibilityLabel="Ad ve kodları düzenle"
+              style={styles.editInfo}
+            >
+              <TagIcon size={16} color={ON_HERO.text} />
+              <Text style={styles.editInfoText} numberOfLines={1}>
+                Ad ve kodları düzenle
+              </Text>
+              <ArrowRightIcon size={16} color={ON_HERO.soft} />
+            </PressableScale>
+          ) : null}
         </DetailHero>
 
         {channels.length > 0 ? (
@@ -379,7 +504,7 @@ export default function ProductDetailScreen() {
                       divider={i > 0}
                       matched={Boolean(row)}
                       value={row ? `${row.stock} adet` : "-"}
-                      note={row && row.stock !== product.stock ? "Ana stoktan farklı" : undefined}
+                      note={!row ? undefined : unsent.stock.includes(ch.id) ? UNSENT_NOTE : row.stock !== product.stock ? "Ana stoktan farklı" : undefined}
                       busy={busyKey === `cs-${ch.id}`}
                       editable={canEdit && Boolean(row)}
                       onPress={canEdit && row && !busyKey ? () => editChannelStock(ch, row.stock) : undefined}
@@ -409,6 +534,7 @@ export default function ProductDetailScreen() {
                       divider={i > 0}
                       matched={Boolean(row)}
                       value={row ? formatTry(row.price) : "-"}
+                      note={!row ? undefined : unsent.price.includes(ch.id) ? UNSENT_NOTE : baseSent.includes(ch.id) && !samePrice(row.price, product.price) ? BASE_SENT_NOTE : undefined}
                       busy={busyKey === `cp-${ch.id}`}
                       editable={canEdit && Boolean(row)}
                       onPress={canEdit && row && !busyKey ? () => editChannelPrice(ch, row.price) : undefined}
@@ -423,7 +549,7 @@ export default function ProductDetailScreen() {
                 <ZapIcon size={18} color={colors.primary} />
               </IconTile>
               <Text style={[type.caption, styles.noteText, { color: colors.textSecondary }]}>
-                Kanal değeri değiştiğinde ilgili pazaryerine hemen gönderilir. Ürün eşleştirme web panelinden yapılır.
+                Kanal değeri değiştiğinde ilgili pazaryerine hemen gönderilir. Kanala özel değer girilmemişse satır ana stoğu ve ana fiyatı gösterir; ana değerde yapılan değişiklik pazaryerine kendiliğinden gönderilmez. Ürün eşleştirme web panelinden yapılır.
               </Text>
             </SafeAnimatedView>
           </>
@@ -439,6 +565,10 @@ export default function ProductDetailScreen() {
             </Card>
           </SafeAnimatedView>
         )}
+
+        <SafeAnimatedView entering={FadeInDown.delay(260).duration(380)}>
+          <StockMovements token={token} productId={product.id} refreshKey={movementsKey} />
+        </SafeAnimatedView>
       </ScrollView>
     </View>
   );
@@ -463,6 +593,8 @@ const styles = StyleSheet.create({
   statDivider: { width: 1, backgroundColor: ON_HERO.faint, marginVertical: 4 },
   lowRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: spacing.sm },
   lowDot: { width: 6, height: 6, borderRadius: 3 },
+  editInfo: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.xs, minHeight: 44, marginTop: spacing.md, paddingHorizontal: spacing.md, borderRadius: radius.md, backgroundColor: ON_HERO.faint },
+  editInfoText: { color: ON_HERO.text, fontSize: 14, fontWeight: "600", flexShrink: 1 },
   lowText: { color: ON_HERO.soft, fontSize: 12, fontWeight: "600" },
   row: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 60, paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
   rowBody: { flex: 1, minWidth: 0, alignItems: "flex-start" },

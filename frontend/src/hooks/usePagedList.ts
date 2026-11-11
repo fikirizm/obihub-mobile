@@ -14,12 +14,17 @@ export function usePagedList<T extends { id: string }>(fetchPage: ((page: number
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestId = useRef(0);
+  // Yüklenmiş son sayfa; yerinde yenileme kaç sayfa çekeceğini buradan bilir.
+  const pageRef = useRef(1);
 
   const run = useCallback(
     async (nextPage: number, mode: "reset" | "more" | "refresh") => {
       if (!fetchPage) return;
       const id = ++requestId.current;
-      if (mode === "reset") setLoading(true);
+      if (mode === "reset") {
+        setLoading(true);
+        pageRef.current = 1;
+      }
       if (mode === "more") setLoadingMore(true);
       if (mode === "refresh") setRefreshing(true);
       try {
@@ -32,6 +37,7 @@ export function usePagedList<T extends { id: string }>(fetchPage: ((page: number
         });
         setTotal(res.total);
         setPage(nextPage);
+        pageRef.current = nextPage;
         setHasMore(res.hasMore);
         setError(null);
       } catch (e: any) {
@@ -47,6 +53,48 @@ export function usePagedList<T extends { id: string }>(fetchPage: ((page: number
     [fetchPage]
   );
 
+  // Yerinde yenileme: yüklenmiş bütün sayfalar (1..son) yeniden çekilir; liste uzunluğu ve kaydırma konumu korunur.
+  // Detaydan geri dönüşte kullanılır. Hata olursa eldeki liste olduğu gibi bırakılır.
+  const refreshLoaded = useCallback(async () => {
+    if (!fetchPage) return;
+    const id = ++requestId.current;
+    const upto = pageRef.current;
+    try {
+      const merged: T[] = [];
+      const known = new Set<string>();
+      let total = 0;
+      let more = false;
+      let lastPage = 1;
+      for (let p = 1; p <= upto; p++) {
+        const res = await fetchPage(p);
+        if (id !== requestId.current) return;
+        for (const x of res.items) {
+          if (known.has(x.id)) continue;
+          known.add(x.id);
+          merged.push(x);
+        }
+        total = res.total;
+        more = res.hasMore;
+        lastPage = p;
+        if (!res.hasMore) break;
+      }
+      setItems(merged);
+      setTotal(total);
+      setPage(lastPage);
+      pageRef.current = lastPage;
+      setHasMore(more);
+      setError(null);
+    } catch {
+      // Sessiz: eldeki liste kalır; kullanıcı aşağı çekerek yenileyebilir.
+    } finally {
+      if (id === requestId.current) {
+        setLoading(false);
+        setLoadingMore(false);
+        setRefreshing(false);
+      }
+    }
+  }, [fetchPage]);
+
   useEffect(() => {
     run(1, "reset");
   }, [run]);
@@ -61,6 +109,7 @@ export function usePagedList<T extends { id: string }>(fetchPage: ((page: number
     hasMore,
     reload: () => run(1, "reset"),
     refresh: () => run(1, "refresh"),
+    refreshLoaded,
     loadMore: () => {
       if (hasMore && !loadingMore && !loading) run(page + 1, "more");
     },

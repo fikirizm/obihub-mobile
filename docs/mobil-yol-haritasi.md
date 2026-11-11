@@ -100,6 +100,42 @@ Açık kalanlar (sonraki tur):
 - Build öncesi inceleme 21 bulgu doğruladı (kritik/yüksek yok); tamamı düzeltildi.
 - Faz 1'de açık kalan: kargo hatası bildirimi (sunucunun push göndermesi gerekir).
 
+### Veri taraması ve kalan işler (11 Kasım 2026, sürüm 1.1.02 / build 53)
+
+Kullanıcı bildirimi: Panel'de bugünün sipariş sayısı ve tutarı görünmüyordu. Neden: sunucu özeti kaydın sisteme düştüğü ana (`created_at`) ve UTC gece yarısına bakıyor. Mobil artık bugünü sipariş tarihine ve telefonun yerel gününe göre kendisi hesaplıyor; dönem (7/30 gün) rakamları Raporlar ile aynı uçtan geliyor.
+
+Beş alanda mobil–sunucu veri uyumu tarandı, bulgular bağımsız doğrulandı ve düzeltildi:
+
+- **Panel / Raporlar:** dönem toplamları, geçmiş aralıkların 500 siparişte kesilmesi, n11 sipariş tarihi, uyarı sayılarının açılan listeyle tutması, önceki dönem sıfırken uydurma +%100.
+- **Sipariş / Mağaza:** sipariş numarasının takip numarası diye gösterilmesi, mağaza sayaçlarının son 200 kayıttan hesaplanması, durum rengi ve "Ödeme bekleniyor" etiketi, kargo/muhasebe entegrasyonlarının mağaza diye listelenmesi, HepsiJet teslim durumu.
+- **Ürün:** fiyat isteği hatasında 0,00 TL gösterimi, toplu fiyat gönderiminde ikinci istek ve gönderilmeyen kanalların işaretlenmesi, düşük stok süzgeci.
+- **Finans:** taslak dışı faturada resmileştirme, özetlerin yenilenmemesi, dövizli cari gösterimi (dövizli caride mobil tahsilat kapatıldı), yerel güne göre vade.
+- **Fatura / Teklif:** teklif ve gelen e-fatura listelerinin ilk sayfada kesilmesi, sunucu hatasının "kayıt yok" diye gösterilmesi, dövizli teklifler.
+
+Yeni özellikler: virman, yeni kasa/banka hesabı, yeni cari, ObiHub satış faturası oluşturma (taslak), ürün adı/SKU/barkod düzenleme, stok hareket geçmişi.
+
+Yapılmayanlar ve nedenleri:
+
+- **Davet et, kazan:** ekran yazıldı (`app/invite.tsx`) ama menüye bağlanmadı. Sunucunun ürettiği `/davet/<kod>` bağlantısının web'de rotası yok ve ödülü işleyen kod bulunamadı; web'deki sayfa da aynı durumda.
+- **BizimHesap gider faturaları:** sunucu ucu belgelenmemiş yolları tahminle deniyor, web de bilerek kullanmıyor.
+- **İçeri Al:** web pilotu sürüyor.
+- **Android yayını, otomatik testler:** açık karar / sonraki tur.
+
+Sunucu oturumuna iletilecek yeni ihtiyaçlar:
+
+| İhtiyaç | Neden |
+|---|---|
+| `/dashboard/stats` ve `/dashboard/sales-chart` sipariş tarihine ve Europe/Istanbul gününe göre hesaplasın | Web panelinde de "bugün" yanlış/sıfır görünebilir |
+| Finans ve yerel fatura uçlarında `date.today()` yerine Türkiye günü | 00:00–03:00 arası vade geçmişliği |
+| `/reports/overview` sorgusuna tarih süzgeci (5000 kayıt sınırı yerine) | Yüksek hacimde dönem toplamı eksik |
+| `/orders` aramasına `trendyol_order_number` | Trendyol siparişi görünen numarayla bulunamıyor |
+| n11'de `order_date` oluşturma tarihinden gelsin, eşitlemede ezilmesin | Eski siparişler bugüne sayılıyor |
+| `/price/adjust` kanala özel fiyat kaydını da eşitlesin; kanala son gönderilen değer saklansın | Kanal satırı gerçek pazaryeri değerini göstermiyor |
+| Para yazan POST uçlarında tekrar anahtarı (idempotency) | Yanıt kaybında mükerrer virman/fatura |
+| `/davet/<kod>` rotası ve ödül işleme | Davet özelliği uçtan uca çalışmıyor |
+
+Cihazda denenmedi; yalnızca sahte API ile tarayıcıda ve tip denetimiyle doğrulandı. Para yazan yeni ekranlar önce küçük tutarla denenmeli.
+
 ## 4. Web'de olup mobilde olmayanlar
 
 Öncelik, özelliğin telefonda ne kadar işe yaradığına göre verildi.

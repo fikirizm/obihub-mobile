@@ -109,6 +109,10 @@ export default function JobsScreen() {
           renderItem={({ item, index }) => {
             const ok = item.status === "success";
             const tone = ok ? colors.success : colors.error;
+            // Sunucu, ürünü bulunamayan ve iletisi olmayan kayıtlarda "-" yer tutucusu döndürür; veri sayılmaz.
+            const real = (v?: string) => (v && v.trim() !== "-" ? v.trim() : "");
+            const title = real(item.product_name) || (item.sku ? `SKU ${item.sku}` : "Silinmiş ürün");
+            const message = real(item.message);
             const card = (
               <View style={[styles.card, shadows.sm, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
                 <View style={[styles.accent, { backgroundColor: tone }]} />
@@ -118,7 +122,7 @@ export default function JobsScreen() {
                   </IconTile>
                   <View style={styles.cardBody}>
                     <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={2}>
-                      {item.product_name || item.sku || "Ürün"}
+                      {title}
                     </Text>
                     <Text style={[type.caption, { color: colors.textTertiary, marginTop: 2 }]} numberOfLines={2}>
                       {[item.integration_name || item.provider_label || item.provider, when(item.timestamp)].filter(Boolean).join(" · ")}
@@ -126,9 +130,9 @@ export default function JobsScreen() {
                   </View>
                   <StatusBadge label={ok ? "Başarılı" : "Başarısız"} kind={ok ? "success" : "error"} size="sm" />
                 </View>
-                {item.message ? (
+                {message ? (
                   <View style={[styles.message, { backgroundColor: ok ? colors.surfaceMuted : colors.errorBg }]}>
-                    <Text style={[type.footnote, { color: colors.textSecondary }]}>{item.message}</Text>
+                    <Text style={[type.footnote, { color: colors.textSecondary }]}>{message}</Text>
                   </View>
                 ) : null}
                 {!ok && item.retryable ? (

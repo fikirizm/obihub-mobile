@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Platform, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { getCatalog } from "../../src/api";
-import { rememberCatalog } from "../../src/catalogCache";
+import { recallProduct, rememberCatalog } from "../../src/catalogCache";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatTry } from "../../src/utils";
@@ -15,11 +15,19 @@ import { FadeInDown, SafeAnimatedView } from "../../src/components/SafeAnimatedV
 import { Skeleton } from "../../src/components/Skeleton";
 import { useDebounce } from "../../src/hooks/useDebounce";
 import { Button } from "../../src/ui/Button";
+import { Chip, ChipRow } from "../../src/ui/Chip";
 import { StackHeader } from "../../src/ui/Header";
 import { SearchField } from "../../src/ui/SearchField";
 import type { CatalogProduct } from "../../src/types";
 
 const PER_PAGE = 30;
+// Düşük stok görünümü: sunucuda stok süzgeci olmadığı için ürünler 100'erli sayfalarla taranır ve burada süzülür.
+// Eşik panel uyarısıyla aynıdır (0-5 adet).
+const LOW_STOCK_MAX = 5;
+const SCAN_PER_PAGE = 100;
+const SCAN_MAX_PAGES = 30;
+const SCAN_PARALLEL = 3;
+const isLowStock = (p: CatalogProduct) => p.stock >= 0 && p.stock <= LOW_STOCK_MAX;
 
 // Barkod okutma simgesi: köşe çerçevesi içinde çizgiler.
 function BarcodeIcon({ size = 18, color }: { size?: number; color: string }) {
@@ -50,7 +58,7 @@ function ProductRowSkeleton() {
 }
 
 export default function ProductsScreen() {
-  const params = useLocalSearchParams<{ q?: string; t?: string }>();
+  const params = useLocalSearchParams<{ q?: string; t?: string; filter?: string }>();
   const { token } = useAuth();
   const { colors, shadows } = useTheme();
   const [search, setSearch] = useState("");
@@ -62,6 +70,10 @@ export default function ProductsScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Panel uyarısından gelindiğinde yalnızca düşük stoklu ürünler gösterilir.
+  const [lowOnly, setLowOnly] = useState(params.filter === "low");
+  // Tarama sınırı aşıldıysa taranan ürün sayısı; liste eksik olabilir.
+  const [scanLimit, setScanLimit] = useState<number | null>(null);
   const requestId = useRef(0);
 
   // Barkod okuyucudan dönen değer arama kutusuna yazılır.
@@ -76,6 +88,29 @@ export default function ProductsScreen() {
       if (mode === "reset") setLoading(true);
       if (mode === "more") setLoadingMore(true);
       try {
+        if (lowOnly) {
+          const search = debounced || undefined;
+          const first = await getCatalog(token, { page: 1, perPage: SCAN_PER_PAGE, search });
+          if (id !== requestId.current) return;
+          const all = [...first.products];
+          const pages = Math.min(SCAN_MAX_PAGES, Math.ceil(first.total / SCAN_PER_PAGE));
+          for (let p = 2; p <= pages; p += SCAN_PARALLEL) {
+            const batch = [];
+            for (let q = p; q < p + SCAN_PARALLEL && q <= pages; q += 1) batch.push(getCatalog(token, { page: q, perPage: SCAN_PER_PAGE, search }));
+            const results = await Promise.all(batch);
+            if (id !== requestId.current) return;
+            results.forEach((r) => all.push(...r.products));
+          }
+          rememberCatalog(all, first.channels);
+          const seen = new Set<string>();
+          const low = all.filter((p) => isLowStock(p) && !seen.has(p.id) && Boolean(seen.add(p.id))).sort((a, b) => a.stock - b.stock);
+          setProducts(low);
+          setTotal(low.length);
+          setPage(1);
+          setScanLimit(first.total > pages * SCAN_PER_PAGE ? pages * SCAN_PER_PAGE : null);
+          setError(null);
+          return;
+        }
         const res = await getCatalog(token, { page: nextPage, perPage: PER_PAGE, search: debounced || undefined });
         if (id !== requestId.current) return;
         rememberCatalog(res.products, res.channels);
@@ -86,9 +121,16 @@ export default function ProductsScreen() {
         });
         setTotal(res.total);
         setPage(nextPage);
+        setScanLimit(null);
         setError(null);
       } catch (e: any) {
-        if (id === requestId.current) setError(e?.message || "Ürünler yüklenemedi.");
+        if (id !== requestId.current) return;
+        setError(e?.message || "Ürünler yüklenemedi.");
+        // Eksik taramayla yanlış sayı gösterilmez; hata durumu "Tekrar dene" ile görünür.
+        if (lowOnly) {
+          setProducts([]);
+          setTotal(0);
+        }
       } finally {
         if (id === requestId.current) {
           setLoading(false);
@@ -97,18 +139,43 @@ export default function ProductsScreen() {
         }
       }
     },
-    [token, debounced]
+    [token, debounced, lowOnly]
   );
 
   useEffect(() => {
     fetchPage(1, "reset");
   }, [fetchPage]);
 
+  // Ürün detayından ya da bilgi düzenleme ekranından dönüldüğünde satırlar önbellekteki güncel hâliyle gösterilir.
+  // Düşük stok görünümünde stoğu yükselen ürün listeden ve sayıdan düşer.
+  const productsRef = useRef(products);
+  productsRef.current = products;
+  const lowOnlyRef = useRef(lowOnly);
+  lowOnlyRef.current = lowOnly;
+  useFocusEffect(
+    useCallback(() => {
+      const prev = productsRef.current;
+      let changed = false;
+      const merged = prev.map((p) => {
+        const cached = recallProduct(p.id);
+        if (cached && cached !== p) {
+          changed = true;
+          return cached;
+        }
+        return p;
+      });
+      if (!changed) return;
+      const next = lowOnlyRef.current ? merged.filter(isLowStock) : merged;
+      setProducts(next);
+      if (lowOnlyRef.current) setTotal(next.length);
+    }, [])
+  );
+
   const hasMore = products.length < total;
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="products-screen">
-      <StackHeader title="Ürünler" subtitle={loading ? undefined : `${total} ürün`} />
+      <StackHeader title="Ürünler" subtitle={loading ? undefined : lowOnly ? `${total} düşük stoklu ürün` : `${total} ürün`} />
       <SearchField testID="products-search" value={search} onChangeText={setSearch} placeholder="Ürün adı, SKU veya barkod" />
       {Platform.OS !== "web" ? (
         <SafeAnimatedView entering={FadeInDown.delay(60).duration(380)} style={[styles.scanWrap, shadows.primary]}>
@@ -121,6 +188,10 @@ export default function ProductsScreen() {
           />
         </SafeAnimatedView>
       ) : null}
+      <ChipRow>
+        <Chip label="Tümü" selected={!lowOnly} onPress={() => setLowOnly(false)} testID="products-filter-all" />
+        <Chip label="Düşük stok" selected={lowOnly} onPress={() => setLowOnly(true)} testID="products-filter-low" />
+      </ChipRow>
       {loading ? (
         <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.md, gap: spacing.xs }}>
           {[0, 1, 2, 3, 4, 5].map((i) => (
@@ -139,7 +210,15 @@ export default function ProductsScreen() {
           }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchPage(1, "refresh"); }} tintColor={colors.primary} />}
           ListHeaderComponent={
-            debounced && products.length > 0 ? (
+            lowOnly && products.length > 0 ? (
+              <View style={styles.resultHead}>
+                <SearchIcon size={14} color={colors.textTertiary} />
+                <Text style={[type.caption, { color: colors.textSecondary, flex: 1 }]} numberOfLines={2}>
+                  {`Stoğu ${LOW_STOCK_MAX} adet ve altında olan ürünler`}
+                  {scanLimit ? ` · yalnızca ilk ${scanLimit} ürün tarandı` : ""}
+                </Text>
+              </View>
+            ) : debounced && products.length > 0 ? (
               <View style={styles.resultHead}>
                 <SearchIcon size={14} color={colors.textTertiary} />
                 <Text style={[type.caption, { color: colors.textSecondary, flex: 1 }]} numberOfLines={1}>
@@ -199,8 +278,15 @@ export default function ProductsScreen() {
           ListEmptyComponent={
             <EmptyState
               icon={<PackageIcon size={30} color={error ? colors.error : colors.primary} />}
-              title={error ? "Ürünler yüklenemedi" : debounced ? "Sonuç bulunamadı" : "Ürün yok"}
-              description={error || (debounced ? "Farklı bir ad, SKU veya barkod deneyin." : "Ürünler web panelinden eklenir.")}
+              title={error ? "Ürünler yüklenemedi" : lowOnly ? "Düşük stoklu ürün yok" : debounced ? "Sonuç bulunamadı" : "Ürün yok"}
+              description={
+                error ||
+                (lowOnly
+                  ? `Stoğu ${LOW_STOCK_MAX} adet ve altında olan ürün bulunmuyor.${scanLimit ? ` Yalnızca ilk ${scanLimit} ürün tarandı.` : ""}`
+                  : debounced
+                    ? "Farklı bir ad, SKU veya barkod deneyin."
+                    : "Ürünler web panelinden eklenir.")
+              }
               actionLabel={error ? "Tekrar dene" : undefined}
               onAction={error ? () => fetchPage(1, "reset") : undefined}
             />

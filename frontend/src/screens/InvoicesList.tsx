@@ -31,6 +31,7 @@ export function InvoicesList({ source = "parasut" }: { source?: "parasut" | "biz
   const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [totalOnServer, setTotalOnServer] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
     const d = new Date();
@@ -53,9 +54,12 @@ export function InvoicesList({ source = "parasut" }: { source?: "parasut" | "biz
       const invoices = res.invoices;
       setList(invoices);
       setTotalOnServer(res.total);
+      setLoadError(null);
       setIsOffline(false);
       await saveCache(`invoices_list_${source}`, invoices);
-    } catch {
+    } catch (e: any) {
+      // Gösterilecek kayıt yoksa ekran "fatura yok" yerine bu hatayı gösterir.
+      setLoadError(e?.message || "Faturalar yüklenemedi.");
       if (list.length === 0 && !silent) {
         const cached = await loadCache<Invoice[]>(`invoices_list_${source}`);
         if (cached) { setList(cached); setIsOffline(true); }
@@ -143,11 +147,31 @@ export function InvoicesList({ source = "parasut" }: { source?: "parasut" | "biz
   const pendingCount = monthTotals.count - monthTotals.officialized;
   const officialRatio = monthTotals.count > 0 ? monthTotals.officialized / monthTotals.count : 0;
 
+  // İstek başarısız ve gösterilecek kayıt yok: sıfırlı özet ve "fatura yok" yerine hata gösterilir.
+  if (!loading && loadError && list.length === 0) {
+    return (
+      <ScrollView
+        style={{ backgroundColor: colors.background }}
+        contentContainerStyle={styles.list}
+        testID="invoices-screen"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+      >
+        <EmptyState
+          icon={<AlertIcon size={30} color={colors.error} />}
+          title="Faturalar yüklenemedi"
+          description={loadError}
+          actionLabel="Tekrar dene"
+          onAction={() => load()}
+        />
+      </ScrollView>
+    );
+  }
+
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="invoices-screen">
       <NetworkErrorBanner visible={isOffline} offline />
 
-      {totalOnServer > list.length ? (
+      {!isOffline && totalOnServer > list.length ? (
         <View style={[styles.notice, { backgroundColor: colors.infoBg }]}>
           <AlertIcon size={16} color={colors.info} />
           <Text style={[type.footnote, styles.noticeText, { color: colors.textSecondary }]}>

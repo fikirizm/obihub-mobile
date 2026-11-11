@@ -8,7 +8,7 @@ import { collectPartyPayment, getPartyLedger } from "../../src/api";
 import { PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
-import { formatDate, formatTry } from "../../src/utils";
+import { formatDate, formatMoney } from "../../src/utils";
 import { Button } from "../../src/ui/Button";
 import { useFeedback } from "../../src/ui/Feedback";
 import { StackHeader } from "../../src/ui/Header";
@@ -30,8 +30,10 @@ function initialsOf(name: string): string {
 }
 
 export default function CustomerDetailScreen() {
-  const params = useLocalSearchParams<{ id: string; name?: string; balance?: string; registered?: string }>();
+  const params = useLocalSearchParams<{ id: string; name?: string; balance?: string; registered?: string; currency?: string }>();
   const id = String(params.id || "");
+  // Bakiye ve ekstre carinin kendi para biriminde tutulur.
+  const cur = String(params.currency || "TRY").toUpperCase().replace("TRL", "TRY");
   const { token, user } = useAuth();
   const { colors } = useTheme();
   const { toast, promptEntry } = useFeedback();
@@ -44,6 +46,9 @@ export default function CustomerDetailScreen() {
   // Tahsilat yalnızca kayıtlı carilerde yapılabilir; siparişlerden türetilen carilerde uç 404 döner.
   const registered = params.registered === "1";
   const mayCollect = canManage(user, "customers") || canManage(user, "billing");
+  // Sunucu tahsilatı para birimine bakmadan ilk kasa hesabına gelir yazar; dövizli caride tutar TL kasaya
+  // döviz tutarıyla işlenirdi. Sunucu hesap seçimi sunana kadar dövizli caride mobilden tahsilat alınmaz.
+  const foreign = cur !== "TRY";
 
   const load = useCallback(async () => {
     if (!token || !id) return;
@@ -65,7 +70,7 @@ export default function CustomerDetailScreen() {
   }, [load]);
 
   const onCollect = async () => {
-    if (!token) return;
+    if (!token || foreign) return;
     const entry = await promptEntry({
       title: "Tahsilat al",
       message: String(params.name || ""),
@@ -113,12 +118,12 @@ export default function CustomerDetailScreen() {
           <View style={styles.valueBlock}>
             <Text style={styles.valueLabel}>{balanceLabel}</Text>
             <Text testID="customer-balance" style={[styles.value, tabular]} numberOfLines={1} adjustsFontSizeToFit>
-              {formatTry(Math.abs(balance))}
+              {formatMoney(Math.abs(balance), cur)}
             </Text>
           </View>
         </DetailHero>
 
-        {registered && mayCollect ? (
+        {registered && mayCollect && !foreign ? (
           <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)} style={styles.action}>
             <Button
               testID="customer-collect"
@@ -127,6 +132,16 @@ export default function CustomerDetailScreen() {
               busy={busy}
               onPress={onCollect}
             />
+          </SafeAnimatedView>
+        ) : null}
+        {registered && mayCollect && foreign ? (
+          <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)}>
+            <View testID="customer-collect-foreign-notice" style={[styles.notice, { backgroundColor: colors.infoBg }]}>
+              <AlertIcon size={18} color={colors.info} />
+              <Text style={[type.footnote, styles.noticeText, { color: colors.textSecondary }]}>
+                Bu cari {cur} para biriminde. Dövizli cari tahsilatı mobil uygulamadan alınamaz; lütfen web panelini kullanın.
+              </Text>
+            </View>
           </SafeAnimatedView>
         ) : null}
         {!registered && mayCollect ? (
@@ -189,10 +204,10 @@ export default function CustomerDetailScreen() {
                     }
                     title={r.description || r.reference || "Hareket"}
                     subtitle={formatDate(r.date)}
-                    meta={r.balance != null ? `Bakiye ${formatTry(r.balance)}` : undefined}
+                    meta={r.balance != null ? `Bakiye ${formatMoney(r.balance, cur)}` : undefined}
                     trailing={
                       <Text style={[type.bodyStrong, tabular, { color: isCredit ? colors.success : colors.textPrimary }]}>
-                        {isCredit ? `-${formatTry(credit)}` : `+${formatTry(debit)}`}
+                        {isCredit ? `-${formatMoney(credit, cur)}` : `+${formatMoney(debit, cur)}`}
                       </Text>
                     }
                   />

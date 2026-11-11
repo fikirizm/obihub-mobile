@@ -32,7 +32,33 @@ import {
 } from "../src/components/reports/reportUtils";
 import type { Order, ReportsOverview } from "../src/types";
 
-type ReportsCache = { reports: ReportsOverview; orders: Order[]; rangeKey: string; previousRevenue?: number | null };
+type ReportsCache = { reports: ReportsOverview; orders: Order[]; rangeKey: string; previousRevenue?: number | null; truncated?: boolean };
+
+// Sunucunun hesaplayamadığı aralıklarda (bitişi geçmişte olanlar) siparişler sayfa sayfa indirilir.
+const ORDERS_PAGE = 500;
+const ORDERS_MAX_PAGES = 6;
+
+// Siparişleri yeniden eskiye, `until` anından öncesine ulaşana dek indirir.
+// coveredFrom: bu andan sonraki tüm siparişler eldedir (liste bittiyse 0).
+async function loadOrdersBack(token: string, until: number): Promise<{ list: Order[]; coveredFrom: number }> {
+  const list: Order[] = [];
+  let coveredFrom = Number.POSITIVE_INFINITY;
+  for (let page = 1; page <= ORDERS_MAX_PAGES; page += 1) {
+    const items = await getOrders(token, undefined, { page, perPage: ORDERS_PAGE, sortBy: "-order_date" });
+    const batch = Array.isArray(items) ? items : [];
+    list.push(...batch);
+    if (batch.length < ORDERS_PAGE) return { list, coveredFrom: 0 };
+    // Sunucu sipariş tarihine göre sıralar; sayfanın son kaydı o ana kadar inildiğini gösterir.
+    const last = batch[batch.length - 1];
+    const ts = Date.parse(String(last?.order_date || last?.created_at || ""));
+    if (!Number.isNaN(ts)) {
+      coveredFrom = Math.min(coveredFrom, ts);
+      // Farklı saat dilimiyle yazılmış tarihler için bir günlük pay bırakılır.
+      if (ts < until - 86400000) break;
+    }
+  }
+  return { list, coveredFrom };
+}
 
 // Sekmeye geri dönüldüğünde veri bu süreden eskiyse yeniden yüklenir.
 const STALE_MS = 2 * 60 * 1000;
@@ -172,6 +198,8 @@ function ReportsContent() {
   const [orders, setOrders] = useState<Order[]>([]);
   // null: önceki dönem bilinmiyor (istek başarısız ya da önbellekte yok); trend gösterilmez.
   const [previousRevenue, setPreviousRevenue] = useState<number | null>(null);
+  // Seçili aralıktaki siparişlerin tamamı indirilemediyse rakamlar eksiktir; ekranda belirtilir.
+  const [truncated, setTruncated] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const loadSeq = useRef(0);
@@ -194,6 +222,7 @@ function ReportsContent() {
         setReports(cached.reports);
         setOrders(cached.orders || []);
         setPreviousRevenue(typeof cached.previousRevenue === "number" ? cached.previousRevenue : null);
+        setTruncated(Boolean(cached.truncated));
         setIsOffline(true);
         setLoading(false);
       }
@@ -204,7 +233,10 @@ function ReportsContent() {
       let apiFailed = false as boolean;
       let ordersFailed = false as boolean;
       const days = rangeDays(range);
-      const isApiWindow = ["7d", "30d", "90d", "thisMonth"].includes(range.key);
+      // Sunucu yalnızca başlangıç tarihi alır ve bugüne kadar hesaplar: bitişi bugün olan her aralık sunucudan gelir.
+      // "Bugün" ayrı tutulur; sunucunun günü UTC gece yarısında başladığından 00:00-03:00 arası siparişler dışarıda kalır.
+      const endsToday = localDateKey(range.end) === localDateKey(new Date());
+      const isApiWindow = endsToday && range.key !== "today" && days > 1;
       const normalizedDays = periodDaysFromRangeKey(range.key, days);
       const apiResp = isApiWindow
         ? await getSalesReportsOverview(token, normalizedDays, { startDate: range.start, endDate: range.end }).catch(() => {
@@ -226,7 +258,7 @@ function ReportsContent() {
 
       const shouldUseApiDirectly = Boolean(apiHasData && isApiWindow);
       // Sunucu dönemi hesaplayabiliyorsa siparişler telefona indirilmez; en çok satanlar ve önceki dönem de sunucudan gelir.
-      // Yalnızca özel tarih aralığında (sunucu bitiş tarihi desteklemez) son 500 sipariş telefonda toplanır.
+      // Bitişi geçmişte olan aralıklarda (sunucu bitiş tarihi desteklemez) siparişler telefonda toplanır.
       let prevFromServer: number | null = null;
       if (shouldUseApiDirectly) {
         const spanMs = range.end.getTime() - range.start.getTime();
@@ -234,18 +266,27 @@ function ReportsContent() {
         const wider = await getSalesReportsOverview(token, normalizedDays, { startDate: prevStart }).catch(() => null);
         if (wider) prevFromServer = Math.max(0, Number(wider.total_revenue || 0) - Number(apiResp?.total_revenue || 0));
       }
-      const ordersRaw = shouldUseApiDirectly
-        ? ([] as Order[])
-        : await getOrders(token, undefined, { page: 1, perPage: 500, sortBy: "-order_date" }).catch(() => {
+      // Önceki dönem karşılaştırması için bir dönem daha geriye inilir.
+      const prevStartMs = range.start.getTime() - (range.end.getTime() - range.start.getTime()) - 1;
+      const loaded = shouldUseApiDirectly
+        ? { list: [] as Order[], coveredFrom: 0 }
+        : await loadOrdersBack(token, prevStartMs).catch(() => {
             ordersFailed = true;
-            return [] as Order[];
+            return { list: [] as Order[], coveredFrom: 0 };
           });
       if (seq !== loadSeq.current) return;
       if (ordersFailed) {
         failed = true;
         return;
       }
-      const orderList = Array.isArray(ordersRaw) ? ordersRaw : [];
+      const allOrders = loaded.list;
+      const isTruncated = loaded.coveredFrom > range.start.getTime();
+      const prevCovered = loaded.coveredFrom <= prevStartMs;
+      // Ekranda ve önbellekte yalnızca seçili aralığın siparişleri tutulur.
+      const orderList = allOrders.filter((o) => {
+        const ts = orderTimestamp(o);
+        return ts >= range.start.getTime() && ts <= range.end.getTime();
+      });
       setOrders(orderList);
 
       const result: ReportsOverview = shouldUseApiDirectly
@@ -255,11 +296,13 @@ function ReportsContent() {
         result.status_breakdown = apiResp?.status_breakdown;
       }
       // Sunucu yolunda "önceki dönem" isteği başarısızsa değer null kalır; sahte yüzde üretilmez.
-      const prevValue = shouldUseApiDirectly ? prevFromServer : computePreviousRevenue(orderList, range);
+      // Önceki dönemin siparişleri tam indirilemediyse yüzde gösterilmez.
+      const prevValue = shouldUseApiDirectly ? prevFromServer : prevCovered ? computePreviousRevenue(allOrders, range) : null;
       setReports(result);
       setPreviousRevenue(prevValue);
+      setTruncated(isTruncated);
       setIsOffline(false);
-      await saveCache("reports_cache", { reports: result, orders: orderList, rangeKey: range.key, previousRevenue: prevValue });
+      await saveCache("reports_cache", { reports: result, orders: orderList, rangeKey: range.key, previousRevenue: prevValue, truncated: isTruncated });
     } catch {
       failed = true;
     } finally {
@@ -279,6 +322,7 @@ function ReportsContent() {
       setReports(null);
       setOrders([]);
       setPreviousRevenue(null);
+      setTruncated(false);
       setIsOffline(false);
       setLoading(true);
       setRange(r);
@@ -309,14 +353,9 @@ function ReportsContent() {
 
   // Seçili dönem için henüz rapor yokken sıfırlar yerine yükleniyor durumu gösterilir.
   const pending = loading && !reports;
+  // Önceki dönem cirosu sıfırsa yüzde hesaplanamaz; uydurma +%100 yerine boş gösterilir.
   const trendPct: number | null =
-    previousRevenue == null
-      ? null
-      : previousRevenue > 0
-        ? ((totalRevenue - previousRevenue) / previousRevenue) * 100
-        : totalRevenue > 0
-          ? 100
-          : 0;
+    previousRevenue == null || previousRevenue <= 0 ? null : ((totalRevenue - previousRevenue) / previousRevenue) * 100;
   const sparkData = dailyData.map((d) => Number(d.revenue || 0));
   const topDay = dailyData.slice().sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0))[0];
   const bucketKind = bucketKindOf(String(dailyData[0]?.date || ""));
@@ -422,6 +461,18 @@ function ReportsContent() {
           />
         ) : (
           <>
+            {truncated ? (
+              <View
+                testID="reports-truncated"
+                accessibilityRole="alert"
+                style={[styles.notice, { marginTop: 0, marginBottom: spacing.sm, backgroundColor: colors.warningBg, borderColor: colors.warning }]}
+              >
+                <ZapIcon size={16} color={colors.warning} />
+                <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>
+                  Bu aralıkta çok fazla sipariş var; rakamlar yalnızca en yeni {(ORDERS_PAGE * ORDERS_MAX_PAGES).toLocaleString("tr-TR")} siparişi kapsıyor ve eksik olabilir. Tam rakamlar için web panelindeki Raporlar sayfasını kullanınız.
+                </Text>
+              </View>
+            ) : null}
             <SafeAnimatedView entering={FadeIn.delay(100).duration(450)} style={[styles.heroCard, shadows.lg]}>
               <View pointerEvents="none" style={StyleSheet.absoluteFill}>
                 <Svg width="100%" height="100%" viewBox="0 0 360 240" preserveAspectRatio="xMidYMid slice">

@@ -5,7 +5,7 @@ import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
-import { getDashboardStats, getFinanceOverview, getOrdersPage, getSalesChart, getSmartAlerts } from "../../src/api";
+import { getDashboardStats, getFinanceOverview, getOrdersPage, getSalesReportsOverview, getSmartAlerts, getTodaySales } from "../../src/api";
 import { canAccess } from "../../src/auth/permissions";
 import { formatCompact, formatTry } from "../../src/utils";
 import { AnimatedNumber, Sparkline } from "../../src/components/Charts";
@@ -26,19 +26,60 @@ import type { DashboardStats, Order, SalesChartPoint, SmartAlert, User } from ".
 type Range = "7" | "30";
 type DashData = {
   stats: DashboardStats | null;
-  chart: Record<Range, SalesChartPoint[]>;
+  today: { revenue: number; orders: number } | null;
+  // Bugün dahil son 30 günün günlük satışı (eskiden yeniye); alınamadıysa null.
+  daily: SalesChartPoint[] | null;
   alerts: SmartAlert[];
   recent: Order[];
   overdueReceivable: number;
 };
 
-const EMPTY: DashData = { stats: null, chart: { "7": [], "30": [] }, alerts: [], recent: [], overdueReceivable: 0 };
-const CACHE_KEY = "dashboard_v2";
+const EMPTY: DashData = { stats: null, today: null, daily: null, alerts: [], recent: [], overdueReceivable: 0 };
+const CACHE_KEY = "dashboard_v4";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+// Sunucudaki rapor ucunun okuduğu en çok sipariş sayısı (backend/routers/reports.py).
+const REPORT_ORDER_LIMIT = 5000;
+
+const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+// Günlük satış, Raporlar ekranıyla aynı uçtan (sipariş tarihine göre) alınır ve bugün dahil 30 güne tamamlanır.
+// Panel özetindeki grafik ucu kaydın sisteme düştüğü ana bakar; mağaza eşitlenince eski siparişler tek güne yığılır.
+async function getDailySales(token: string): Promise<SalesChartPoint[]> {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - 29);
+  const [report, edge] = await Promise.all([
+    getSalesReportsOverview(token, 30, { startDate: start }),
+    // Rapor ucu sisteme en son düşen REPORT_ORDER_LIMIT siparişi okur; sınırdaki kaydın düşme anına bakılır.
+    getOrdersPage(token, { page: REPORT_ORDER_LIMIT, perPage: 1, sortBy: "-created_at" }).then((r) => r.items[0] ?? null),
+  ]);
+  // Sınırdaki kayıt dönemin içindeyse (bir gün payla) daha eski günler eksik gelir; yanlış toplam yerine veri yok sayılır.
+  if (edge) {
+    const edgeTs = Date.parse(String(edge.created_at || ""));
+    if (Number.isNaN(edgeTs) || edgeTs >= start.getTime() - DAY_MS) throw new Error("Dönem verisi eksik: sipariş sayısı rapor sınırını aşıyor.");
+  }
+  // Telefon UTC'nin gerisindeyken sunucu dönemi 31 gün sayıp haftalık kova döndürebilir; günlük anahtar değilse veri yok sayılır.
+  if ((report.daily_sales || []).some((d) => !/^\d{4}-\d{2}-\d{2}$/.test(d.date))) throw new Error("Dönem verisi günlük değil.");
+  const byDay = new Map((report.daily_sales || []).map((d) => [d.date, d]));
+  return Array.from({ length: 30 }, (_, i) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    const key = dayKey(d);
+    const hit = byDay.get(key);
+    return { date: key, total: Number(hit?.revenue || 0), count: Number(hit?.orders || 0) };
+  });
+}
 
 // Sunucudaki uyarı hedeflerinden mobilde karşılığı olanlar.
-function alertTarget(path: string | undefined, user: User | null): (() => void) | undefined {
-  if (path === "/siparisler") return () => router.push({ pathname: "/(tabs)/orders", params: { filter: "pending", t: String(Date.now()) } });
-  if (path === "/stok" && (canAccess(user, "catalog") || canAccess(user, "inventory"))) return () => router.push("/products");
+function alertTarget(alert: SmartAlert, user: User | null): (() => void) | undefined {
+  const path = alert.action_path;
+  if (path === "/siparisler") {
+    // Bekleyen uyarısı yalnızca 3 günü aşan bekleyenleri sayar; hacim düşüşü uyarısı tüm siparişlerle ilgilidir.
+    const params = alert.type === "stale_orders" ? { filter: "pending", stale: "1" } : { filter: "all", stale: "" };
+    return () => router.push({ pathname: "/(tabs)/orders", params: { ...params, t: String(Date.now()) } });
+  }
+  if (path === "/stok" && (canAccess(user, "catalog") || canAccess(user, "inventory"))) return () => router.push({ pathname: "/products", params: { filter: "low" } });
   if (path === "/entegrasyon-isleri" && canAccess(user, "catalog")) return () => router.push("/jobs");
   return undefined;
 }
@@ -67,15 +108,15 @@ export default function DashboardScreen() {
       }
       try {
         // Rakamlar sunucuda hesaplanır; web paneliyle aynı uçlar kullanılır.
-        const [stats, chart7, chart30, alerts, recent, overdueReceivable] = await Promise.all([
+        const [stats, today, daily, alerts, recent, overdueReceivable] = await Promise.all([
           getDashboardStats(token),
-          getSalesChart(token, 7),
-          getSalesChart(token, 30),
+          getTodaySales(token).catch(() => null),
+          getDailySales(token).catch(() => null),
           getSmartAlerts(token).catch(() => []),
           getOrdersPage(token, { page: 1, perPage: 5 }).then((r) => r.items).catch(() => []),
           billing ? getFinanceOverview(token).then((f) => f.overdue_receivable).catch(() => 0) : Promise.resolve(0),
         ]);
-        const next: DashData = { stats, chart: { "7": chart7, "30": chart30 }, alerts, recent, overdueReceivable };
+        const next: DashData = { stats, today, daily, alerts, recent, overdueReceivable };
         setData(next);
         setOffline(false);
         setFailed(false);
@@ -92,16 +133,20 @@ export default function DashboardScreen() {
 
   useFocusLoad(load, { hasData: Boolean(data.stats) });
 
-  // Sunucunun günlük dizisi bugünü içermez; bugünün değeri özetten eklenir.
-  const points = useMemo(() => {
-    const base = data.chart[range];
-    const today = new Date().toISOString().slice(0, 10);
-    if (!data.stats || base.length === 0 || base[base.length - 1]?.date === today) return base;
-    return [...base, { date: today, total: Number(data.stats.revenue_today || 0), count: Number(data.stats.orders_today || 0) }];
-  }, [data, range]);
+  // Bugün: sipariş tarihine ve yerel güne göre; alınamazsa sunucu özetindeki değer.
+  const todayRevenue = Number(data.today?.revenue ?? data.stats?.revenue_today ?? 0);
+  const todayOrders = Number(data.today?.orders ?? data.stats?.orders_today ?? 0);
+  // Bugün dahil son 7 ya da 30 gün. Dönem toplamı Raporlar ekranıyla aynı sunucu verisinden gelir.
+  const periodReady = Array.isArray(data.daily);
+  const points = useMemo(() => (data.daily || []).slice(-Number(range)), [data.daily, range]);
   const [chartWidth, setChartWidth] = useState(0);
   const periodRevenue = useMemo(() => points.reduce((s, p) => s + Number(p.total || 0), 0), [points]);
   const periodOrders = useMemo(() => points.reduce((s, p) => s + Number(p.count || 0), 0), [points]);
+  // Grafiğin son noktası üstteki "Bugün" rakamıyla aynı değeri gösterir.
+  const chartValues = useMemo(() => {
+    const today = dayKey(new Date());
+    return points.map((p) => (p.date === today ? Math.max(Number(p.total || 0), todayRevenue) : Number(p.total || 0)));
+  }, [points, todayRevenue]);
   const todayLabel = new Intl.DateTimeFormat("tr-TR", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
   const stats = data.stats;
   const { shadows } = useTheme();
@@ -169,9 +214,9 @@ export default function DashboardScreen() {
               </View>
             </View>
 
-            <View accessible accessibilityLabel={`Bugün ${formatTry(stats.revenue_today)} ciro, ${stats.orders_today} sipariş`}>
-              <AnimatedNumber testID="dash-today-revenue" value={stats.revenue_today} format={(n) => formatTry(n)} style={[styles.heroValue, tabular]} />
-              <Text style={styles.heroSub}>{stats.orders_today} sipariş</Text>
+            <View accessible accessibilityLabel={`Bugün ${formatTry(todayRevenue)} ciro, ${todayOrders} sipariş`}>
+              <AnimatedNumber testID="dash-today-revenue" value={todayRevenue} format={(n) => formatTry(n)} style={[styles.heroValue, tabular]} />
+              <Text testID="dash-today-orders" style={styles.heroSub}>{todayOrders} sipariş</Text>
             </View>
 
             <View
@@ -182,7 +227,7 @@ export default function DashboardScreen() {
             >
               {chartWidth > 0 ? (
                 <Sparkline
-                  data={points.length > 1 ? points.map((p) => Number(p.total || 0)) : [0, 0]}
+                  data={chartValues.length > 1 ? chartValues : [0, 0]}
                   width={chartWidth}
                   height={64}
                   color={colors.heroAccent}
@@ -197,19 +242,19 @@ export default function DashboardScreen() {
               <View style={[styles.heroCell, { flex: 1.5 }]}>
                 <Text style={styles.heroCellLabel}>Son {range} gün</Text>
                 <Text testID="dash-period-revenue" style={[styles.heroCellValue, tabular]} numberOfLines={1} adjustsFontSizeToFit>
-                  {formatTry(periodRevenue)}
+                  {periodReady ? formatTry(periodRevenue) : "—"}
                 </Text>
               </View>
               <View style={styles.heroDivider} />
               <View style={styles.heroCell}>
                 <Text style={styles.heroCellLabel}>Sipariş</Text>
-                <Text style={[styles.heroCellValue, tabular]}>{periodOrders}</Text>
+                <Text testID="dash-period-orders" style={[styles.heroCellValue, tabular]}>{periodReady ? periodOrders : "—"}</Text>
               </View>
               <View style={styles.heroDivider} />
               <View style={styles.heroCell}>
                 <Text style={styles.heroCellLabel}>Ort. sepet</Text>
                 <Text style={[styles.heroCellValue, tabular]} numberOfLines={1} adjustsFontSizeToFit>
-                  {formatTry(periodOrders > 0 ? periodRevenue / periodOrders : 0)}
+                  {periodReady ? formatTry(periodOrders > 0 ? periodRevenue / periodOrders : 0) : "—"}
                 </Text>
               </View>
             </View>
@@ -257,12 +302,13 @@ export default function DashboardScreen() {
                     title="Vadesi geçen alacak"
                     subtitle={`${formatTry(data.overdueReceivable)} tahsil edilmeyi bekliyor`}
                     chevron
-                    onPress={() => router.push("/local-invoices")}
+                    // Tutar Finans özetinden gelir (yerel faturalar ve muhasebe programından alınan belgeler); aynı rakam o ekranda görünür.
+                    onPress={() => router.push("/(tabs)/finance")}
                   />
                 ) : null}
                 {data.alerts.map((a, i) => {
                   const isError = a.severity === "error";
-                  const go = alertTarget(a.action_path, user);
+                  const go = alertTarget(a, user);
                   return (
                     <ListRow
                       key={`${a.type}-${i}`}

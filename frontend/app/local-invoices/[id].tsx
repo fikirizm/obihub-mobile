@@ -5,11 +5,11 @@ import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { addLocalInvoicePayment, getLocalInvoice, officializeLocalInvoice } from "../../src/api";
-import { invoiceStatus, PAYMENT_METHODS, todayIso } from "../../src/finance";
+import { invoiceStatus, isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney } from "../../src/utils";
-import { AlertIcon, PackageIcon, ReceiptIcon, WalletIcon } from "../../src/components/Icons";
+import { AlertIcon, ClockIcon, PackageIcon, ReceiptIcon, WalletIcon } from "../../src/components/Icons";
 import { EmptyState } from "../../src/components/EmptyState";
 import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { Skeleton } from "../../src/components/Skeleton";
@@ -118,21 +118,25 @@ export default function LocalInvoiceDetailScreen() {
     );
   }
 
-  const st = invoiceStatus(inv.display_status || inv.status);
+  const isOverdue = isInvoiceOverdue(inv);
+  const st = invoiceStatus(isOverdue ? "gecikti" : inv.display_status || inv.status);
   const cur = inv.currency;
   const remaining = Number(inv.remaining_amount ?? Number(inv.total || 0) - Number(inv.paid_amount || 0));
-  const isDraft = inv.status === "taslak";
   const isCancelled = inv.status === "iptal";
-  // Resmileştirme Paraşüt üzerinden yapılır.
+  // Resmileştirme Paraşüt üzerinden yapılır. Sunucu, Paraşüt'e gitmemiş her faturayı (taslak, gönderildi, gecikti,
+  // tahsilatı tamamlanmış "ödendi") resmileştirir; düğme web paneliyle aynı koşulda görünür.
   const mayWrite = canManage(user, "billing");
-  const canOfficialize = mayWrite && isDraft && parasutConnected === true && !inv.parasut_invoice_id;
+  const canOfficialize =
+    mayWrite && parasutConnected === true && !inv.parasut_invoice_id && inv.status !== "resmilesti" && !isCancelled;
   const canCollect = mayWrite && !isCancelled && remaining > 0.004;
 
   const onOfficialize = async () => {
     if (!token) return;
     const ok = await confirm({
       title: "Fatura resmileştirilsin mi?",
-      message: "Fatura Paraşüt üzerinden e-belge olarak gönderilir. Bu işlem geri alınamaz.",
+      message:
+        "Fatura Paraşüt üzerinden e-belge olarak gönderilir. Bu işlem geri alınamaz." +
+        (Number(inv.paid_amount || 0) > 0 ? " Alınan tahsilatlar ObiHub'da kalır, bu adımda Paraşüt'e gönderilmez." : ""),
       confirmLabel: "Resmileştir",
     });
     if (!ok) return;
@@ -181,7 +185,6 @@ export default function LocalInvoiceDetailScreen() {
 
   const total = Number(inv.total || 0);
   const paid = Number(inv.paid_amount || 0);
-  const isOverdue = Boolean(inv.is_overdue) || (inv.display_status || inv.status) === "gecikti";
   const settled = remaining <= 0.004;
   const paidRatio = total > 0 ? Math.min(1, Math.max(0, paid / total)) : 0;
   const showProgress = total > 0 && !isCancelled;
@@ -235,6 +238,17 @@ export default function LocalInvoiceDetailScreen() {
             <View style={[styles.alert, { backgroundColor: colors.errorBg }]}>
               <AlertIcon size={18} color={colors.error} />
               <Text style={[type.footnote, { color: colors.error, flex: 1 }]}>E-belge hatası: {inv.edoc_error}</Text>
+            </View>
+          </SafeAnimatedView>
+        ) : null}
+
+        {inv.edoc_state === "pending" && !inv.edoc_error ? (
+          <SafeAnimatedView entering={FadeInDown.delay(60).duration(380)}>
+            <View testID="invoice-edoc-pending" style={[styles.alert, { backgroundColor: colors.infoBg }]}>
+              <ClockIcon size={18} color={colors.info} />
+              <Text style={[type.footnote, { color: colors.textSecondary, flex: 1 }]}>
+                E-belge sonucu bekleniyor. Fatura Paraşüt'e gönderildi; sonuç geldiğinde durum güncellenir.
+              </Text>
             </View>
           </SafeAnimatedView>
         ) : null}

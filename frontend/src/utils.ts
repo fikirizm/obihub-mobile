@@ -108,68 +108,60 @@ export function displayOrderStatus(order: Order, providerHint?: string) {
   if (provider.includes("woo")) {
     return trStatus(String(order.wc_status || order.status || ""));
   }
-  if (provider.includes("trendyol")) {
-    const raw = String(order.trendyol_status || order.status || "")
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, "")
-      .replace(/_/g, "");
-    return trendyolStatusMap[raw] || trStatus(order.trendyol_status || order.status);
+  if (provider.includes("trendyol") && order.trendyol_status) {
+    const known = trendyolStatusMap[compactStatus(order.trendyol_status)];
+    if (known) return known;
   }
-  if (provider.includes("hepsiburada")) {
-    return trStatus(String(order.hepsiburada_status || order.status || ""));
-  }
+  // Pazaryerlerinde "pending" ödemesi alınmış, hazırlanmayı bekleyen sipariştir (web paneliyle aynı etiketler).
+  const internal = compactStatus(order.status);
+  if (internal === "pending") return "Bekleyen";
+  if (internal === "processing") return "Gönderime Hazır";
   return trStatus(order.status);
+}
+
+function compactStatus(raw: unknown) {
+  return String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
 }
 
 export type StatusKind = "success" | "info" | "warning" | "error" | "neutral";
 
+// Renk ve sayım sunucunun iç durumundan (status) türetilir; Panel ve süzgeçler de aynı alana bakar.
+// Kargo gönderisinin durumu (cargo_status) siparişin durumu değildir, hesaba katılmaz.
 export function statusKindFromOrder(order: Order, providerHint?: string): StatusKind {
-  const shown = String(displayOrderStatus(order, providerHint) || "").toLowerCase();
-  const raw = String(
-    order.hepsiburada_status ||
-      order.trendyol_status ||
-      order.wc_status ||
-      order.cargo_status ||
-      order.status ||
-      ""
-  )
-    .toLowerCase()
-    .replace(/\s+/g, "")
-    .replace(/_/g, "")
-    .replace(/-/g, "");
-  if (shown.includes("kargo") || raw.includes("cargo") || raw.includes("ship") || raw.includes("transit")) return "info";
-  if (shown.includes("tamam") || shown.includes("teslim")) return "success";
-  if (
-    shown.includes("hazır") ||
-    shown.includes("hazırlan") ||
-    shown.includes("bekliyor") ||
-    raw.includes("new") ||
-    raw.includes("created") ||
-    raw.includes("pending")
-  )
-    return "warning";
-  if (shown.includes("iptal") || shown.includes("iade") || shown.includes("başarısız")) return "error";
-  return "neutral";
+  const provider = String(providerHint || order.channel || "").toLowerCase();
+  if (provider.includes("trendyol")) {
+    const ty = compactStatus(order.trendyol_status);
+    if (ty === "undelivered" || ty === "unsupplied" || ty === "returned") return "error";
+  }
+  switch (compactStatus(order.status)) {
+    case "pending":
+    case "processing":
+    case "onhold":
+    case "created":
+    case "new":
+      return "warning";
+    case "shipped":
+      return "info";
+    case "delivered":
+    case "completed":
+      return "success";
+    case "cancelled":
+    case "refunded":
+    case "failed":
+      return "error";
+    default:
+      return "neutral";
+  }
 }
 
+// Bekleyen sipariş: sunucunun "pending" veya "processing" saydığı, sorunlu olmayan sipariş.
 export function isNewOrderStatus(order: Order, providerHint?: string): boolean {
-  const shown = String(displayOrderStatus(order, providerHint) || "").toLowerCase();
-  const raw = String(
-    order.hepsiburada_status ||
-      order.trendyol_status ||
-      order.wc_status ||
-      order.cargo_status ||
-      order.status ||
-      ""
-  )
-    .toLowerCase()
-    .replace(/\s+/g, "")
-    .replace(/_/g, "")
-    .replace(/-/g, "");
-  if (shown.includes("kargo") || shown.includes("tamam") || shown.includes("teslim")) return false;
-  if (raw.includes("cargo") || raw.includes("ship") || raw.includes("transit") || raw.includes("deliver")) return false;
-  return shown.includes("hazır") || shown.includes("bekliyor") || raw.includes("new") || raw.includes("created") || raw.includes("pending") || raw.includes("processing");
+  if (statusKindFromOrder(order, providerHint) === "error") return false;
+  const internal = compactStatus(order.status);
+  return internal === "pending" || internal === "processing";
 }
 
 export function providerKey(s: unknown): "woo" | "trendyol" | "hepsiburada" | "n11" | "other" {
@@ -179,6 +171,13 @@ export function providerKey(s: unknown): "woo" | "trendyol" | "hepsiburada" | "n
   if (v.includes("hepsiburada")) return "hepsiburada";
   if (v.includes("n11")) return "n11";
   return "other";
+}
+
+// Sipariş alan entegrasyon (mağaza ya da pazaryeri) mi? Kargo ve muhasebe bağlantıları mağaza sayılmaz.
+export function isStoreIntegration(it: { kind?: string | null; provider?: string | null }): boolean {
+  const kind = String(it.kind || "").trim().toLowerCase();
+  if (kind) return kind === "store" || kind === "marketplace";
+  return !/(hepsijet|yurtici|aras|mng|surat|ptt|parasut|bizimhesap)/.test(String(it.provider || "").toLowerCase());
 }
 
 export function providerLabel(p: string): string {
@@ -212,6 +211,12 @@ export function providerColor(p: string, fallback: string): string {
 }
 
 export function orderTimestamp(order: Order) {
+  // n11'de sipariş tarihi her durum değişikliğinde yenilenir; ilk kayıt anı daha eskiyse o esas alınır.
+  if (String(order.channel || "").toLowerCase() === "n11" && order.order_date && order.created_at) {
+    const modified = Date.parse(String(order.order_date));
+    const first = Date.parse(String(order.created_at));
+    if (!Number.isNaN(modified) && !Number.isNaN(first)) return Math.min(modified, first);
+  }
   const candidates = [order.order_date, order.created_at, order.updated_at];
   for (const c of candidates) {
     if (!c) continue;
@@ -273,76 +278,21 @@ export function formatOrderDateTime(order: Order): string {
   }
 }
 
-function deepFindTracking(obj: any, depth = 0): string {
-  if (!obj || depth > 4) return "";
-  if (typeof obj === "string") {
-    const v = obj.trim();
-    if (v.length >= 6 && /[A-Za-z]/.test(v) && /\d/.test(v)) return v;
-    return "";
-  }
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      const found = deepFindTracking(item, depth + 1);
-      if (found) return found;
-    }
-    return "";
-  }
-  if (typeof obj !== "object") return "";
-  for (const [k, v] of Object.entries(obj)) {
-    const key = String(k).toLowerCase();
-    if (/(tracking|takip|awb|waybill|kargo.*no|cargo.*no)/.test(key)) {
-      const asStr = String(v ?? "").trim();
-      if (asStr) return asStr;
-    }
-  }
-  for (const v of Object.values(obj)) {
-    const found = deepFindTracking(v, depth + 1);
-    if (found) return found;
-  }
-  return "";
-}
-
+// Yalnızca sunucunun gerçekten kargo takip numarası olarak döndürdüğü alanlara bakılır.
+// Numara yoksa boş döner; sipariş numarası ya da başka bir alan takip numarası gibi gösterilmez.
 export function getOrderTrackingNo(order: Order): string {
-  const metaDataMatch = Array.isArray(order.meta_data)
-    ? order.meta_data.find((m) => /(tracking|takip|awb|waybill|kargo)/i.test(String(m?.key || "")))?.value
-    : undefined;
-  const metadataMatch = Array.isArray(order.metadata)
-    ? order.metadata.find((m) => /(tracking|takip|awb|waybill|kargo)/i.test(String(m?.key || "")))?.value
-    : undefined;
-  const metaObj = !Array.isArray(order.metadata) ? order.metadata : undefined;
-
   const candidates = [
-    order.tracking_number,
-    order.trackingNumber,
-    order.cargo_tracking_number,
-    order.cargoTrackingNumber,
     order.cargo_tracking,
-    order.tracking_code,
-    order.trackingCode,
-    order.kargo_takip_no,
-    order.kargoTakipNo,
-    order.awb,
-    order.waybill_no,
-    order.waybillNo,
-    order.cargo?.tracking_number,
-    order.cargo?.trackingNumber,
-    order.shipping?.tracking_number,
-    order.shipping?.trackingNumber,
-    order.shipment?.tracking_number,
-    order.shipment?.tracking_code,
-    order.shipment?.trackingNumber,
-    order.meta?.tracking_number,
-    order.meta?.trackingNumber,
-    metaObj?.tracking_number,
-    metaObj?.trackingNumber,
-    metaDataMatch,
-    metadataMatch,
+    order.n11_cargo_tracking,
+    Array.isArray(order.cargo_barcodes) ? order.cargo_barcodes[0]?.barcode : undefined,
+    order.cargo_tracking_number,
+    order.tracking_number,
   ];
   for (const c of candidates) {
     const v = String(c || "").trim();
     if (v) return v;
   }
-  return deepFindTracking(order);
+  return "";
 }
 
 // Para birimiyle tutar. Backend bazı uçlarda TL için "TRL" döndürür.

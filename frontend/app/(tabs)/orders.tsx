@@ -7,7 +7,7 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, type } from "../../src/theme/tokens";
 import { getIntegrations, getOrdersPage } from "../../src/api";
-import { providerLabel } from "../../src/utils";
+import { isStoreIntegration, providerLabel } from "../../src/utils";
 import { InboxIcon, PrinterIcon } from "../../src/components/Icons";
 import { PressableScale } from "../../src/components/KPICard";
 import { printOrderLabel } from "../../src/labels";
@@ -33,6 +33,8 @@ const FILTERS: { key: FilterKey; label: string; statuses: string[] }[] = [
 ];
 
 const PER_PAGE = 30;
+// Panel'deki "3 gündür bekliyor" uyarısı sunucuda bu eşikle sayılır: durumu "pending", kaydı 3 günden eski.
+const STALE_MS = 3 * 24 * 3600 * 1000;
 
 // Yüklenirken gerçek listeyle aynı biçim: tek yuvarlak kart, içinde iki satırlı sipariş satırları.
 function OrdersSkeleton() {
@@ -100,10 +102,12 @@ function SwipeableOrder({ order, divider, onPrint, busy }: { order: Order; divid
 }
 
 export default function OrdersScreen() {
-  const params = useLocalSearchParams<{ filter?: string; t?: string }>();
+  const params = useLocalSearchParams<{ filter?: string; stale?: string; t?: string }>();
   const { token } = useAuth();
   const { colors } = useTheme();
   const [filter, setFilter] = useState<FilterKey>("all");
+  // Panel uyarısından gelindiğinde yalnızca 3 günden eski bekleyen siparişler, en eskiden yeniye listelenir.
+  const [staleOnly, setStaleOnly] = useState(false);
   const [integrationId, setIntegrationId] = useState<string>("");
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [search, setSearch] = useState("");
@@ -145,13 +149,15 @@ export default function OrdersScreen() {
   useEffect(() => {
     const f = String(params.filter || "");
     if (FILTERS.some((x) => x.key === f)) setFilter(f as FilterKey);
+    if (params.t) setStaleOnly(params.stale === "1");
     // `t` her gelişte değişir; aynı süzgeçle ikinci kez gelindiğinde de uygulanır.
-  }, [params.filter, params.t]);
+  }, [params.filter, params.stale, params.t]);
 
   useEffect(() => {
     if (!token) return;
     getIntegrations(token)
-      .then((list) => setIntegrations(Array.isArray(list) ? list : []))
+      // Kargo ve muhasebe bağlantıları sipariş döndürmez; mağaza çiplerinde yer almaz.
+      .then((list) => setIntegrations((Array.isArray(list) ? list : []).filter(isStoreIntegration)))
       .catch(() => {});
   }, [token]);
 
@@ -162,15 +168,36 @@ export default function OrdersScreen() {
       if (mode === "reset") setLoading(true);
       if (mode === "more") setLoadingMore(true);
       try {
-        const statuses = FILTERS.find((f) => f.key === filter)?.statuses ?? [];
+        const statuses = staleOnly ? ["pending"] : FILTERS.find((f) => f.key === filter)?.statuses ?? [];
         const res = await getOrdersPage(token, {
           page: nextPage,
           perPage: PER_PAGE,
           search: debouncedSearch || undefined,
           statuses,
           integrationId: integrationId || undefined,
+          sortBy: staleOnly ? "created_at" : undefined,
         });
         if (id !== requestId.current) return; // Daha yeni bir istek var.
+        if (staleOnly) {
+          // Liste en eskiden yeniye gelir; eşiği aşmayan ilk kayıtta eski siparişler bitmiştir.
+          const cutoff = Date.now() - STALE_MS;
+          const stale = res.items.filter((o) => {
+            const ts = o.created_at ? Date.parse(String(o.created_at)) : NaN;
+            return !Number.isNaN(ts) && ts <= cutoff;
+          });
+          const more = stale.length === res.items.length && nextPage < res.totalPages;
+          setOrders((prev) => {
+            if (mode !== "more") return stale;
+            const known = new Set(prev.map((o) => o.id));
+            return [...prev, ...stale.filter((o) => !known.has(o.id))];
+          });
+          // Bu kipte kesin toplam yalnızca son sayfa yüklenince bilinir; başlık o zamana dek "30+" yazar.
+          setTotal((prev) => (mode === "more" ? prev + stale.length : stale.length));
+          setPage(nextPage);
+          setHasMore(more);
+          setError(null);
+          return;
+        }
         setOrders((prev) => {
           if (mode !== "more") return res.items;
           const known = new Set(prev.map((o) => o.id));
@@ -191,7 +218,7 @@ export default function OrdersScreen() {
         }
       }
     },
-    [token, filter, debouncedSearch, integrationId]
+    [token, filter, staleOnly, debouncedSearch, integrationId]
   );
 
   useEffect(() => {
@@ -200,11 +227,23 @@ export default function OrdersScreen() {
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="orders-screen">
-      <TabHeader title="Siparişler" subtitle={loading ? undefined : `${total} sipariş`} />
+      <TabHeader title="Siparişler" subtitle={loading ? undefined : `${total}${staleOnly && hasMore ? "+" : ""} sipariş`} />
       <SearchField testID="orders-search" value={search} onChangeText={setSearch} placeholder="Müşteri veya sipariş no ara" />
       <ChipRow>
+        {staleOnly ? (
+          <Chip testID="orders-filter-stale" label="3 günden eski bekleyenler" selected onPress={() => setStaleOnly(false)} />
+        ) : null}
         {FILTERS.map((f) => (
-          <Chip key={f.key} testID={`orders-filter-${f.key}`} label={f.label} selected={filter === f.key} onPress={() => setFilter(f.key)} />
+          <Chip
+            key={f.key}
+            testID={`orders-filter-${f.key}`}
+            label={f.label}
+            selected={!staleOnly && filter === f.key}
+            onPress={() => {
+              setStaleOnly(false);
+              setFilter(f.key);
+            }}
+          />
         ))}
       </ChipRow>
       {integrations.length > 1 ? (

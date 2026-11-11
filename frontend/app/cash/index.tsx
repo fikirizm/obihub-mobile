@@ -1,15 +1,17 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
+import { canManage } from "../../src/auth/permissions";
 import { getCashAccounts } from "../../src/api";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatMoney } from "../../src/utils";
-import { BagIcon, HomeIcon, ReceiptIcon, TagIcon, WalletIcon } from "../../src/components/Icons";
+import { BagIcon, HomeIcon, PlusIcon, ReceiptIcon, RefreshIcon, TagIcon, WalletIcon } from "../../src/components/Icons";
 import { EmptyState } from "../../src/components/EmptyState";
 import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
+import { Button } from "../../src/ui/Button";
 import { StackHeader } from "../../src/ui/Header";
 import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
 import { Card, IconTile, ListRow, SectionTitle } from "../../src/ui/ListRow";
@@ -73,8 +75,9 @@ function LoadingSkeleton() {
 }
 
 export default function CashScreen() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { colors } = useTheme();
+  const mayWrite = canManage(user, "billing");
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -93,9 +96,12 @@ export default function CashScreen() {
     }
   }, [token]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  // Yeni hesap ya da virman ekranından dönüldüğünde bakiyeler tazelenir.
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const tryAccounts = accounts.filter(isTry);
   const foreignCount = accounts.length - tryAccounts.length;
@@ -110,9 +116,9 @@ export default function CashScreen() {
         <EmptyState
           icon={<WalletIcon size={30} color={colors.textTertiary} />}
           title={error ? "Yüklenemedi" : "Hesap yok"}
-          description={error || "Kasa ve banka hesapları web panelinden eklenir."}
-          actionLabel={error ? "Tekrar dene" : undefined}
-          onAction={error ? load : undefined}
+          description={error || (mayWrite ? "İlk kasa ya da banka hesabınızı ekleyin." : "Henüz kasa ya da banka hesabı eklenmemiş.")}
+          actionLabel={error ? "Tekrar dene" : mayWrite ? "Yeni hesap ekle" : undefined}
+          onAction={error ? load : mayWrite ? () => router.push("/cash/new") : undefined}
         />
       ) : (
         <ScrollView
@@ -136,6 +142,27 @@ export default function CashScreen() {
                   </View>
                 </View>
               </HeroCard>
+            </SafeAnimatedView>
+          ) : null}
+
+          {mayWrite ? (
+            <SafeAnimatedView entering={FadeInDown.delay(40).duration(380)} style={styles.actions}>
+              <Button
+                testID="cash-transfer"
+                label="Virman"
+                icon={<RefreshIcon size={16} color={ON_HERO.text} />}
+                disabled={accounts.length < 2}
+                onPress={() => router.push("/cash/transfer")}
+                style={{ flex: 1 }}
+              />
+              <Button
+                testID="cash-new-account"
+                label="Yeni hesap"
+                variant="secondary"
+                icon={<PlusIcon size={16} color={colors.textPrimary} />}
+                onPress={() => router.push("/cash/new")}
+                style={{ flex: 1 }}
+              />
             </SafeAnimatedView>
           ) : null}
 
@@ -164,9 +191,11 @@ export default function CashScreen() {
                 />
               ))}
             </Card>
-            <Text style={[type.caption, { color: colors.textTertiary, marginHorizontal: spacing.lg, marginTop: spacing.sm }]}>
-              Yeni hesap ve hesaplar arası virman web panelinden yapılır.
-            </Text>
+            {mayWrite && accounts.length < 2 ? (
+              <Text style={[type.caption, { color: colors.textTertiary, marginHorizontal: spacing.lg, marginTop: spacing.sm }]}>
+                Virman için en az iki hesap gerekir.
+              </Text>
+            ) : null}
           </SafeAnimatedView>
         </ScrollView>
       )}
@@ -177,6 +206,7 @@ export default function CashScreen() {
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },
+  actions: { flexDirection: "row", gap: spacing.sm, marginHorizontal: spacing.lg, marginTop: spacing.md },
   amount: { maxWidth: 150, textAlign: "right" },
   heroLabel: { color: ON_HERO.soft, fontSize: 13, fontWeight: "600" },
   heroValue: { color: ON_HERO.text, fontSize: 34, lineHeight: 40, fontWeight: "800", letterSpacing: -1, marginTop: 2 },

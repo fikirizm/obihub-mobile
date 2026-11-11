@@ -50,7 +50,7 @@ const STATUS_MESSAGES: Record<number, string> = {
   503: "Hizmet geçici olarak kullanılamıyor. Lütfen tekrar deneyin.",
 };
 
-async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
+export async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
@@ -133,6 +133,22 @@ export async function getOrders(
   if (Array.isArray(payload.items)) return payload.items;
   if (Array.isArray(payload.data)) return payload.data;
   return [];
+}
+
+export type OrderStats = {
+  total: number;
+  pending: number;
+  processing: number;
+  shipped: number;
+  delivered: number;
+  cancelled: number;
+  deleted: number;
+};
+
+// Duruma göre gerçek sipariş sayıları (tüm siparişler üzerinden); mağaza verilirse yalnızca o mağaza.
+export async function getOrderStats(token: string, integrationId?: string) {
+  const qs = integrationId ? `?integration_id=${encodeURIComponent(integrationId)}` : "";
+  return request<OrderStats>(`/orders/stats${qs}`, { method: "GET" }, token);
 }
 
 export async function getOrderDetail(token: string, orderId: string) {
@@ -508,7 +524,7 @@ export async function getAccountingSettings(token: string) {
 // Sayfalı sipariş listesi. Sunucu tek durum değeri süzdüğü için birden çok durum ayrı çağrılarla birleştirilir.
 export async function getOrdersPage(
   token: string,
-  options: { page?: number; perPage?: number; search?: string; statuses?: string[]; integrationId?: string } = {}
+  options: { page?: number; perPage?: number; search?: string; statuses?: string[]; integrationId?: string; sortBy?: string } = {}
 ): Promise<OrdersPage> {
   const page = options.page ?? 1;
   const perPage = options.perPage ?? 30;
@@ -516,7 +532,7 @@ export async function getOrdersPage(
     const qs = new URLSearchParams();
     qs.set("page", String(page));
     qs.set("per_page", String(perPage));
-    qs.set("sort_by", "-order_date");
+    qs.set("sort_by", options.sortBy ?? "-order_date");
     if (options.search) qs.set("search", escapeSearch(options.search));
     if (options.integrationId) qs.set("integration_id", options.integrationId);
     if (status) qs.set("status", status);
@@ -530,8 +546,9 @@ export async function getOrdersPage(
   const seen = new Set<string>();
   const items = parts
     .flatMap((p) => p.items)
-    .filter((o) => (seen.has(o.id) ? false : (seen.add(o.id), true)))
-    .sort((a, b) => String(b.order_date || b.created_at || "").localeCompare(String(a.order_date || a.created_at || "")));
+    .filter((o) => (seen.has(o.id) ? false : (seen.add(o.id), true)));
+  // Özel sıralama istendiyse sunucunun sırası korunur.
+  if (!options.sortBy) items.sort((a, b) => String(b.order_date || b.created_at || "").localeCompare(String(a.order_date || a.created_at || "")));
   return {
     items,
     total: parts.reduce((n, p) => n + p.total, 0),
@@ -542,6 +559,43 @@ export async function getOrdersPage(
 
 export async function getDashboardStats(token: string) {
   return request<DashboardStats>("/dashboard/stats", { method: "GET" }, token);
+}
+
+// Bugünün satışı telefonun yerel gününe ve sipariş tarihine göre hesaplanır.
+// Sunucunun özetindeki "bugün" değeri kaydın sisteme düştüğü ana ve UTC gece yarısına
+// bakar; Türkiye saatinde gün 03:00'te başlar ve eşitleme anına göre sıfır görünebilir.
+export async function getTodaySales(token: string): Promise<{ revenue: number; orders: number }> {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const perPage = 100;
+  let revenue = 0;
+  let orders = 0;
+  // Yoğun günde toplam sessizce kesilmez: bugüne ait kayıt bitene dek sürer; üst sınır da aşılırsa
+  // hata verilir ve çağıran sunucu özetindeki değere döner.
+  const maxPages = 30;
+  for (let page = 1; ; page += 1) {
+    if (page > maxPages) throw new Error("Bugünün satışı hesaplanamadı: sipariş sayısı sınırı aşıldı.");
+    const payload = await request<any>(`/orders?page=${page}&per_page=${perPage}&sort_by=-order_date`, { method: "GET" }, token);
+    const items: any[] = Array.isArray(payload) ? payload : Array.isArray(payload?.items) ? payload.items : [];
+    let hits = 0;
+    for (const o of items) {
+      const raw = o?.order_date || o?.created_at;
+      const ts = raw ? Date.parse(String(raw)) : NaN;
+      if (Number.isNaN(ts) || ts < start) continue;
+      hits += 1;
+      if (String(o?.status || "").toLowerCase() === "deleted") continue;
+      // n11'de sipariş tarihi son değişiklik anıdır; durumu bugün değişen eski sipariş bugüne sayılmaz.
+      if (String(o?.channel || o?.integration_provider || "").toLowerCase() === "n11") {
+        const first = o?.created_at ? Date.parse(String(o.created_at)) : NaN;
+        if (!Number.isNaN(first) && first < start) continue;
+      }
+      orders += 1;
+      revenue += Number(o?.total_amount || 0) || 0;
+    }
+    // Liste yeniden eskiye sıralıdır; bugüne ait kayıt kalmayan sayfada durulur.
+    if (items.length < perPage || hits === 0) break;
+  }
+  return { revenue, orders };
 }
 
 export async function getSalesChart(token: string, days: number) {
@@ -574,7 +628,8 @@ export async function getCatalog(
   if (search) qs.set("search", escapeSearch(search));
   const [stock, prices] = await Promise.all([
     request<any>(`/parasut/product-stock?${qs.toString()}`, { method: "GET" }, token),
-    request<any>(`/parasut/product-prices?${qs.toString()}`, { method: "GET" }, token).catch(() => null),
+    // Fiyat hatası yutulmaz: yutulursa bütün ürünler 0,00 ₺ ve kanalsız görünür, bu değerler önbelleğe de yazılır.
+    request<any>(`/parasut/product-prices?${qs.toString()}`, { method: "GET" }, token),
   ]);
   const priceById = new Map<string, any>();
   (Array.isArray(prices?.products) ? prices.products : []).forEach((p: any) => priceById.set(String(p.id), p));
@@ -825,7 +880,11 @@ export async function getAccountingInvoices(token: string, source: "parasut" | "
   const max = options?.maxRecords ?? 300;
   const fetchPage = async (page: number) => {
     const payload = await request<any>(`/${source}/invoices?page=${page}&per_page=${perPage}`, { method: "GET" }, token);
-    return { rows: (Array.isArray(payload?.invoices) ? payload.invoices : []) as Invoice[], total: Number(payload?.total ?? 0) };
+    return {
+      rows: (Array.isArray(payload?.invoices) ? payload.invoices : []) as Invoice[],
+      total: Number(payload?.total ?? 0),
+      remote: String(payload?.source || "").startsWith("remote:"),
+    };
   };
   const first = await fetchPage(1);
   const invoices = [...first.rows];
@@ -836,7 +895,7 @@ export async function getAccountingInvoices(token: string, source: "parasut" | "
     // Dörderli gruplar hâlinde paralel çekilir.
     const pages = [page, page + 1, page + 2, page + 3].filter((p) => (p - 1) * perPage < Math.min(total, max));
     if (pages.length === 0) break;
-    const batch = await Promise.all(pages.map((p) => fetchPage(p).catch(() => ({ rows: [] as Invoice[], total: 0 }))));
+    const batch = await Promise.all(pages.map((p) => fetchPage(p).catch(() => ({ rows: [] as Invoice[], total: 0, remote: false }))));
     let added = 0;
     batch.forEach((b) =>
       b.rows.forEach((r) => {
@@ -849,6 +908,28 @@ export async function getAccountingInvoices(token: string, source: "parasut" | "
     );
     if (added === 0) break;
     page += pages.length;
+  }
+  // BizimHesap uzak ucunda sunucu "total" olarak yalnızca o sayfadaki satır sayısını döndürür; toplam sınır alınamaz.
+  // Sayfa doluysa sıradaki sayfa istenir; boş, yinelenen ya da uzak uçtan gelmeyen sayfada durulur.
+  if (source === "bizimhesap" && first.remote) {
+    let lastFull = first.rows.length === perPage;
+    let next = 2;
+    while (lastFull && invoices.length < max) {
+      const b = await fetchPage(next).catch(() => null);
+      if (!b || !b.remote) break;
+      let added = 0;
+      b.rows.forEach((r) => {
+        if (!seen.has(String(r.id))) {
+          seen.add(String(r.id));
+          invoices.push(r);
+          added += 1;
+        }
+      });
+      if (added === 0) break;
+      lastFull = b.rows.length === perPage;
+      next += 1;
+    }
+    return { invoices, total: invoices.length };
   }
   return { invoices, total };
 }
@@ -884,6 +965,15 @@ export async function getIncomingInvoices(token: string, source: IncomingSource,
   if (source === "turkcell-efatura") {
     const d = await request<any>(`/turkcell-efatura/inbox?page=${page}&page_size=${perPage}`, { method: "GET" }, token);
     return paged<IncomingInvoice>(d, "items", page, perPage);
+  }
+  if (source === "parasut") {
+    // Sunucu "total" olarak Paraşüt'teki gerçek toplamı değil, o ana dek önbelleğe yazdığı satır sayısını döndürür ve
+    // uzaktan yalnızca istenen sayfayı çeker. Bu yüzden toplam sınır alınmaz: sayfa doluysa devamı vardır; sonraki
+    // sayfalar force_sync ile istenir ki sunucu o sayfayı Paraşüt'ten çekip önbelleğe yazsın (boş sayfada durulur).
+    const sync = page > 1 ? "&force_sync=1" : "";
+    const d = await request<any>(`/parasut/incoming-e-invoices?page=${page}&per_page=${perPage}${sync}`, { method: "GET" }, token);
+    const res = paged<IncomingInvoice>(d, "invoices", page, perPage);
+    return { ...res, hasMore: res.items.length >= perPage };
   }
   const d = await request<any>(`/${source}/incoming-e-invoices?page=${page}&per_page=${perPage}`, { method: "GET" }, token);
   return paged<IncomingInvoice>(d, "invoices", page, perPage);

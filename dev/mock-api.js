@@ -19,7 +19,8 @@ const orders = Array.from({ length: 74 }, (_, i) => {
     id: `o${i + 1}`,
     channel: ch.provider,
     integration_id: ch.integration_id,
-    integration_provider: ch.provider,
+    cargo_status: null,
+    cargo_tracking: null,
     channel_order_id: `${ch.prefix}-${1000 + i}`,
     customer_name: NAMES[i % NAMES.length],
     total_amount: Math.round((149.9 + ((i * 137) % 2400)) * 100) / 100,
@@ -108,6 +109,15 @@ http
       rows = rows.slice((page - 1) * per, page * per);
       return send(res, 200, { items: rows, total, page, per_page: per, total_pages: Math.max(1, Math.ceil(total / per)) });
     }
+    if (path === "/orders/stats") {
+      const iid = url.searchParams.get("integration_id");
+      const rows = orders.filter((o) => !iid || o.integration_id === iid);
+      const n = (st) => rows.filter((o) => o.status === st).length;
+      return send(res, 200, {
+        total: rows.length, pending: n("pending"), processing: n("processing"), shipped: n("shipped"),
+        delivered: n("delivered"), cancelled: n("cancelled"), deleted: n("deleted"), needs_invoice: 0,
+      });
+    }
     if (path.startsWith("/orders/")) return send(res, 200, orders.find((o) => path.endsWith("/" + o.id)) || orders[0]);
     if (path === "/dashboard/stats")
       return send(res, 200, {
@@ -125,13 +135,14 @@ http
     }
     if (path === "/dashboard/smart-alerts")
       return send(res, 200, [
-        { type: "low_stock", severity: "warning", title: "4 ürün düşük stokta", desc: "Stok seviyesi 5 adedin altına düşen ürünler var.", action_path: "/stok" },
+        { type: "low_stock", severity: "warning", title: `${products.filter((p) => p.stock >= 0 && p.stock <= 5).length} ürün düşük stokta`, desc: "Stok seviyesi 5 adedin altına düşen ürünler var.", action_path: "/stok" },
         { type: "stale_orders", severity: "warning", title: "2 sipariş 3 gündür bekliyor", desc: "Beklemede olan siparişleri kontrol edin.", action_path: "/siparisler" },
       ]);
     if (path === "/integrations") return send(res, 200, [
-      { id: "i1", name: "Deneme Mağaza", provider: "woocommerce", status: "success" },
-      { id: "i2", name: "Trendyol", provider: "trendyol", status: "success" },
-      { id: "i3", name: "Hepsiburada", provider: "hepsiburada", status: "failed" },
+      { id: "i1", name: "Deneme Mağaza", provider: "woocommerce", kind: "store", status: "success" },
+      { id: "i2", name: "Trendyol", provider: "trendyol", kind: "marketplace", status: "success" },
+      { id: "i3", name: "Hepsiburada", provider: "hepsiburada", kind: "marketplace", status: "failed" },
+      { id: "i4", name: "HepsiJet", provider: "hepsijet", kind: "cargo", status: "success" },
     ]);
     if (path === "/parasut/invoices")
       return send(res, 200, { invoices: Array.from({ length: 6 }, (_, i) => ({
@@ -139,7 +150,38 @@ http
         gross_total: 1200 + i * 310.5, contact_name: NAMES[i % NAMES.length], can_officialize: i % 2 === 0,
       })), total: 6, page: 1, per_page: 600 });
     if (path === "/parasut/sales-offers") return send(res, 200, { offers: [], total: 0 });
-    if (path === "/reports/overview") return send(res, 200, { summary: { total_revenue: 84250, total_orders: 212, avg_order_value: 397.4 }, channels: [], timeline: [] });
+    if (path === "/reports/overview") {
+      // Gerçek sunucu gibi: since_date'ten bugüne, sipariş tarihine göre; 30 güne kadar günlük kova.
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        let b = {};
+        try { b = JSON.parse(raw || "{}"); } catch {}
+        const since = b.since_date ? Date.parse(`${String(b.since_date).slice(0, 10)}T00:00:00Z`) : Date.now() - (Number(b.period_days) || 30) * 86400000;
+        const days = Math.max(1, Math.floor((Date.now() - since) / 86400000) + 1);
+        const hit = orders.filter((o) => Date.parse(o.order_date) >= since);
+        const buckets = {};
+        const chans = {};
+        for (const o of hit) {
+          const key = days <= 30 ? o.order_date.slice(0, 10) : o.order_date.slice(0, 7);
+          buckets[key] = buckets[key] || { key, label: key, revenue: 0, orders: 0 };
+          buckets[key].revenue += o.total_amount;
+          buckets[key].orders += 1;
+          chans[o.channel] = chans[o.channel] || { provider: o.channel, integration_id: o.integration_id, name: o.channel, revenue: 0, orders: 0 };
+          chans[o.channel].revenue += o.total_amount;
+          chans[o.channel].orders += 1;
+        }
+        const total = hit.reduce((n, o) => n + o.total_amount, 0);
+        send(res, 200, {
+          period_days: days,
+          summary: { total_revenue: total, total_orders: hit.length, avg_order_value: hit.length ? total / hit.length : 0 },
+          timeline: Object.values(buckets).sort((x, y) => x.key.localeCompare(y.key)),
+          channels: Object.values(chans).sort((x, y) => y.revenue - x.revenue),
+          top_products: [],
+        });
+      });
+      return;
+    }
     if (path === "/parasut/product-stock" || path === "/parasut/product-prices") {
       const q = (url.searchParams.get("search") || "").replace(/\\\\/g, "").toLowerCase();
       const page = Number(url.searchParams.get("page") || 1);
@@ -150,6 +192,37 @@ http
       if (path.endsWith("stock"))
         return send(res, 200, { products: slice.map((p) => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, image_url: "", integration_stocks: [{ integration_id: "i1", stock: p.ch.i1.stock, active: true }, { integration_id: "i2", stock: p.ch.i2.stock, active: true }] })), integrations, total: rows.length, page, per_page: per });
       return send(res, 200, { products: slice.map((p) => ({ id: p.id, price: p.price.toFixed(2), integration_prices: [{ integration_id: "i1", price: p.ch.i1.price.toFixed(2), active: true }, { integration_id: "i2", price: p.ch.i2.price.toFixed(2), active: true }] })), integrations, total: rows.length, page, per_page: per });
+    }
+    // Ürün kimliği (ad / SKU / barkod) ve stok hareketleri — gerçek uçlar: GET|PATCH /products/{id}, GET /stock/movements.
+    const prodMatch = path.match(/^\/products\/([^/]+)$/);
+    if (prodMatch && (req.method === "GET" || req.method === "PATCH")) {
+      const p = products.find((x) => x.id === decodeURIComponent(prodMatch[1]));
+      if (!p) return send(res, 404, { detail: "Ürün bulunamadı" });
+      const view = () => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, price: p.price });
+      if (req.method === "GET") return send(res, 200, view());
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        const b = JSON.parse(raw || "{}");
+        for (const k of ["name", "sku", "barcode"]) if (typeof b[k] === "string") p[k] = b[k];
+        console.log("WRITE", path, raw);
+        send(res, 200, view());
+      });
+      return;
+    }
+    if (req.method === "GET" && path === "/stock/movements") {
+      const pid = url.searchParams.get("product_id") || "";
+      const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit") || 100)));
+      const skip = Math.max(0, Number(url.searchParams.get("skip") || 0));
+      const n = Number(pid.replace(/\D/g, "")) || 0;
+      // Ürüne göre değişen sayıda satır: p3 → boş, diğerleri 4–45 hareket.
+      const count = n % 3 === 0 ? 0 : 4 + ((n * 13) % 42);
+      const kinds = [["in", "Mal kabul"], ["out", "Sipariş stok düşümü"], ["adjustment", "Manuel güncelleme"], ["out", "Trendyol siparişi"]];
+      const all = Array.from({ length: count }, (_, i) => ({
+        id: `sm-${pid}-${i}`, user_id: "u1", product_id: pid, movement_type: kinds[i % 4][0], quantity: 1 + ((i * 3) % 12),
+        reason: kinds[i % 4][1], reference_id: null, created_at: new Date(Date.now() - i * 5400000).toISOString(),
+      }));
+      return send(res, 200, all.slice(skip, skip + limit));
     }
     if (req.method === "POST" && ["/stock/adjust", "/stock/channel-set", "/price/adjust", "/price/channel-set"].includes(path)) {
       let raw = "";
@@ -171,7 +244,9 @@ http
       return send(res, 200, { items: [
         { id: "j1", product_name: "Deneme Ürün 3", sku: "SKU-3", provider_label: "Trendyol", integration_name: "Trendyol", status: "failed", message: "Barkod Trendyol'da zaten kayıtlı.", timestamp: new Date().toISOString(), retryable: true },
         { id: "j2", product_name: "Deneme Ürün 7", sku: "SKU-7", provider_label: "WooCommerce", integration_name: "Deneme Mağaza", status: "failed", message: "Bağlantı zaman aşımına uğradı.", timestamp: new Date().toISOString(), retryable: false },
-      ], total: 2, page: 1, per_page: 25 });
+        // Gerçek sunucu, ürünü silinmiş ve iletisi olmayan kayıtlarda "-" yer tutucusu döndürür.
+        { id: "j3", product_name: "-", sku: "", provider_label: "Hepsiburada", integration_name: "Hepsiburada", status: "failed", message: "-", timestamp: new Date().toISOString(), retryable: false },
+      ], total: 3, page: 1, per_page: 25 });
     if (path === "/integration-jobs/retry") return send(res, 200, { success: true, attempted: 1, success_count: 1, failed_count: 0 });
     if (path.startsWith("/hepsijet/create-shipment/")) return send(res, 200, { success: true, barcode: "HJ123456789", message: "Gönderi oluşturuldu" });
     if (path === "/push-token") return send(res, 200, { ok: true });
@@ -184,7 +259,30 @@ http
           { kind: "receivable", date: "2026-11-05", amount: 6200, currency: "TRY", title: "Elif Kaya", reference: "OBI2026101" },
           { kind: "payable", date: "2026-11-18", amount: 9400, currency: "TRY", title: "Tedarikçi A.Ş.", reference: "GF-88" },
           { kind: "receivable", date: "2026-11-22", amount: 12850.5, currency: "TRY", title: "Can Öztürk", reference: "OBI2026104" },
+          { kind: "payable", date: null, undated: true, amount: 1850, currency: "TRY", title: "Kırtasiye Ltd.", reference: "GF-91", source: "obihub" },
         ] });
+    // Yeni hesap ve virman (gerçek uçlar: backend/routers/finance.py create_account, create_transfer)
+    if (path === "/finance/accounts" && req.method === "POST")
+      return readBody((b) => {
+        if (!String(b.name || "").trim()) return send(res, 400, { detail: "Hesap adı zorunludur" });
+        const acc = { id: "a" + Date.now(), name: String(b.name).trim(), account_type: b.account_type || "cash", currency: String(b.currency || "TRY").toUpperCase(), opening_balance: Number(b.opening_balance || 0), balance: Number(b.opening_balance || 0), bank_name: b.bank_name || "", iban: b.iban || "", is_default: false };
+        accounts.push(acc);
+        send(res, 200, acc);
+      });
+    if (path === "/finance/transfers" && req.method === "POST")
+      return readBody((b) => {
+        if (b.from_account_id === b.to_account_id) return send(res, 400, { detail: "Kaynak ve hedef hesap farklı olmalıdır" });
+        const src = accounts.find((a) => a.id === b.from_account_id);
+        const dst = accounts.find((a) => a.id === b.to_account_id);
+        if (!src || !dst) return send(res, 404, { detail: "Transfer hesaplarından biri bulunamadı" });
+        if ((src.currency || "TRY") !== (dst.currency || "TRY")) return send(res, 400, { detail: "Farklı para birimleri arasında transfer için kur bilgisi gerekir" });
+        const tid = "tr" + Date.now();
+        src.balance -= b.amount; dst.balance += b.amount;
+        const outgoing = { id: tid + "o", account_id: src.id, entry_type: "transfer_out", amount: b.amount, entry_date: b.entry_date, description: b.description || "Hesaplar arası transfer", related_account_name: dst.name };
+        const incoming = { id: tid + "i", account_id: dst.id, entry_type: "transfer_in", amount: b.amount, entry_date: b.entry_date, description: b.description || "Hesaplar arası transfer", related_account_name: src.name };
+        entries.unshift(outgoing, incoming);
+        send(res, 200, { transfer_id: tid, outgoing, incoming });
+      });
     if (path === "/finance/accounts") return send(res, 200, { items: accounts });
     if (path.startsWith("/finance/accounts/")) {
       const acc = accounts.find((a) => path.endsWith("/" + a.id));
@@ -198,6 +296,14 @@ http
         acc.balance += b.entry_type === "income" ? b.amount : -b.amount;
         entries.unshift({ id: "e" + Date.now(), account_id: acc.id, entry_type: b.entry_type, amount: b.amount, entry_date: b.entry_date, description: b.description });
         send(res, 200, { ok: true });
+      });
+    // Yeni cari (gerçek uç: backend/routers/customers.py create_customer)
+    if (path === "/customers" && req.method === "POST")
+      return readBody((b) => {
+        if (!String(b.name || "").trim()) return send(res, 400, { detail: "Müşteri adı zorunludur" });
+        const party = { id: "c" + Date.now(), name: String(b.name).trim(), phone: b.phone || "", email: b.email || "", tax_no: b.tax_no || "", tax_office: b.tax_office || "", address: b.address || "", contact_role: b.contact_role || "customer", source: "registered", currency: "TRY", opening_balance: Number(b.opening_balance || 0), balance: Number(b.opening_balance || 0), payments: [] };
+        parties.push(party);
+        send(res, 200, { ...party, balance: 0, pos_sales_count: 0, pos_sales_total: 0 });
       });
     if (path === "/customers")
       return send(res, 200, { items: parties.filter((p) => { const q = (url.searchParams.get("search") || "").toLowerCase(); const bs = url.searchParams.get("balance_status"); return (!q || p.name.toLowerCase().includes(q)) && (!bs || (bs === "receivable" ? p.balance > 0 : p.balance < 0)); }), total: parties.length, page: 1, per_page: 30, total_pages: 1, summary: { total_receivable: 19050.5, total_payable: 9400 } });
@@ -213,6 +319,18 @@ http
       return readBody((b) => { party.balance -= b.amount; party.payments.unshift(b.amount); send(res, 200, { id: "pm" + Date.now(), amount: b.amount }); });
     }
     if (path === "/local-invoices/summary") return send(res, 200, { total_remaining: localInvoices.reduce((n, i) => n + i.remaining_amount, 0), overdue_amount: 6200, overdue_count: 1 });
+    // Yeni satış faturası: her zaman taslak açılır, tutarlar kalemlerden hesaplanır (backend/routers/local_invoices.py create_invoice)
+    if (path === "/local-invoices" && req.method === "POST")
+      return readBody((b) => {
+        if (!Array.isArray(b.items) || b.items.length === 0) return send(res, 400, { detail: "Faturada en az bir satır olmalı" });
+        const r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+        const items = b.items.map((it) => ({ ...it, line_total: r2(Number(it.quantity) * Number(it.unit_price) * (1 - Number(it.discount_percent || 0) / 100)) }));
+        const subtotal = r2(items.reduce((n, it) => n + it.line_total, 0));
+        const vat = r2(items.reduce((n, it) => n + (it.line_total * Number(it.vat_rate || 0)) / 100, 0));
+        const inv = { id: "li" + Date.now(), invoice_number: `FTR-${new Date().getFullYear()}-${String(localInvoices.length + 1).padStart(4, "0")}`, invoice_type: "satis", status: "taslak", display_status: "taslak", is_overdue: false, customer_id: b.customer_id || null, customer_name: b.customer_name, issue_date: b.issue_date, due_date: b.due_date, currency: b.currency || "TRY", notes: b.notes || "", items, subtotal, discount_amount: 0, vat_amount: vat, total: r2(subtotal + vat), paid_amount: 0, remaining_amount: r2(subtotal + vat), payments: [] };
+        localInvoices.unshift(inv);
+        send(res, 200, inv);
+      });
     if (path === "/local-invoices") {
       const st = url.searchParams.get("status");
       const rows = localInvoices.filter((i) => !st || i.status === st);
@@ -255,6 +373,17 @@ http
       if (!tMatch[2]) return send(res, 200, { ticket: t, messages: t.messages });
       return readBody((b) => { t.messages.push({ id: "m" + Date.now(), sender_role: "user", message: b.message, created_at: new Date().toISOString() }); send(res, 200, { success: true }); });
     }
+    if (path === "/referrals/config") return send(res, 200, { allowed_plans: ["starter", "growth", "enterprise"], default_plan: "growth" });
+    if (path === "/referrals/generate-link" && req.method === "POST")
+      return readBody((b) => {
+        if (!["starter", "growth", "enterprise"].includes(b.plan)) return send(res, 400, { detail: "Bu abonelik planı davet için aktif değil." });
+        send(res, 200, { success: true, invite_url: "https://app.obihub.com/davet/mock" + Date.now() });
+      });
+    if (path === "/referrals/invite-email" && req.method === "POST")
+      return readBody((b) => {
+        if (!["starter", "growth", "enterprise"].includes(b.plan)) return send(res, 400, { detail: "Bu abonelik planı davet için aktif değil." });
+        send(res, 200, { success: true, message: "Davet gönderildi.", invite_url: "https://app.obihub.com/davet/mock" + Date.now() });
+      });
     if (path === "/billing/trial-status") return send(res, 200, { plan: "pro", is_trial: false, billing_cycle: "monthly", expires_at: "2026-12-04T00:00:00Z", days_left: 23, subscription_status: "active" });
     if (path === "/usage/summary") return send(res, 200, { limits: { integrations: 5, products: 5000, orders_monthly: 3000 }, usage: { integrations: 3, products: 48, orders_monthly: 212 } });
     return send(res, 200, {});

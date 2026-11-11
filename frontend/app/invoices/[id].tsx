@@ -32,6 +32,7 @@ export default function InvoiceDetail() {
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
   const [isOffline, setIsOffline] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [officialBusy, setOfficialBusy] = useState(false);
 
@@ -48,10 +49,12 @@ export default function InvoiceDetail() {
     try {
       const inv = await getInvoiceDetail(token, invoiceId);
       setInvoice(inv);
+      setLoadError(null);
       setIsOffline(false);
       await saveCache(cacheKey, inv);
-    } catch {
-      // Sunucuya ulaşılamazsa önbellekteki kayıt gösterilmeye devam eder.
+    } catch (e: any) {
+      // Sunucuya ulaşılamazsa önbellekteki kayıt gösterilmeye devam eder; kayıt yoksa hata gösterilir.
+      setLoadError(e?.message || "Fatura yüklenemedi.");
     } finally {
       setLoading(false);
     }
@@ -134,8 +137,10 @@ export default function InvoiceDetail() {
         <StackHeader title="Fatura" />
         <EmptyState
           icon={<ReceiptIcon size={30} color={colors.textTertiary} />}
-          title="Fatura bulunamadı"
-          description="Fatura silinmiş olabilir veya bağlantı kurulamadı."
+          title={loadError ? "Fatura yüklenemedi" : "Fatura bulunamadı"}
+          description={loadError || "Fatura silinmiş olabilir."}
+          actionLabel={loadError ? "Tekrar dene" : undefined}
+          onAction={loadError ? () => load() : undefined}
         />
       </View>
     );

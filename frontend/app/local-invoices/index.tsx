@@ -1,19 +1,22 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
+import { canManage } from "../../src/auth/permissions";
 import { getLocalInvoices, getLocalInvoiceSummary } from "../../src/api";
-import { invoiceStatus } from "../../src/finance";
+import { invoiceStatus, isInvoiceOverdue } from "../../src/finance";
 import { useDebounce } from "../../src/hooks/useDebounce";
 import { usePagedList } from "../../src/hooks/usePagedList";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing } from "../../src/theme/tokens";
 import { formatDate, formatMoney, formatTry } from "../../src/utils";
-import { AlertIcon, CheckIcon, FileTextIcon, ReceiptIcon } from "../../src/components/Icons";
+import { AlertIcon, CheckIcon, FileTextIcon, PlusIcon, ReceiptIcon } from "../../src/components/Icons";
 import { FadeInDown, SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { StatusBadge } from "../../src/components/StatusBadge";
+import { Button } from "../../src/ui/Button";
 import { Chip, ChipRow } from "../../src/ui/Chip";
 import { StackHeader } from "../../src/ui/Header";
+import { ON_HERO } from "../../src/ui/HeroCard";
 import { ListBody } from "../../src/ui/ListBody";
 import { IconTile } from "../../src/ui/ListRow";
 import { RowCard, StatCard } from "../../src/ui/RowCard";
@@ -23,14 +26,16 @@ import type { LocalInvoice } from "../../src/types";
 const FILTERS = [
   { key: "", label: "Tümü" },
   { key: "taslak", label: "Taslak" },
+  { key: "gonderildi", label: "Gönderildi" },
   { key: "resmilesti", label: "Resmileşti" },
   { key: "gecikti", label: "Gecikti" },
   { key: "odendi", label: "Ödendi" },
 ];
 
 export default function LocalInvoicesScreen() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { colors } = useTheme();
+  const mayCreate = canManage(user, "billing");
   const [search, setSearch] = useState("");
   const debounced = useDebounce(search.trim(), 350);
   const [status, setStatus] = useState("");
@@ -42,9 +47,23 @@ export default function LocalInvoicesScreen() {
   );
   const list = usePagedList<LocalInvoice>(token ? fetchPage : null);
 
-  useEffect(() => {
-    if (token) getLocalInvoiceSummary(token).then(setSummary).catch(() => {});
+  // Özet yenilenemezse eski tutar gösterilmez; kartlar gizlenir.
+  const loadSummary = useCallback(() => {
+    if (token) getLocalInvoiceSummary(token).then(setSummary).catch(() => setSummary(null));
   }, [token]);
+
+  // Detayda tahsilat ya da resmileştirme sonrası geri dönüldüğünde özet ve liste tazelenir.
+  // Yüklenmiş sayfalar yerinde yenilenir; liste ilk sayfaya düşmez, kaydırma konumu korunur.
+  const refreshRef = useRef(list.refreshLoaded);
+  refreshRef.current = list.refreshLoaded;
+  const focusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      loadSummary();
+      if (focusedOnce.current) refreshRef.current();
+      focusedOnce.current = true;
+    }, [loadSummary])
+  );
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="local-invoices-screen">
@@ -55,6 +74,17 @@ export default function LocalInvoicesScreen() {
           <StatCard label="Vadesi geçen" value={formatTry(summary.overdue_amount || 0)} tone={(summary.overdue_amount || 0) > 0 ? "error" : undefined} />
         </SafeAnimatedView>
       ) : null}
+      {mayCreate ? (
+        <View style={styles.actions}>
+          <Button
+            testID="local-invoices-new"
+            label="Yeni fatura oluştur"
+            size="sm"
+            icon={<PlusIcon size={16} color={ON_HERO.text} />}
+            onPress={() => router.push("/local-invoices/new")}
+          />
+        </View>
+      ) : null}
       <SearchField testID="local-invoices-search" value={search} onChangeText={setSearch} placeholder="Müşteri veya fatura no ara" />
       <ChipRow>
         {FILTERS.map((f) => (
@@ -62,13 +92,16 @@ export default function LocalInvoicesScreen() {
         ))}
       </ChipRow>
       <ListBody
-        state={list}
+        state={{ ...list, refresh: () => { loadSummary(); list.refresh(); } }}
         icon={<ReceiptIcon size={30} color={colors.emerald} />}
         emptyTitle="Fatura yok"
-        emptyDescription="Bu süzgece uyan satış faturası bulunmuyor. Yeni fatura web panelinden oluşturulur."
+        emptyDescription={mayCreate ? "Bu süzgece uyan satış faturası bulunmuyor. Yukarıdaki düğmeyle yeni fatura oluşturabilirsiniz." : "Bu süzgece uyan satış faturası bulunmuyor."}
         renderItem={(inv) => {
-          const key = String(inv.display_status || inv.status || "");
-          const st = invoiceStatus(inv.display_status || inv.status);
+          // "Gönderildi" ve "Resmileşti" süzgeçlerinde sunucu gecikmişleri kendi gününe göre ayıklar; rozet de sunucunun
+          // durumunu gösterir. Aksi halde gece yarısından sonra satır bu süzgeçte "Gecikti" rozetiyle çıkar.
+          const serverKey = String(inv.display_status || inv.status || "");
+          const key = status === "gonderildi" || status === "resmilesti" ? serverKey : isInvoiceOverdue(inv) ? "gecikti" : serverKey;
+          const st = invoiceStatus(key);
           // Durum rengi: gecikti kırmızı, taslak sarı, ödendi yeşil; diğerleri nötr mavi simge.
           const look =
             key === "gecikti"
@@ -99,5 +132,6 @@ export default function LocalInvoicesScreen() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
+  actions: { marginHorizontal: spacing.lg, marginBottom: spacing.sm },
   stats: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
 });

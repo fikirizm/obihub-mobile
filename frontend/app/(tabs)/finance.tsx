@@ -4,6 +4,7 @@ import { router } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canAccess } from "../../src/auth/permissions";
 import { getFinanceOverview } from "../../src/api";
+import { todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing, tabular, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney, formatTry } from "../../src/utils";
@@ -55,6 +56,9 @@ export default function FinanceScreen() {
 
   const invoiceSource = parasutConnected ? "Paraşüt" : accountingProvider === "bizimhesap" ? "BizimHesap" : null;
   const upcoming = (data?.upcoming || []).slice(0, 5);
+  // Sunucunun "bugün"ü UTC'dir; gece yarısından sonra geride kalabildiği için cihazın günü ilerideyse o kullanılır.
+  const localToday = todayIso();
+  const today = data?.today && data.today > localToday ? data.today : localToday;
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="finance-screen">
@@ -119,13 +123,13 @@ export default function FinanceScreen() {
                 <SectionTitle title="Yaklaşan vadeler" />
                 <Card style={styles.block}>
                   {upcoming.map((u, i) => {
-                    const overdue = Boolean(u.date && data.today && u.date < data.today);
+                    const overdue = Boolean(u.date && u.date.slice(0, 10) < today);
                     return (
                       <ListRow
                         key={`${u.reference || u.title}-${i}`}
                         divider={i > 0}
                         title={u.title || (u.kind === "receivable" ? "Alacak" : "Borç")}
-                        subtitle={`${u.kind === "receivable" ? "Alacak" : "Borç"} · ${formatDate(u.date)}${overdue ? " · vadesi geçti" : ""}`}
+                        subtitle={`${u.kind === "receivable" ? "Alacak" : "Borç"} · ${u.date ? formatDate(u.date) : "Vadesiz"}${overdue ? " · vadesi geçti" : ""}`}
                         trailing={
                           <Text style={[type.bodyStrong, tabular, { color: overdue ? colors.error : colors.textPrimary }]}>
                             {formatMoney(u.amount, u.currency)}

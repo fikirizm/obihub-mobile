@@ -1,15 +1,17 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
+import { canManage } from "../../src/auth/permissions";
 import { getParties } from "../../src/api";
 import { useDebounce } from "../../src/hooks/useDebounce";
 import { usePagedList } from "../../src/hooks/usePagedList";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing, tabular, type } from "../../src/theme/tokens";
-import { formatTry } from "../../src/utils";
-import { UserIcon } from "../../src/components/Icons";
+import { formatMoney, formatTry } from "../../src/utils";
+import { PlusIcon, UserIcon } from "../../src/components/Icons";
 import { FadeInDown, SafeAnimatedView } from "../../src/components/SafeAnimatedView";
+import { Button } from "../../src/ui/Button";
 import { Chip, ChipRow } from "../../src/ui/Chip";
 import { StackHeader } from "../../src/ui/Header";
 import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
@@ -45,7 +47,15 @@ function Avatar({ name, bg, fg }: { name: string; bg: string; fg: string }) {
 }
 
 // Listenin üstündeki özet: toplam alacak ve toplam borç (liste yanıtındaki özetten).
-function SummaryHero({ summary }: { summary: Summary }) {
+function isForeign(currency?: string) {
+  const cur = String(currency || "TRY").toUpperCase();
+  return cur !== "TRY" && cur !== "TRL";
+}
+
+// Sunucu özeti dövizli bakiye bilgisini vermez; "unknown" bütün cariler henüz görülmedi demektir.
+type ForeignState = "yes" | "no" | "unknown";
+
+function SummaryHero({ summary, foreign }: { summary: Summary; foreign: ForeignState }) {
   return (
     <HeroCard tone="emerald" style={styles.hero}>
       {summary.total_contacts != null ? (
@@ -72,13 +82,21 @@ function SummaryHero({ summary }: { summary: Summary }) {
           </Text>
         </View>
       </View>
+      {foreign !== "no" ? (
+        <Text style={[type.caption, { color: ON_HERO.soft, marginTop: spacing.sm }]}>
+          {foreign === "yes"
+            ? "Toplamlara dövizli carilerin bakiyeleri çevrilmeden dahildir."
+            : "Dövizli cari bulunuyorsa bakiyesi toplamlara çevrilmeden dahildir."}
+        </Text>
+      ) : null}
     </HeroCard>
   );
 }
 
 export default function CustomersScreen() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { colors } = useTheme();
+  const mayAdd = canManage(user, "customers");
   const [search, setSearch] = useState("");
   const debounced = useDebounce(search.trim(), 350);
   const [filter, setFilter] = useState<Filter>("");
@@ -88,6 +106,8 @@ export default function CustomersScreen() {
   // Sunucu özeti arama ve bakiye süzgecinden SONRA hesaplar. "Toplam" etiketinin doğru kalması için
   // yalnızca süzgeçsiz ve aramasız ilk sayfanın özeti saklanır; sayaç, geç gelen eski yanıtı eler.
   const summarySeq = useRef(0);
+  // Eldeki satırların süzgeçsiz ve aramasız sorgudan gelip gelmediği (dövizli cari notu için).
+  const itemsUnfiltered = useRef(false);
   const fetchPage = useCallback(
     async (page: number) => {
       const unfiltered = page === 1 && !debounced && !filter;
@@ -96,6 +116,7 @@ export default function CustomersScreen() {
         const res = await getParties(token as string, { page, search: debounced || undefined, balanceStatus: filter || undefined });
         // Özet ilk sayfayla birlikte gelir; ek istek yapılmaz.
         if (unfiltered && my === summarySeq.current) setSummary(res.summary ?? null);
+        if (page === 1) itemsUnfiltered.current = unfiltered;
         return res;
       } catch (e) {
         // Genel toplam yenilenemediyse eski tutarı göstermeyin.
@@ -107,6 +128,28 @@ export default function CustomersScreen() {
   );
   const list = usePagedList<Party>(token ? fetchPage : null);
 
+  // Detayda tahsilat alınıp geri dönüldüğünde bakiyeler ve toplamlar tazelenir (ilk açılışı liste kendisi yükler).
+  // Yüklenmiş sayfalar yerinde yenilenir; liste ilk sayfaya düşmez, kaydırma konumu korunur.
+  const refreshRef = useRef(list.refreshLoaded);
+  refreshRef.current = list.refreshLoaded;
+  const focusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (focusedOnce.current) refreshRef.current();
+      focusedOnce.current = true;
+    }, [])
+  );
+
+  // Özet bütün carileri kapsar, liste ise sayfa sayfa gelir. Dövizli cari yalnızca yüklü satırlardan görülebildiği için
+  // not üç durumludur: görüldü (kesin), bütün cariler yüklendi ve yok (gizli), henüz bilinmiyor (koşullu not).
+  const [foreign, setForeign] = useState<ForeignState>("unknown");
+  const { items, hasMore, loading } = list;
+  useEffect(() => {
+    if (loading) return;
+    const seen = items.some((p) => isForeign(p.currency) && Number(p.balance || 0) !== 0);
+    if (itemsUnfiltered.current) setForeign(seen ? "yes" : hasMore ? "unknown" : "no");
+    else if (seen) setForeign("yes");
+  }, [items, hasMore, loading]);
   const hasSummary = summary != null && (summary.total_receivable != null || summary.total_payable != null);
 
   return (
@@ -114,8 +157,19 @@ export default function CustomersScreen() {
       <StackHeader title="Cari hesaplar" subtitle={list.loading ? undefined : `${list.total} cari`} />
       {hasSummary && summary ? (
         <SafeAnimatedView entering={FadeInDown.duration(380)}>
-          <SummaryHero summary={summary} />
+          <SummaryHero summary={summary} foreign={foreign} />
         </SafeAnimatedView>
+      ) : null}
+      {mayAdd ? (
+        <View style={styles.actions}>
+          <Button
+            testID="customers-new"
+            label="Yeni cari ekle"
+            size="sm"
+            icon={<PlusIcon size={16} color={ON_HERO.text} />}
+            onPress={() => router.push("/customers/new")}
+          />
+        </View>
       ) : null}
       <SearchField testID="customers-search" value={search} onChangeText={setSearch} placeholder="Cari adı, telefon veya e-posta" />
       <ChipRow>
@@ -144,11 +198,11 @@ export default function CustomersScreen() {
               }
               title={name}
               subtitle={p.phone || p.email || (p.source === "orders" ? "Siparişlerden" : undefined)}
-              amount={bal === 0 ? "Bakiye yok" : formatTry(Math.abs(bal))}
+              amount={bal === 0 ? "Bakiye yok" : formatMoney(Math.abs(bal), p.currency)}
               amountColor={bal > 0 ? colors.success : bal < 0 ? colors.error : colors.textTertiary}
               meta={bal > 0 ? "Alacağınız var" : bal < 0 ? "Borcunuz var" : undefined}
               onPress={() =>
-                router.push({ pathname: "/customers/[id]", params: { id: p.id, name, balance: String(bal), registered: p.source === "registered" ? "1" : "0" } })
+                router.push({ pathname: "/customers/[id]", params: { id: p.id, name, balance: String(bal), registered: p.source === "registered" ? "1" : "0", currency: p.currency || "TRY" } })
               }
             />
           );
@@ -160,6 +214,7 @@ export default function CustomersScreen() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
+  actions: { marginHorizontal: spacing.lg, marginBottom: spacing.sm },
   avatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   hero: { marginBottom: spacing.sm },
   heroRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },

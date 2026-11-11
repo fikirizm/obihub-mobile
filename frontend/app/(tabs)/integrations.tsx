@@ -10,8 +10,8 @@ import { Card } from "../../src/ui/ListRow";
 import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
 import { Skeleton } from "../../src/components/Skeleton";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
-import { getIntegrations, getOrders } from "../../src/api";
-import { providerLabel, isNewOrderStatus, statusKindFromOrder } from "../../src/utils";
+import { getIntegrations, getOrderStats } from "../../src/api";
+import { providerLabel, isStoreIntegration } from "../../src/utils";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
 import { PressableScale } from "../../src/components/KPICard";
 import { AlertIcon, ArrowRightIcon, PlugIcon, InboxIcon, TruckIcon } from "../../src/components/Icons";
@@ -19,9 +19,10 @@ import { EmptyState } from "../../src/components/EmptyState";
 import { NetworkErrorBanner } from "../../src/components/NetworkErrorBanner";
 import { saveCache, loadCache } from "../../src/offlineCache";
 import { useFocusLoad } from "../../src/hooks/useFocusLoad";
-import type { Integration, Order } from "../../src/types";
+import type { Integration } from "../../src/types";
 
-type IntegCache = { list: Integration[]; orderCounts: Record<string, { all: number; pending: number; shipped: number }> };
+type Counts = { all: number; pending: number; shipped: number };
+type IntegCache = { list: Integration[]; orderCounts: Record<string, Counts> };
 
 // Sunucudaki entegrasyon durumları: success, failed, pending.
 function statusOf(status: string | undefined, colors: { success: string; error: string; warning: string }) {
@@ -35,7 +36,7 @@ export default function IntegrationsScreen() {
   const { token } = useAuth();
   const { colors } = useTheme();
   const [list, setList] = useState<Integration[]>([]);
-  const [orderCounts, setOrderCounts] = useState<Record<string, { all: number; pending: number; shipped: number }>>({});
+  const [orderCounts, setOrderCounts] = useState<Record<string, Counts>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
@@ -46,36 +47,36 @@ export default function IntegrationsScreen() {
     if (!silent) {
       const cached = await loadCache<IntegCache>("integrations_cache");
       if (cached) {
-        setList(cached.list);
-        setOrderCounts(cached.orderCounts);
+        setList((cached.list || []).filter(isStoreIntegration));
+        setOrderCounts(cached.orderCounts || {});
         setIsOffline(true);
         setLoading(false);
       }
     }
     try {
-      const [data, orders] = await Promise.all([
-        getIntegrations(token),
-        getOrders(token, undefined, { page: 1, perPage: 200, sortBy: "-created_at" }).catch(() => [] as Order[]),
-      ]);
-      const intList = Array.isArray(data) ? data : [];
+      const data = await getIntegrations(token);
+      // Kargo ve muhasebe bağlantıları mağaza değildir; burada yalnızca sipariş alan kanallar listelenir.
+      const intList = (Array.isArray(data) ? data : []).filter(isStoreIntegration);
       setList(intList);
-      const counts: Record<string, { all: number; pending: number; shipped: number }> = {};
-      for (const o of (orders || [])) {
-        const intId = String(o.integration_id || "");
-        if (!intId) continue;
-        if (!counts[intId]) counts[intId] = { all: 0, pending: 0, shipped: 0 };
-        counts[intId].all += 1;
-        const provider = String(o.integration_provider || o.provider || o.channel || "");
-        if (isNewOrderStatus(o, provider)) counts[intId].pending += 1;
-        if (statusKindFromOrder(o, provider) === "info") counts[intId].shipped += 1;
-      }
+      // Sayılar sunucunun tüm siparişler üzerinden verdiği özetten gelir (Panel ve Siparişler ile aynı kaynak).
+      const stats = await Promise.all(intList.map((it) => getOrderStats(token, it.id).catch(() => null)));
+      const counts: Record<string, Counts> = {};
+      intList.forEach((it, i) => {
+        const st = stats[i];
+        if (!st) return; // Alınamayan sayı 0 yazılmaz; kartta "—" görünür.
+        counts[it.id] = {
+          all: Number(st.total || 0),
+          pending: Number(st.pending || 0) + Number(st.processing || 0),
+          shipped: Number(st.shipped || 0),
+        };
+      });
       setOrderCounts(counts);
       setIsOffline(false);
       await saveCache("integrations_cache", { list: intList, orderCounts: counts });
     } catch {
       if (list.length === 0 && !silent) {
         const cached = await loadCache<IntegCache>("integrations_cache");
-        if (cached) { setList(cached.list); setOrderCounts(cached.orderCounts); setIsOffline(true); }
+        if (cached) { setList((cached.list || []).filter(isStoreIntegration)); setOrderCounts(cached.orderCounts || {}); setIsOffline(true); }
       }
     } finally {
       setLoading(false);
@@ -97,11 +98,13 @@ export default function IntegrationsScreen() {
       if (c) {
         acc.pending += c.pending;
         acc.shipped += c.shipped;
+      } else {
+        acc.missing += 1;
       }
       if (String(it.status || "").trim().toLowerCase() === "failed") acc.problem += 1;
       return acc;
     },
-    { pending: 0, shipped: 0, problem: 0 }
+    { pending: 0, shipped: 0, problem: 0, missing: 0 }
   );
   const onRefresh = () => {
     setRefreshing(true);
@@ -157,8 +160,8 @@ export default function IntegrationsScreen() {
                 <View style={styles.heroStats}>
                   {[
                     { label: "Mağaza", value: totalConnected },
-                    { label: "Bekleyen", value: totals.pending },
-                    { label: "Kargoda", value: totals.shipped },
+                    { label: "Bekleyen", value: totals.missing > 0 ? "—" : totals.pending },
+                    { label: "Kargoda", value: totals.missing > 0 ? "—" : totals.shipped },
                   ].map((st) => (
                     <View key={st.label} style={[styles.heroStat, { backgroundColor: ON_HERO.faint }]}>
                       <Text style={[type.title, tabular, { color: ON_HERO.text }]} numberOfLines={1} adjustsFontSizeToFit>
@@ -183,7 +186,9 @@ export default function IntegrationsScreen() {
           }
           renderItem={({ item, index }) => {
             const provider = String(item.provider || item.name || "");
-            const counts = orderCounts[item.id] || { all: 0, pending: 0, shipped: 0 };
+            const known = orderCounts[item.id];
+            const pendingText = known ? String(known.pending) : "—";
+            const shippedText = known ? String(known.shipped) : "—";
             const name = item.name || providerLabel(provider);
             const st = statusOf(item.status, colors);
             return (
@@ -192,7 +197,7 @@ export default function IntegrationsScreen() {
                   testID={`integration-${item.id}`}
                   onPress={() => router.push({ pathname: "/integrations/[id]", params: { id: item.id, provider } })}
                   accessibilityRole="button"
-                  accessibilityLabel={`${name}, ${providerLabel(provider)}, ${st.label}, ${counts.pending} bekleyen, ${counts.shipped} kargoda`}
+                  accessibilityLabel={`${name}, ${providerLabel(provider)}, ${st.label}, ${known ? `${known.pending} bekleyen, ${known.shipped} kargoda` : "sipariş sayıları alınamadı"}`}
                 >
                   <Card style={styles.card}>
                     <View style={styles.cardTop}>
@@ -217,7 +222,7 @@ export default function IntegrationsScreen() {
                       <View style={[styles.stat, { backgroundColor: colors.warningBg }]}>
                         <InboxIcon size={16} color={colors.warning} />
                         <Text style={[type.bodyStrong, tabular, { color: colors.textPrimary }]} numberOfLines={1}>
-                          {counts.pending}
+                          {pendingText}
                         </Text>
                         <Text style={[type.caption, styles.metaText, { color: colors.textSecondary }]} numberOfLines={1}>
                           bekleyen
@@ -226,7 +231,7 @@ export default function IntegrationsScreen() {
                       <View style={[styles.stat, { backgroundColor: colors.primarySoft }]}>
                         <TruckIcon size={16} color={colors.primary} />
                         <Text style={[type.bodyStrong, tabular, { color: colors.textPrimary }]} numberOfLines={1}>
-                          {counts.shipped}
+                          {shippedText}
                         </Text>
                         <Text style={[type.caption, styles.metaText, { color: colors.textSecondary }]} numberOfLines={1}>
                           kargoda

@@ -6,7 +6,7 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { createOfferPayment, getOfferPayment, getSalesOfferDetail, getWooIntegrations, updateSalesOffer } from "../../src/api";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
-import { formatDate, formatTry } from "../../src/utils";
+import { formatDate, formatMoney } from "../../src/utils";
 import type { StatusKind } from "../../src/utils";
 import { CheckIcon, FileTextIcon, LinkIcon, MailIcon, PlugIcon, TagIcon, WalletIcon } from "../../src/components/Icons";
 import { EmptyState } from "../../src/components/EmptyState";
@@ -107,6 +107,7 @@ export default function OfferDetail() {
 
   const [offer, setOffer] = useState<SalesOffer | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [payment, setPayment] = useState<OfferPayment | null>(null);
   const [sendEmail, setSendEmail] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -124,6 +125,7 @@ export default function OfferDetail() {
         getWooIntegrations(token),
       ]);
       setOffer(detail ?? null);
+      setLoadError(null);
       setSendEmail(!!(detail?.contact_email));
       setPayment(pay ?? null);
 
@@ -135,7 +137,8 @@ export default function OfferDetail() {
       const wooList = intList.filter((i: any) => i.provider === "woocommerce" && i.status !== "deleted");
       setWooIntegrations(wooList);
       if (wooList.length === 1) setSelectedIntegrationId(wooList[0].id);
-    } catch {
+    } catch (e: any) {
+      setLoadError(e?.message || "Teklif yüklenirken sorun oluştu.");
       toast("Teklif yüklenirken sorun oluştu.", "error");
     } finally {
       setLoading(false);
@@ -209,8 +212,10 @@ export default function OfferDetail() {
         <StackHeader title="Teklif" />
         <EmptyState
           icon={<FileTextIcon size={30} color={colors.violet} />}
-          title="Teklif bulunamadı"
-          description="Teklif silinmiş olabilir. Listeden yeniden açmayı deneyin."
+          title={loadError ? "Teklif yüklenemedi" : "Teklif bulunamadı"}
+          description={loadError || "Teklif silinmiş olabilir. Listeden yeniden açmayı deneyin."}
+          actionLabel={loadError ? "Tekrar dene" : undefined}
+          onAction={loadError ? () => load() : undefined}
         />
       </View>
     );
@@ -221,6 +226,9 @@ export default function OfferDetail() {
   const hasPayment = payment?.exists !== false && !!payment?.payment_url;
   const isPaid = payment?.status === "paid";
   const isPending = payment?.status === "pending_payment";
+  // Sunucu WooCommerce siparişi iptal, iade ya da başarısız olduğunda "cancelled" döndürür.
+  const isCancelled = payment?.status === "cancelled";
+  const money = (v: number | string | undefined | null) => formatMoney(v, offer.currency);
   const totalDiscount = Number((offer as any).total_discount || offer.computed_total_discount || 0);
   const canDecide = offer.status === "waiting" || offer.status === "sent" || offer.status === "draft" || offer.status === "approved";
   const title = offer.description || `Teklif #${offer.id}`;
@@ -233,10 +241,10 @@ export default function OfferDetail() {
   const heroStats: HeroStat[] = [];
   if (offer.due_date) heroStats.push({ label: "Son geçerlilik", value: formatDate(offer.due_date) });
   if (lineItems.length > 0) heroStats.push({ label: "Kalem", value: String(lineItems.length) });
-  if (totalDiscount > 0) heroStats.push({ label: "Toplam indirim", value: `-${formatTry(totalDiscount)}`, tone: "bad" });
-  const payLabel = isPaid ? "Ödeme alındı" : isPending ? "Ödeme bekleniyor" : payment?.status || "-";
-  const payTint = isPaid ? colors.successBg : isPending ? colors.warningBg : colors.surfaceMuted;
-  const payColor = isPaid ? colors.success : isPending ? colors.warning : colors.textSecondary;
+  if (totalDiscount > 0) heroStats.push({ label: "Toplam indirim", value: `-${money(totalDiscount)}`, tone: "bad" });
+  const payLabel = isPaid ? "Ödeme alındı" : isPending ? "Ödeme bekleniyor" : isCancelled ? "İptal edildi" : payment?.status || "-";
+  const payTint = isPaid ? colors.successBg : isPending ? colors.warningBg : isCancelled ? colors.errorBg : colors.surfaceMuted;
+  const payColor = isPaid ? colors.success : isPending ? colors.warning : isCancelled ? colors.error : colors.textSecondary;
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="offer-detail">
@@ -258,7 +266,7 @@ export default function OfferDetail() {
             subtitle={heroSubtitle || undefined}
             badge={<StatusBadge label={st.label} kind={st.kind} />}
             valueLabel="Toplam tutar"
-            value={formatTry(Number(offer.net_total || 0))}
+            value={money(Number(offer.net_total || 0))}
             stats={heroStats}
           />
         </View>
@@ -304,17 +312,17 @@ export default function OfferDetail() {
                     </IconTile>
                   }
                   title={(item as any).product_name || item.description || "Ürün/Hizmet"}
-                  subtitle={`${fmtQty(item.quantity)} adet × ${formatTry(Number(item.unit_price || 0))}`}
+                  subtitle={`${fmtQty(item.quantity)} adet × ${money(Number(item.unit_price || 0))}`}
                   trailing={
                     <>
                       <Text style={[type.callout, tabular, { color: colors.textPrimary }]}>
-                        {formatTry(Number((item as any).total || item.net_total || 0))}
+                        {money(Number((item as any).total || item.net_total || 0))}
                       </Text>
                       {Number(item.discount_value || 0) > 0 ? (
                         <Text style={[type.caption, tabular, { color: colors.error }]}>
                           -{item.discount_type === "percentage"
                             ? `%${Number(item.discount_value).toFixed(2)}`
-                            : formatTry(Number(item.discount_value))}
+                            : money(Number(item.discount_value))}
                         </Text>
                       ) : null}
                     </>
@@ -346,7 +354,7 @@ export default function OfferDetail() {
                         </Text>
                       ) : null}
                     </View>
-                    <StatusBadge label={payLabel} kind={isPaid ? "success" : isPending ? "warning" : "neutral"} />
+                    <StatusBadge label={payLabel} kind={isPaid ? "success" : isPending ? "warning" : isCancelled ? "error" : "neutral"} />
                   </View>
 
                   <View style={[styles.linkBox, { borderColor: colors.border, backgroundColor: colors.surfaceMuted }]}>
@@ -380,6 +388,12 @@ export default function OfferDetail() {
                         Gönderildi: {payment.contact_email}
                       </Text>
                     </View>
+                  ) : null}
+
+                  {isCancelled ? (
+                    <Text style={[type.caption, { color: colors.error }]}>
+                      Bu ödeme iptal edilmiş; link artık geçerli olmayabilir. Yeni bir ödeme linki oluşturabilirsiniz.
+                    </Text>
                   ) : null}
 
                   {!isPaid ? (
