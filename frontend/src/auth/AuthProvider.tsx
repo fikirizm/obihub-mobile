@@ -5,7 +5,7 @@ import * as BackgroundFetch from "expo-background-fetch";
 import * as TaskManager from "expo-task-manager";
 import { Platform } from "react-native";
 import * as Storage from "../storage";
-import { getAccountingSettings, getMe, getOrders, getSupportNotifications, login as apiLogin, registerPushToken, setSessionHandlers } from "../api";
+import { getAccountingSettings, getMe, getOrders, getSupportNotifications, login as apiLogin, registerPushToken, setSessionHandlers, unregisterPushToken } from "../api";
 import { displayOrderNo, formatOrderDateTime, isNewOrderStatus, providerLabel } from "../utils";
 import { clearCatalogCache } from "../catalogCache";
 import { clearAllCache } from "../offlineCache";
@@ -204,6 +204,10 @@ async function scheduleOrderNotification(orders: Order[]) {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
+  // Çıkışta bildirim kaydını silmek için: geçerli oturum belirteci ve bu cihazın sunucuya kaydedilen push belirteci.
+  const tokenRef = useRef<string | null>(null);
+  tokenRef.current = token;
+  const pushTokenRef = useRef<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [bootLoading, setBootLoading] = useState(true);
   const [subscriptionLock, setSubscriptionLock] = useState<string | null>(null);
@@ -275,6 +279,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    // Cihaz önceki kullanıcının bildirimlerini almaya devam etmesin.
+    const authToken = tokenRef.current;
+    const pushToken = pushTokenRef.current;
+    pushTokenRef.current = null;
+    if (authToken && pushToken) await unregisterPushToken(authToken, pushToken);
     await Storage.deleteItemAsync(TOKEN_KEY);
     await Storage.deleteItemAsync(USER_KEY);
     await Storage.deleteItemAsync(PARASUT_CONNECTED_KEY);
@@ -483,6 +492,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             });
             if (pushTokenData.data && token) {
               await registerPushToken(token, pushTokenData.data);
+              pushTokenRef.current = pushTokenData.data;
             }
           } catch {}
         }

@@ -455,6 +455,26 @@ export async function registerPushToken(token: string, pushToken: string) {
   );
 }
 
+// Çıkışta cihazın bildirim kaydını siler (DELETE /push-token, gövde {token}). Oturum işleyicilerini tetiklememek için
+// ortak request() kullanılmaz: çıkış 401 yüzünden yapılıyorsa bu çağrı da 401 alır ve yeni bir çıkış başlatmamalı.
+// Hata yutulur; uç henüz yoksa (404/405) çıkış yine tamamlanır. En çok 4 sn beklenir.
+export async function unregisterPushToken(token: string, pushToken: string): Promise<void> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    await fetch(`${API_BASE_URL}/push-token`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ token: pushToken }),
+      signal: ctrl.signal,
+    });
+  } catch {
+    // Ağ hatası ya da zaman aşımı: çıkış sürer.
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function getSalesOffers(token: string, options?: { page?: number; perPage?: number }) {
   const qs = new URLSearchParams();
   qs.set("page", String(options?.page ?? 1));
