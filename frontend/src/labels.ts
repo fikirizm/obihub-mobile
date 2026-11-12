@@ -3,10 +3,10 @@
 // - Trendyol, n11, Pazarama: ObiHub ürünlü etiketi (/orders/{id}/product-label/pdf); pazaryeri etiketi seçeneği yok.
 // - Hepsiburada: varsayılan ürünlü etiket; ikinci seçenek Hepsiburada etiketi (API hatasında ObiHub etiketine düşülür).
 // - Idefix: varsayılan ortak HepsiJet etiketi (?variant=shared, kargo kodu gerekir); ikinci seçenek Idefix ürünlü etiketi.
-// - Diğerleri (WooCommerce vb.): siparişe açılmış kargo gönderisinin ürünlü etiketi.
+// - Diğerleri (WooCommerce vb.): varsayılan orijinal HepsiJet etiketi; ikinci seçenek kargo gönderisinin ürünlü etiketi.
 import * as FileSystem from "expo-file-system/legacy";
 import { printOrShare } from "./pdf";
-import { getHepsiJetLabelWithProducts, getShippingLabel } from "./api";
+import { getHepsiJetLabel, getHepsiJetLabelWithProducts, getShippingLabel } from "./api";
 import {
   channelKeyOf,
   fileLooksLikePdf,
@@ -17,32 +17,8 @@ import {
   type OrderFull,
 } from "./api-siparis";
 
-export type LabelTemplate = "product" | "marketplace" | "shared" | "cargo";
-export type LabelOption = { template: LabelTemplate; label: string };
-
-// İlk seçenek varsayılandır.
-export function labelOptionsFor(provider: string): LabelOption[] {
-  switch (channelKeyOf(provider)) {
-    case "trendyol":
-      return [{ template: "product", label: "Ürünlü barkod etiketi" }];
-    case "hepsiburada":
-      return [
-        { template: "product", label: "Ürünlü etiket" },
-        { template: "marketplace", label: "Hepsiburada etiketi" },
-      ];
-    case "n11":
-      return [{ template: "product", label: "N11 sipariş etiketi" }];
-    case "idefix":
-      return [
-        { template: "shared", label: "HepsiJet ortak etiketi" },
-        { template: "product", label: "Idefix ürünlü etiketi" },
-      ];
-    case "pazarama":
-      return [{ template: "product", label: "Pazarama sipariş etiketi" }];
-    default:
-      return [{ template: "cargo", label: "Kargo etiketi" }];
-  }
-}
+export { labelOptionsFor, type LabelOption, type LabelTemplate } from "./label-options";
+import { labelOptionsFor, type LabelTemplate } from "./label-options";
 
 // Web getDisplayCodes: önce siparişe açılmış barkodlar, yoksa pazaryerinin kargo kodu.
 export function orderDisplayCodes(order: Partial<OrderFull> | null | undefined, provider: string): string[] {
@@ -75,6 +51,28 @@ export function orderHasPrintableLabel(order: Partial<OrderFull> | null | undefi
 }
 
 export type LabelFile = { path: string; notice?: string };
+
+// E2 (web handlePrintOriginalPDF): kargo firmasının kendi PDF etiketi; barkod siparişe açılmış gönderiden okunur.
+async function originalLabel(token: string, orderId: string): Promise<string> {
+  const info = await getShippingLabel(token, orderId);
+  const barcode = String(info?.barcode || info?.cargo_barcodes?.[0]?.barcode || "").trim();
+  if (!barcode) {
+    // Yurtiçi gibi barkodsuz gönderide orijinal HepsiJet etiketi yoktur; ürünlü kargo etiketine düşülür.
+    if (String(info?.cargo_provider || "").trim().toLowerCase() === "yurtici") return cargoLabel(token, orderId);
+    throw new Error("Bu sipariş için henüz kargo gönderisi oluşturulmamış. Önce gönderi oluşturun.");
+  }
+  const r: any = await getHepsiJetLabel(token, encodeURIComponent(barcode));
+  const url = String(r?.file_url || "");
+  if (url && /^https:\/\//i.test(url)) {
+    const path = `${FileSystem.cacheDirectory}hj-${orderId}.pdf`;
+    const dl = await FileSystem.downloadAsync(url, path);
+    if (dl.status >= 200 && dl.status < 300 && (await fileLooksLikePdf(path))) return path;
+    throw new Error(`HepsiJet etiketi indirilemedi (${dl.status}).`);
+  }
+  const data = r?.data || r?.data_base64 || "";
+  if (r?.success !== false && data) return writePdfBase64(data, `hj-${orderId}`);
+  throw new Error(r?.message || `Etiket alınamadı: ${barcode}`);
+}
 
 async function cargoLabel(token: string, orderId: string): Promise<string> {
   // Etiket, sipariş için oluşturulmuş kargo gönderisinden gelir.
@@ -140,6 +138,7 @@ export async function fetchOrderLabelFile(
   const template = opts.template || labelOptionsFor(provider || String(opts.order?.channel || ""))[0].template;
   const order = opts.order || null;
 
+  if (template === "original") return { path: await originalLabel(token, orderId) };
   if (template === "cargo") return { path: await cargoLabel(token, orderId) };
 
   if (key === "hepsiburada" && template === "marketplace") return hepsiburadaLabel(token, order || {}, orderId);

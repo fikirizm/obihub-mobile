@@ -249,6 +249,16 @@ http
       return send(res, 200, state.autoprint === "0" ? { success: false, message: "Auto print kapalı veya kullanıcı yetkili değil." } : { success: true, job_id: "j1", status: "pending" });
     if (req.method === "POST" && /\/sync-orders$/.test(path)) return send(res, 200, { success: true, message: "Senkronizasyon tamamlandı", count: 0, total_fetched: 0 });
     if (req.method === "POST" && path === "/orders/resync-dates") return send(res, 200, { success: true, updated: 0, total: 0 });
+    // E2: etiketler (orijinal HepsiJet PDF / ürünlü etiket). Küçük geçerli PDF base64 döner.
+    const PDF64 = Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF").toString("base64");
+    let lm2;
+    if ((lm2 = path.match(/^\/orders\/([^/]+)\/shipping-label$/))) {
+      const o = orders.find((x) => x.id === lm2[1]);
+      const bcs = (o && o.cargo_barcodes) || [];
+      return send(res, 200, { barcode: bcs.length ? bcs[bcs.length - 1].barcode : null, cargo_barcodes: bcs, cargo_provider: bcs.length ? "hepsijet" : null });
+    }
+    if ((lm2 = path.match(/^\/hepsijet\/label\/([^/]+)$/))) { console.log("LABEL original " + lm2[1] + " format=" + url.searchParams.get("format")); return send(res, 200, { success: true, data: PDF64, format: "PDF" }); }
+    if ((lm2 = path.match(/^\/hepsijet\/label-with-products\/([^/]+)$/))) { console.log("LABEL products " + lm2[1] + " barcode=" + url.searchParams.get("barcode")); return send(res, 200, { success: true, data: PDF64, format: "PDF" }); }
     if (path.startsWith("/orders/")) return send(res, 200, orders.find((o) => path.endsWith("/" + o.id)) || orders[0]);
     if (path === "/dashboard/stats")
       return send(res, 200, {

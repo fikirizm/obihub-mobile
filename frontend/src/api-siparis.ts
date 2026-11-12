@@ -21,20 +21,8 @@ export type OrderFull = Order & {
   trendyol_invoice_shared?: boolean;
 };
 
-export type ChannelKey = "trendyol" | "hepsiburada" | "n11" | "idefix" | "pazarama" | "amazon" | "woocommerce" | "other";
-
-// Web'deki kanal anahtarı (sağlayıcı adı küçük harfle) ile aynı sınıflandırma.
-export function channelKeyOf(raw: unknown): ChannelKey {
-  const v = String(raw || "").trim().toLowerCase();
-  if (v.includes("trendyol")) return "trendyol";
-  if (v.includes("hepsiburada")) return "hepsiburada";
-  if (v.includes("n11")) return "n11";
-  if (v.includes("idefix")) return "idefix";
-  if (v.includes("pazarama")) return "pazarama";
-  if (v.includes("amazon")) return "amazon";
-  if (v.includes("woo")) return "woocommerce";
-  return "other";
-}
+export { channelKeyOf, type ChannelKey } from "./label-options";
+import { channelKeyOf, type ChannelKey } from "./label-options";
 
 // Pazaryerinin kendi kargosu/etiketi olan kanallar (web CargoLabelSidebar ile aynı küme).
 export const MARKETPLACE_LABEL_CHANNELS: ChannelKey[] = ["trendyol", "hepsiburada", "n11", "idefix", "pazarama"];
