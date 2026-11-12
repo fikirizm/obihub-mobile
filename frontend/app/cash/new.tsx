@@ -71,7 +71,7 @@ export default function NewCashAccountScreen() {
   const settlement = settlementText.trim() === "" ? 0 : parseAmount(settlementText, false);
   const errors = {
     name: tried && !name.trim() ? "Hesap adı zorunludur." : undefined,
-    opening: tried && opening === null ? "Geçerli bir tutar girin (ör. 1.250,50)." : undefined,
+    opening: tried && opening === null ? "Geçerli bir tutar girin: en çok 2 ondalık, ör. 1.234,56." : undefined,
     settlement: tried && (settlement === null || settlement > 365) ? "Valör 0 ile 365 gün arasında olmalıdır." : undefined,
   };
 

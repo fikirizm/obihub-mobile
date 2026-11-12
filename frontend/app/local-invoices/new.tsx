@@ -373,7 +373,7 @@ export default function NewLocalInvoiceScreen() {
                     placeholder="0,00"
                     keyboardType="decimal-pad"
                     suffix="TRY"
-                    error={tried && price === null ? "Geçerli bir fiyat girin" : undefined}
+                    error={tried && price === null ? "Geçerli bir fiyat girin: en çok 2 ondalık, ör. 1.234,56" : undefined}
                   />
                 </View>
                 <View>

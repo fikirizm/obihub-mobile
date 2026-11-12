@@ -443,7 +443,7 @@ export default function ManualExpenseScreen() {
               </Text>
             </View>
           ) : null}
-          {tried && built.problems.includes("lines") ? <Text style={[type.caption, styles.pad, { color: colors.error }]}>Her satırda açıklama, miktar ve birim fiyat olmalı.</Text> : null}
+          {tried && built.problems.includes("lines") ? <Text style={[type.caption, styles.pad, { color: colors.error }]}>Her satırda açıklama, miktar ve birim fiyat olmalı; fiyat ve iskonto en çok 2 ondalık, ör. 1.234,56.</Text> : null}
           {tried && built.problems.includes("product") ? <Text style={[type.caption, styles.pad, { color: colors.error }]}>Ürün satırı için katalogdan bir ürün seçin.</Text> : null}
           {built.problems.includes("productQuantity") ? (
             <Text style={[type.caption, styles.pad, { color: colors.error }]}>Stoğa girecek satırın miktarı tam sayı olmalı.</Text>

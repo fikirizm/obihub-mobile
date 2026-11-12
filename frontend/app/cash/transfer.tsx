@@ -71,7 +71,7 @@ export default function TransferScreen() {
   }, [targets, toId]);
 
   const amount = parseAmount(amountText, true);
-  const amountError = tried && (!amount || amount <= 0) ? "Geçerli bir tutar girin (ör. 1.250,50)." : undefined;
+  const amountError = tried && (!amount || amount <= 0) ? "Geçerli bir tutar girin: en çok 2 ondalık, ör. 1.234,56." : undefined;
 
   const submit = async () => {
     setTried(true);

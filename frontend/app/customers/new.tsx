@@ -73,7 +73,7 @@ export default function NewPartyScreen() {
   const errors = {
     name: tried && !name.trim() ? "Cari adı zorunludur." : undefined,
     email: tried && !emailValid ? "Geçerli bir e-posta adresi girin." : undefined,
-    opening: tried && opening === null ? "Geçerli bir tutar girin (ör. 1.250,50)." : undefined,
+    opening: tried && opening === null ? "Geçerli bir tutar girin: en çok 2 ondalık, ör. 1.234,56." : undefined,
   };
 
   const submit = async () => {

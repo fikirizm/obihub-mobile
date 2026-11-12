@@ -150,7 +150,7 @@ export default function PayablePayScreen() {
   const amountErr = !tried
     ? undefined
     : minor === null || minor <= 0
-      ? "Geçerli bir tutar girin (ör. 1.250,50)."
+      ? "Geçerli bir tutar girin: en çok 2 ondalık, ör. 1.234,56."
       : remainingMinor !== null && minor > remainingMinor
         ? `Tutar kalan borçtan büyük olamaz (kalan ${formatMoney(info!.remaining, currency)}).`
         : undefined;

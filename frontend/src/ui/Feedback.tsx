@@ -407,6 +407,11 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
                   )}
                 </View>
               ) : null}
+              {numberText.trim() && parsedNumber === null ? (
+                <Text testID="number-error" accessibilityRole="alert" style={[type.caption, { color: colors.error, textAlign: "center" }]}>
+                  {numberState.decimal ? "Geçerli bir tutar girin: en çok 2 ondalık, ör. 1.234,56." : "Tam sayı girin, ör. 12."}
+                </Text>
+              ) : null}
               {/* Düğmeler yan yana: küçük ekranlarda da sayfa sığar. */}
               <View style={styles.numberActions}>
                 <Button testID="number-cancel" label="Vazgeç" variant="secondary" onPress={() => settleNumber(null)} style={{ flex: 1 }} />
