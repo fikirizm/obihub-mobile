@@ -1,4 +1,6 @@
 import { printOrShare } from "../../src/pdf";
+import { createHepsiJetManualShipmentsBulk, getHjCities, getHjDistricts, getHjTowns, type LocOption } from "../../src/api-hepsijet";
+import { OptionPicker } from "../../src/components/OptionPicker";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -70,6 +72,50 @@ export default function HepsiJetScreen() {
   });
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [parcels, setParcels] = useState("1");
+  // E1: aynı alıcıya birden çok gönderi (web create_count → /shipments/bulk).
+  const [count, setCount] = useState("1");
+  // E1: il / ilçe / mahalle HepsiJet listelerinden seçilir; liste yüklenemezse serbest metne düşülür.
+  const [cities, setCities] = useState<LocOption[]>([]);
+  const [towns, setTowns] = useState<LocOption[]>([]);
+  const [districts, setDistricts] = useState<LocOption[]>([]);
+  const [locIds, setLocIds] = useState<{ city: LocOption | null; town: LocOption | null; district: LocOption | null }>({ city: null, town: null, district: null });
+  const [locLoading, setLocLoading] = useState<"" | "city" | "town" | "district">("");
+  const [locFailed, setLocFailed] = useState(false);
+  useEffect(() => {
+    if (!showNewCustomer || !token || cities.length || locFailed) return;
+    setLocLoading("city");
+    getHjCities(token)
+      .then((c) => (c.length ? setCities(c) : setLocFailed(true)))
+      .catch(() => setLocFailed(true))
+      .finally(() => setLocLoading(""));
+  }, [showNewCustomer, token, cities.length, locFailed]);
+  const pickCity = (o: LocOption) => {
+    setLocIds({ city: o, town: null, district: null });
+    setForm((f) => ({ ...f, city: o.label, town: "", district: "" }));
+    setTowns([]);
+    setDistricts([]);
+    if (!token) return;
+    setLocLoading("town");
+    getHjTowns(token, o.id)
+      .then(setTowns)
+      .catch(() => setLocFailed(true))
+      .finally(() => setLocLoading(""));
+  };
+  const pickTown = (o: LocOption) => {
+    setLocIds((l) => ({ ...l, town: o, district: null }));
+    setForm((f) => ({ ...f, town: o.label, district: "" }));
+    setDistricts([]);
+    if (!token) return;
+    setLocLoading("district");
+    getHjDistricts(token, o.id)
+      .then(setDistricts)
+      .catch(() => setLocFailed(true))
+      .finally(() => setLocLoading(""));
+  };
+  const pickDistrict = (o: LocOption) => {
+    setLocIds((l) => ({ ...l, district: o }));
+    setForm((f) => ({ ...f, district: o.label }));
+  };
   const [desi, setDesi] = useState("1");
 
   const load = useCallback(async (silent = false) => {
@@ -173,6 +219,9 @@ export default function HepsiJetScreen() {
       setCustomers((prev) => [created, ...prev]);
       setSelectedCustomerId(created.id);
       setForm({ full_name: "", phone: "", email: "", city: "", town: "", district: "", address_line: "" });
+      setLocIds({ city: null, town: null, district: null });
+      setTowns([]);
+      setDistricts([]);
       setShowNewCustomer(false);
       toast("Müşteri kaydedildi", "success");
     } catch (e: any) {
@@ -190,13 +239,27 @@ export default function HepsiJetScreen() {
       toast("Önce bir müşteri seçin.", "error");
       return;
     }
+    const n = Math.trunc(Number(count) || 1);
+    if (n < 1 || n > 50) {
+      toast("Adet 1 ile 50 arasında olmalıdır.", "error");
+      return;
+    }
     setBusy(true);
     try {
-      const sh = await createHepsiJetManualShipment(token, {
+      const payload = {
         customer_id: selectedCustomerId,
         total_parcels: Number(parcels) || 1,
         desi: Number(String(desi).replace(",", ".")) || 1,
-      });
+      };
+      if (n > 1) {
+        // Web ile aynı: create_count > 1 → toplu uç; kısmi başarısızlık açıkça söylenir.
+        const r = await createHepsiJetManualShipmentsBulk(token, payload, n);
+        if (r.created.length) setShipments((prev) => [...r.created, ...prev.filter((x) => !r.created.some((c) => c.id === x.id))]);
+        if (r.failed) toast(`${r.failed}/${r.total} etiket oluşturulamadı: ${r.firstError}`, "error");
+        else toast(`${r.created.length} etiket oluşturuldu.`, "success");
+        return;
+      }
+      const sh = await createHepsiJetManualShipment(token, payload);
       if (!sh?.id) throw new Error("Etiket oluşturma yanıtı eksik.");
       setShipments((prev) => [sh, ...prev]);
       toast(`Etiket oluşturuldu. Barkod: ${sh.barcode || sh.id}`, "success");
@@ -353,11 +416,24 @@ export default function HepsiJetScreen() {
                 <Field label="Telefon" value={form.phone} onChange={setField("phone")} required keyboardType="phone-pad" style={styles.fieldFlex} />
                 <Field label="E-posta" value={form.email} onChange={setField("email")} keyboardType="email-address" style={styles.fieldFlex} />
               </View>
-              <View style={styles.fieldRow}>
-                <Field label="İl" value={form.city} onChange={setField("city")} required style={styles.fieldFlex} />
-                <Field label="İlçe" value={form.town} onChange={setField("town")} required style={styles.fieldFlex} />
-                <Field label="Mahalle" value={form.district} onChange={setField("district")} required style={styles.fieldFlex} />
-              </View>
+              {locFailed ? (
+                <>
+                  <Text style={[type.caption, { color: colors.textTertiary }]}>HepsiJet konum listesi alınamadı; il, ilçe ve mahalleyi yazın.</Text>
+                  <View style={styles.fieldRow}>
+                    <Field label="İl" value={form.city} onChange={setField("city")} required style={styles.fieldFlex} />
+                    <Field label="İlçe" value={form.town} onChange={setField("town")} required style={styles.fieldFlex} />
+                    <Field label="Mahalle" value={form.district} onChange={setField("district")} required style={styles.fieldFlex} />
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={styles.fieldRow}>
+                    <OptionPicker testID="hj-city" label="İl" required value={locIds.city} options={cities} loading={locLoading === "city"} onSelect={pickCity} />
+                    <OptionPicker testID="hj-town" label="İlçe" required value={locIds.town} options={towns} loading={locLoading === "town"} disabled={!locIds.city} onSelect={pickTown} />
+                  </View>
+                  <OptionPicker testID="hj-district" label="Mahalle" required value={locIds.district} options={districts} loading={locLoading === "district"} disabled={!locIds.town} onSelect={pickDistrict} />
+                </>
+              )}
               <Field label="Açık adres" value={form.address_line} onChange={setField("address_line")} required multiline />
               <Button testID="hepsijet-customer-save" label="Müşteriyi kaydet" busy={busy} onPress={submitCustomer} style={{ marginTop: spacing.xxs }} />
             </Card>
@@ -478,6 +554,7 @@ export default function HepsiJetScreen() {
                 <View style={styles.fieldRow}>
                   <Field label="Paket" value={parcels} onChange={setParcels} keyboardType="number-pad" numeric style={styles.fieldFlex} />
                   <Field label="Desi" value={desi} onChange={setDesi} keyboardType="decimal-pad" numeric style={styles.fieldFlex} />
+                  <Field label="Adet" value={count} onChange={setCount} keyboardType="number-pad" numeric style={styles.fieldFlex} />
                 </View>
                 <Button testID="hepsijet-shipment-create" label="Etiket oluştur" busy={busy} onPress={submitShipment} style={{ marginTop: spacing.xxs }} />
               </Card>

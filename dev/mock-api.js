@@ -69,6 +69,8 @@ const expenseState = {
 // Dalga 3 / C1: gelen fatura içeri alma durumları.
 const importState = { in2: "applied" };
 const posSales = [];
+const hjCustomers = [{ id: "hc1", full_name: "Ayşe Demir", phone: "05551112233", city: "İstanbul", town: "Kadıköy", district: "Moda", address_line: "Moda Cad. 1" }];
+const hjShipments = [];
 const entries = [
   { id: "e1", account_id: "a1", entry_type: "income", amount: 1250, entry_date: "2026-11-10", description: "Nakit satış" },
   { id: "e2", account_id: "a1", entry_type: "expense", amount: 380.5, entry_date: "2026-11-09", description: "Kargo malzemesi" },
@@ -462,6 +464,22 @@ http
         { id: "j3", product_name: "-", sku: "", provider_label: "Hepsiburada", integration_name: "Hepsiburada", status: "failed", message: "-", timestamp: new Date().toISOString(), retryable: false },
       ], total: 3, page: 1, per_page: 25 });
     if (path === "/integration-jobs/retry") return send(res, 200, { success: true, attempted: 1, success_count: 1, failed_count: 0 });
+    // --- E1: HepsiJet manuel gönderi (alıcılar, gönderiler, il/ilçe/mahalle, toplu oluşturma)
+    if (path === "/hepsijet/cities") return send(res, 200, { data: [{ cityId: 34, cityName: "İstanbul" }, { cityId: 6, cityName: "Ankara" }, { cityId: 35, cityName: "İzmir" }] });
+    if (path.startsWith("/hepsijet/towns/")) return send(res, 200, { data: [{ townId: 1, townName: "Kadıköy" }, { townId: 2, townName: "Beşiktaş" }] });
+    if (path.startsWith("/hepsijet/districts/")) return send(res, 200, { data: [{ districtId: 11, districtName: "Moda" }, { districtId: 12, districtName: "Fenerbahçe" }] });
+    if (path === "/hepsijet/manual/customers" && req.method === "GET") return send(res, 200, { items: hjCustomers });
+    if (path === "/hepsijet/manual/customers" && req.method === "POST")
+      return (() => { let raw = ""; req.on("data", (c) => (raw += c)); req.on("end", () => { console.log("WRITE", path, raw); const c = { id: "hc" + (hjCustomers.length + 1), ...JSON.parse(raw || "{}") }; hjCustomers.unshift(c); send(res, 200, { success: true, customer: c }); }); })();
+    if (path === "/hepsijet/manual/shipments" && req.method === "GET") return send(res, 200, { items: hjShipments });
+    if ((path === "/hepsijet/manual/shipments" || path === "/hepsijet/manual/shipments/bulk") && req.method === "POST")
+      return (() => { let raw = ""; req.on("data", (c) => (raw += c)); req.on("end", () => {
+        console.log("WRITE", path, raw);
+        const b = JSON.parse(raw || "{}");
+        const mk = (p) => { const c = hjCustomers.find((x) => x.id === p.customer_id) || {}; const sh = { id: "hs" + Date.now() + Math.random().toString(36).slice(2, 5), barcode: "HJM" + Math.floor(Math.random() * 1e8), status: "new", customer_name: c.full_name, total_parcels: p.total_parcels, desi: p.desi, created_at: new Date().toISOString() }; hjShipments.unshift(sh); return sh; };
+        if (path.endsWith("/bulk")) return send(res, 200, { results: (b.shipments || []).map((p) => ({ success: true, shipment: mk(p) })) });
+        send(res, 200, { success: true, shipment: mk(b) });
+      }); })();
     if (path.startsWith("/hepsijet/create-shipment/")) return send(res, 200, { success: true, barcode: "HJ123456789", message: "Gönderi oluşturuldu" });
     if (path === "/push-token") return send(res, 200, { ok: true });
     // --- Finans, cari, kasa, faturalar
