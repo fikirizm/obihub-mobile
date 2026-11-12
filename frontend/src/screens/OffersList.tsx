@@ -5,6 +5,7 @@ import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../auth/AuthProvider";
 import { canManage } from "../auth/permissions";
 import { haptic } from "../haptics";
+import { SummaryHero } from "../ui/SummaryHero";
 import { useTheme } from "../theme/ThemeProvider";
 import { radius, spacing, type } from "../theme/tokens";
 import { getSalesOffers } from "../api";
@@ -20,7 +21,7 @@ import { useFocusLoad } from "../hooks/useFocusLoad";
 import { useDebounce } from "../hooks/useDebounce";
 import { Chip, ChipRow } from "../ui/Chip";
 import { IconTile } from "../ui/ListRow";
-import { RowCard, StatCard } from "../ui/RowCard";
+import { RowCard } from "../ui/RowCard";
 import { SearchField } from "../ui/SearchField";
 import type { SalesOffer } from "../types";
 
@@ -292,10 +293,14 @@ export function OffersList() {
       ) : null}
 
       <SafeAnimatedView entering={FadeInDown.duration(380)}>
-        <View style={styles.stats}>
-          <StatCard label={totals.label} value={formatMoney(totals.total, totals.currency)} />
-          <StatCard label="Adet" value={String(totals.count)} />
-        </View>
+        <SummaryHero
+          testID="offers-summary"
+          tone="violet"
+          label={totals.label}
+          value={formatMoney(totals.total, totals.currency)}
+          facts={[{ label: "Teklif", value: String(totals.count) }]}
+          style={styles.hero}
+        />
       </SafeAnimatedView>
 
       <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)}>
@@ -382,6 +387,7 @@ export function OffersList() {
 }
 
 const styles = StyleSheet.create({
+  hero: { marginHorizontal: spacing.lg, marginBottom: spacing.sm },
   wrap: { flex: 1 },
   notice: {
     flexDirection: "row",

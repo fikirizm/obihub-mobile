@@ -11,6 +11,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { AlertIcon, CheckIcon, ClockIcon, ReceiptIcon } from "../components/Icons";
 import { InvoiceCardSkeleton } from "../components/Skeleton";
 import { EmptyState } from "../components/EmptyState";
+import { SummaryHero } from "../ui/SummaryHero";
 import { NetworkErrorBanner } from "../components/NetworkErrorBanner";
 import { SafeAnimatedView } from "../components/SafeAnimatedView";
 import { saveCache, loadCache } from "../offlineCache";
@@ -18,7 +19,7 @@ import { useFocusLoad } from "../hooks/useFocusLoad";
 import { useDebounce } from "../hooks/useDebounce";
 import { Chip, ChipRow } from "../ui/Chip";
 import { IconTile } from "../ui/ListRow";
-import { RowCard, StatCard } from "../ui/RowCard";
+import { RowCard } from "../ui/RowCard";
 import { SearchField } from "../ui/SearchField";
 import type { Invoice } from "../types";
 
@@ -181,11 +182,18 @@ export function InvoicesList({ source = "parasut" }: { source?: "parasut" | "biz
       ) : null}
 
       <SafeAnimatedView entering={FadeInDown.duration(380)}>
-        <View style={styles.summaryRow}>
-          <StatCard label="Ay toplamı" value={formatTry(monthTotals.total)} />
-          <StatCard label="Adet" value={String(monthTotals.count)} />
-          <StatCard label="Resmileşen" value={String(monthTotals.officialized)} tone="success" />
-        </View>
+        <SummaryHero
+          testID="invoices-summary"
+          tone="emerald"
+          label="Ay toplamı"
+          value={formatTry(monthTotals.total)}
+          facts={[
+            { label: "Fatura", value: String(monthTotals.count) },
+            { label: "Resmileşen", value: String(monthTotals.officialized), tone: "good" },
+            { label: "Bekleyen", value: String(pendingCount), tone: pendingCount > 0 ? "warn" : undefined },
+          ]}
+          style={styles.hero}
+        />
         {monthTotals.count > 0 ? (
           <View
             style={styles.progressWrap}
@@ -295,6 +303,7 @@ export function InvoicesList({ source = "parasut" }: { source?: "parasut" | "biz
 }
 
 const styles = StyleSheet.create({
+  hero: { marginHorizontal: spacing.lg, marginBottom: spacing.sm },
   wrap: { flex: 1 },
   notice: {
     flexDirection: "row",
