@@ -14,6 +14,7 @@ import { newIdempotencyKey } from "../src/api";
 import { getUiCapabilities } from "../src/api-gider";
 import { cartTotals, cashPostingText, createPosSale, findByBarcode, getPosCardAccounts, posPayload, searchPosProducts, splitCents, toCents, type CartLine, type PaymentType, type PosProduct, type PosSale } from "../src/api-pos";
 import type { CashAccount } from "../src/types";
+import { nextPosKey, posErrorAction } from "../src/pos-money";
 import { markCatalogDirty } from "../src/catalogCache";
 import { useDebounce } from "../src/hooks/useDebounce";
 import { haptic } from "../src/haptics";
@@ -229,25 +230,21 @@ export default function PosScreen() {
       // Sunucu ilk kart satışında "POS (Kart)" hesabını açmış olabilir.
       if (usesCard && !cardAccounts.length) loadCardAccounts();
     } catch (e: any) {
-      const status = Number(e?.status || 0);
       const code = String(e?.code || "");
-      // P4 kesin retleri (POS_* kodları, ör. 409 POS_OPEN_ACCOUNT_PENDING): hiçbir şey yazılmadı.
-      const definite = status > 0 && status < 500 && code.startsWith("POS_");
       if (code === "POS_CARD_ACCOUNT_REQUIRED") loadCardAccounts();
-      if (!definite && (status === 0 || status >= 500 || status === 409)) {
-        // Satış kaydedilmiş olabilir (500: "kaydedildi ancak stok düşülemedi"; 409: stok işlemi başka istekte sürüyor
-        // ya da anahtar farklı sepetle kullanılmış). Sepet kilitlenir; aynı anahtarla aynı sepet yeniden gönderilir.
-        if (status === 409 && /farklı bir sepet/i.test(String(e?.message || ""))) {
-          keyRef.current = newIdempotencyKey("pos");
-          setUncertain(false);
-          setError("Bu ödeme farklı bir sepetle başlatılmış; yeni satış olarak yeniden deneyin.");
-        } else {
-          setUncertain(true);
-          setError(e?.message && status !== 0 ? e.message : "Sonuç alınamadı. Satış kaydedilmiş olabilir; aynı ödemeyi yeniden gönderin, ikinci kez işlenmez.");
-        }
+      // Kural ../src/pos-money (birim testli): belirsizde aynı anahtar + aynı sepet, kesin retten sonra yeni anahtar.
+      const action = posErrorAction(e);
+      keyRef.current = nextPosKey(keyRef.current, e, () => newIdempotencyKey("pos"));
+      if (action === "conflict") {
+        setUncertain(false);
+        setError("Bu ödeme farklı bir sepetle başlatılmış; yeni satış olarak yeniden deneyin.");
+      } else if (action === "retry-same") {
+        // Satış kaydedilmiş olabilir (500: "kaydedildi ancak stok düşülemedi"; 409: stok işlemi başka istekte sürüyor).
+        setUncertain(true);
+        const status = Number(e?.status || 0);
+        setError(e?.message && status !== 0 ? e.message : "Sonuç alınamadı. Satış kaydedilmiş olabilir; aynı ödemeyi yeniden gönderin, ikinci kez işlenmez.");
       } else {
-        // Kesin ret (400: tutar uyuşmuyor, ürün bulunamadı vb.): hiçbir şey yazılmadı, yeni denemeye yeni anahtar.
-        keyRef.current = newIdempotencyKey("pos");
+        // Kesin ret (POS_* kodları, 400/422 …): hiçbir şey yazılmadı.
         setError(e?.message || "Satış kaydedilemedi.");
       }
     } finally {

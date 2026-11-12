@@ -47,29 +47,8 @@ export function collectErrorText(e: any, uncertain: boolean): string {
   return "Tahsilat kaydedilemedi.";
 }
 
-// Pasif hesap (Aşama 4 P3): sunucu otomatik seçmez; açıkça verilirse 409 ACCOUNT_INACTIVE.
-export function isAccountInactive(a: CashAccount) {
-  return a.is_active === false || a.active === false || a.archived === true || a.is_deleted === true;
-}
-export const isPosAccount = (a: CashAccount) => String(a.account_type || "") === "pos";
-
-// Tahsilatın yazılacağı hesap seçenekleri: işlemin para birimindeki etkin hesaplar; varsayılan önce, POS (Kart) en sonda
-// (sunucu POS'u otomatik seçmez, açıkça seçilirse kabul eder).
-export function accountsForCurrency(accounts: CashAccount[], currency: string) {
-  const norm = (c?: string | null) => {
-    const v = String(c || "TRY").toUpperCase();
-    return v === "TRL" || v === "TL" ? "TRY" : v;
-  };
-  const cur = norm(currency);
-  const rank = (a: CashAccount) => (isPosAccount(a) ? 2 : a.is_default ? 0 : 1);
-  return accounts.filter((a) => norm(a.currency) === cur && !isAccountInactive(a)).sort((a, b) => rank(a) - rank(b));
-}
-
-// Hesap seçicideki etiket: POS hesabı "POS" ile, birden çok seçenekte varsayılan "(varsayılan)" ile işaretlenir.
-export function accountOptionLabel(a: CashAccount, many: boolean) {
-  if (isPosAccount(a)) return /pos/i.test(a.name) ? `${a.name} · kart` : `${a.name} (POS)`;
-  return a.is_default && many ? `${a.name} (varsayılan)` : a.name;
-}
+// Tahsilat hesap seçimi saf modülde (birim testli).
+export { accountOptionLabel, accountsForCurrency, isAccountInactive, isPosAccount } from "./account-pick";
 
 // ---------------------------------------------------------------------------
 // Yeni kasa/banka hesabı — POST /finance/accounts (backend/routers/finance.py:138)

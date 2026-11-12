@@ -6,6 +6,7 @@
 // Aşama 4 / P4: satışın ödemesi kasaya yazılır (nakit → varsayılan TL kasa, kart → "pos" türü TL hesap, karma → iki bacak).
 // "Açık hesap" sunucuda henüz kapalı (409 POS_OPEN_ACCOUNT_PENDING); mobilde gizli.
 import { getCashAccounts, request } from "./api";
+import { karmaPayments, posTotalsCents, splitCents, toCents } from "./pos-money";
 import type { CashAccount } from "./types";
 
 export type PosProduct = { id: string; name: string; sku: string; barcode: string; price: number; vatRate: number; stock: number; imageUrl: string };
@@ -53,20 +54,15 @@ export function cartTotals(lines: CartLine[], discountAmount: number) {
   const discount = Math.min(Math.max(0, discountAmount), subtotal);
   const ratio = subtotal > 0 ? 1 - discount / subtotal : 1;
   const vat = lines.reduce((s, l, i) => s + (lineTotals[i] * ratio * l.product.vatRate) / (100 + l.product.vatRate), 0);
-  return { subtotal: r2(subtotal), discount: r2(discount), vat: r2(vat), total: r2(subtotal - discount), itemCount: lines.reduce((s, l) => s + l.quantity, 0) };
+  // Ara toplam, indirim ve toplam sunucunun yöntemiyle kuruşta (float 1 kuruş sapabilir).
+  const c = posTotalsCents(lines.map((l) => ({ unit_price: l.product.price, quantity: l.quantity, discount_percent: 0 })), discountAmount);
+  return { subtotal: c.subtotalCents / 100, discount: c.discountCents / 100, vat: r2(vat), total: c.totalCents / 100, itemCount: lines.reduce((s, l) => s + l.quantity, 0) };
 }
 
 export type PaymentType = "nakit" | "kart" | "karma";
 
-// Kuruş (tamsayı). Sunucu toplamı kuruşa yarım-yukarı yuvarlar; karma bölmesi kuruşla yapılır (float toplamı değil).
-export const toCents = (n: number) => (Number.isFinite(n) ? Math.round(n * 100 + Math.sign(n) * Number.EPSILON * 100) : 0);
-const fromCents = (c: number) => (c / 100).toFixed(2);
-
-// Karma: kart = toplam − nakit (kuruşta), böylece bölme toplamı her zaman fiş tutarına eşittir.
-export function splitCents(totalCents: number, cashCents: number) {
-  const cash = Math.min(Math.max(cashCents, 0), totalCents);
-  return { cash, card: totalCents - cash };
-}
+// Kuruş hesapları ve karma bölmesi: ./pos-money (saf, birim testli).
+export { splitCents, toCents };
 
 export type PosPayOptions = { cashCents?: number; cardAccountId?: string };
 
@@ -95,9 +91,9 @@ export function posPayload(lines: CartLine[], discountAmount: number, payment: P
     total: t.total,
     paid_amount: paid,
     change_amount: r2(Math.max(0, paid - t.total)),
-    notes: split ? `Karma ödeme: Nakit ₺${fromCents(split.cash)}, Kart ₺${fromCents(split.card)}` : "",
+    notes: split ? `Karma ödeme: Nakit ₺${(split.cash / 100).toFixed(2)}, Kart ₺${(split.card / 100).toFixed(2)}` : "",
     session_number: 1,
-    ...(split ? { payments: [{ method: "nakit", amount: fromCents(split.cash) }, { method: "kart", amount: fromCents(split.card) }] } : {}),
+    ...(split ? { payments: karmaPayments(totalCents, split.cash) } : {}),
     ...(usesCard && opts.cardAccountId ? { card_account_id: opts.cardAccountId } : {}),
   };
 }
