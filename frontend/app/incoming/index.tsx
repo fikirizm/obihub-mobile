@@ -3,6 +3,9 @@ import { Platform, StyleSheet, Text, View } from "react-native";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { getIncomingInvoicePdf, getIncomingInvoices, resolveIncomingSource } from "../../src/api";
 import { getIncomingInbox, getUiCapabilities, InboxUnavailable } from "../../src/api-gider";
+import { getQuickImportCapability } from "../../src/api-iceri-al";
+import { canManage } from "../../src/auth/permissions";
+import { router, useFocusEffect } from "expo-router";
 import { usePagedList } from "../../src/hooks/usePagedList";
 import { openBase64Pdf } from "../../src/pdf";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -33,13 +36,23 @@ const IMPORT_STATUS: Record<string, { label: string; kind: StatusKind }> = {
 };
 
 export default function IncomingInvoicesScreen() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { colors } = useTheme();
   const { toast } = useFeedback();
   const [resolving, setResolving] = useState(true);
   const [connected, setConnected] = useState<IncomingSource[]>([]);
   const [source, setSource] = useState<IncomingSource | null>(null);
   const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
+  // Dalga 3 / C1: İçeri Al yeteneği (web quickImportEnabled = enabled && preview); açıksa satır İçeri Al ekranını açar.
+  const [importOn, setImportOn] = useState(false);
+  useEffect(() => {
+    if (!token || !source) return;
+    let live = true;
+    getQuickImportCapability(token, source).then((c) => live && setImportOn(Boolean(c) && canManage(user, "billing")));
+    return () => {
+      live = false;
+    };
+  }, [token, source, user]);
   // Web IncomingEInvoicesPage.js: ui-capabilities.inbox_read açıksa kalıcı gelen kutusu (/incoming-inbox) okunur;
   // uç bu sağlayıcı için 404 dönerse eski sağlayıcı listesine düşülür ve oturum boyunca gelen kutusu denenmez.
   const inboxOn = useRef(false);
@@ -72,13 +85,22 @@ export default function IncomingInvoicesScreen() {
     [token, source]
   );
   const list = usePagedList<IncomingInvoice>(token && source ? fetchPage : null);
+  // İçeri Al ekranından dönüldüğünde satır durumları (İçeri alındı / İşleniyor) sessizce tazelenir.
+  const focusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (focusedOnce.current) list.refreshLoaded();
+      focusedOnce.current = true;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+  );
   const hasPdf = source === "parasut" || source === "turkcell-efatura";
 
   const openPdf = async (inv: IncomingInvoice) => {
     if (!token || !source || pdfBusyId) return;
     setPdfBusyId(inv.id);
     try {
-      const data = await getIncomingInvoicePdf(token, source, inv.id);
+      const data = await getIncomingInvoicePdf(token, source, inv.pdf_id || inv.id);
       if (!data) throw new Error("Fatura görüntüsü alınamadı.");
       await openBase64Pdf(data, `gelen-fatura-${inv.invoice_no || inv.id}`);
     } catch (e: any) {
@@ -123,8 +145,8 @@ export default function IncomingInvoicesScreen() {
               <View style={[styles.note, { backgroundColor: colors.amberSoft }]}>
                 <InboxIcon size={16} color={colors.amber} />
                 <Text style={[type.caption, { color: colors.textSecondary, flex: 1 }]}>
-                  {hasPdf && Platform.OS !== "web" ? "Faturayı görüntülemek için satıra dokunun. " : ""}
-                  Faturayı gidere işleme (İçeri Al) web panelinden yapılır.
+                  {!importOn && hasPdf && Platform.OS !== "web" ? "Faturayı görüntülemek için satıra dokunun. " : ""}
+                  {importOn ? "Faturayı gidere işlemek (İçeri Al) ya da görüntülemek için satıra dokunun." : "Faturayı gidere işleme (İçeri Al) web panelinden yapılır."}
                 </Text>
               </View>
             }
@@ -154,7 +176,24 @@ export default function IncomingInvoicesScreen() {
                   meta={pdfBusyId === inv.id ? "Fatura açılıyor…" : inv.sender_tax_no ? `VKN ${inv.sender_tax_no}` : undefined}
                   amount={formatMoney(inv.gross_total, inv.currency)}
                   badge={<StatusBadge label={st.label} kind={st.kind} size="sm" />}
-                  onPress={hasPdf && Platform.OS !== "web" ? () => openPdf(inv) : undefined}
+                  onPress={
+                    importOn
+                      ? () =>
+                          router.push({
+                            pathname: "/incoming/[id]",
+                            params: {
+                              id: inv.id,
+                              provider: source as string,
+                              status: key,
+                              reimportable: inv.import_reimportable ? "1" : "0",
+                              title: [inv.sender_name, inv.invoice_no].filter(Boolean).join(" · "),
+                              pdf: inv.pdf_id || inv.id,
+                            },
+                          })
+                      : hasPdf && Platform.OS !== "web"
+                        ? () => openPdf(inv)
+                        : undefined
+                  }
                 />
               );
             }}

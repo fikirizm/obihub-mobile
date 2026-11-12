@@ -405,6 +405,10 @@ export type IncomingInvoice = {
   currency?: string;
   status?: string;
   import_status?: string;
+  // Geri alınmış faturayı yeniden içeri alma izni (yalnız sunucu söyler).
+  import_reimportable?: boolean;
+  // PDF için sağlayıcı kimliği (gelen kutusunda native_id; eski listede id ile aynı).
+  pdf_id?: string;
 };
 
 export type SupportTicket = {

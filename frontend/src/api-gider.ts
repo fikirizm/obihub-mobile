@@ -289,6 +289,9 @@ export async function getIncomingInbox(token: string, provider: IncomingSource, 
         currency: x?.currency || undefined,
         status: x?.provider_status || "",
         import_status: x?.import_status,
+        import_reimportable: x?.import_reimportable === true,
+        // Web incomingSync.legacyIdOf: PDF uçları sağlayıcının kendi kimliğini ister (yalnız satır bu sağlayıcıdansa).
+        pdf_id: x?.native_id && (!x?.source || x.source === provider) ? String(x.native_id) : String(x?.document_key || ""),
       } as IncomingInvoice;
     })
     .filter((x: IncomingInvoice) => x.id);

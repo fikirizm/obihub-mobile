@@ -64,6 +64,8 @@ const expenseState = {
   "obihub:e1": { supplier: "Kargo Lojistik A.Ş.", doc: "ABC2026000123", kind: "import", total: "1840.60", remaining: 1840.6, levies: "0", status: "pending", payments: [], seenKeys: [] },
   "obihub:e2": { supplier: "Ofis Kırtasiye", doc: "OK-77", kind: "manual", total: "1250.50", remaining: 1250.5, levies: "50.00", status: "overdue", payments: [{ id: "pp-old", date: "2026-10-25", amount: "0.00", currency: "TRY", account_name: "Nakit Kasa", status: "completed" }].slice(1), seenKeys: [] },
 };
+// Dalga 3 / C1: gelen fatura içeri alma durumları.
+const importState = { in2: "applied" };
 const entries = [
   { id: "e1", account_id: "a1", entry_type: "income", amount: 1250, entry_date: "2026-11-10", description: "Nakit satış" },
   { id: "e2", account_id: "a1", entry_type: "expense", amount: 380.5, entry_date: "2026-11-09", description: "Kargo malzemesi" },
@@ -603,9 +605,65 @@ http
       return send(res, 200, { invoices: [{ id: "x1", invoice_no: "GF-88", supplier_name: "Tedarikçi A.Ş.", issue_date: "2026-11-03", due_date: "2026-11-18", gross_total: 9400, currency: "TRL", status: "unpaid" }], total: 1, page: 1, per_page: 30 });
     if (path === "/turkcell-efatura/status") return send(res, 200, { connected: false });
     if (path === "/settings/incoming-einvoice-source") return send(res, 200, { source: null });
+    // --- Dalga 3 / C1: İçeri Al (quick import). in1 önizlenebilir; in2 zaten alınmış (durum-önce kapısı).
+    if (path === "/incoming-invoices/quick-import/capability")
+      return ["parasut", "turkcell-efatura"].includes(url.searchParams.get("provider")) ? send(res, 200, { enabled: true, preview: true, confirm: true, wizard: true, workspace: true, provider: url.searchParams.get("provider") }) : send(res, 404, { detail: "Not Found" });
+    if (path === "/incoming-invoices/quick-import/expense-categories")
+      return send(res, 200, { items: [{ id: "sys", name: "Gelen fatura gideri", system: true }, { id: "c1", name: "Kargo giderleri", system: false }, { id: "c2", name: "Ambalaj", system: false }] });
+    let qm; // c1
+    if ((qm = path.match(/^\/incoming-invoices\/([^/]+)\/quick-import\/status$/))) {
+      const st = importState[qm[1]] || "none";
+      return send(res, 200, { status: st, reason: null, detail: null, result: st === "applied" ? { invoice_id: "x" } : null });
+    }
+    if (req.method === "POST" && (qm = path.match(/^\/incoming-invoices\/([^/]+)\/quick-import\/(preview|confirm)$/))) {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        const b = JSON.parse(raw || "{}");
+        const lc = b.line_choices || [];
+        const c0 = lc[0] || {};
+        const stock = b.mode === "expense_and_stock";
+        const supplierChosen = Boolean(b.supplier_id) || b.create_supplier === true;
+        const line0Kind = c0.kind || null;
+        const lines = [
+          { index: 0, description: "Koli 40x40 çift oluklu", quantity: "100", unit: { code: "C62", label: "adet" }, unit_price: "10.00", net_computed: "1000.00", line_extension_provider: "1000.00", vat_rate: "20",
+            kind: line0Kind, product: { state: c0.product_id ? "matched" : "ambiguous", selected_id: c0.product_id || null, remember_selected: c0.new_product_draft === true, candidates: [{ id: "p4", label: "Deneme Ürün 4", sku: "SKU-4" }, { id: "p5", label: "Deneme Ürün 5", sku: "SKU-5" }] },
+            stock: { eligible: line0Kind === "product" && Boolean(c0.product_id), selected: stock && c0.stock === true }, issues: line0Kind ? (line0Kind === "product" && !c0.product_id ? ["PRODUCT_MATCH_AMBIGUOUS"] : []) : ["LINE_CLASS_UNRESOLVED"] },
+          { index: 1, description: "Nakliye bedeli", quantity: "1", unit: { code: "C62", label: "adet" }, unit_price: "200.00", net_computed: "200.00", line_extension_provider: "200.00", vat_rate: "20", kind: "service", product: { state: "not_applicable", candidates: [] }, stock: { eligible: false }, issues: [] },
+        ];
+        const whNeeded = stock && lines[0].stock.eligible;
+        const whIssues = whNeeded && !b.warehouse_id ? [{ key: "WAREHOUSE_REQUIRED", line_index: 0 }] : [];
+        const supIssues = supplierChosen ? [] : ["SUPPLIER_NOT_MATCHED"];
+        const anyIssue = supIssues.length || lines.some((l) => l.issues.length) || whIssues.length;
+        const decision = {
+          status: anyIssue ? "REVIEW_REQUIRED" : "FAST_READY", business_ready: true, confirmation_available: true, can_confirm: !anyIssue,
+          preview_fingerprint: "fp1", choices_digest: "cd-" + JSON.stringify(lc).length, decision_digest: "dd1",
+          document_summary: { document_number: "GIB2026000077", issue_date: "2026-11-10", currency: "TRY", taxable: "1200.00", vat_total: "240.00", payable: "1440.00" },
+          blocker_items: [], review_items: whIssues,
+          document_view: {
+            version: "dv1",
+            document: { number: "GIB2026000077", issue_date: "2026-11-10", currency: "TRY", legal_payable: "1440.00", computed_payable: "1440.00", document_issues: [] },
+            supplier: { name: "Ambalaj Ltd.", tax_number: "9876543210", state: b.supplier_id ? "matched" : b.create_supplier ? "create" : "ambiguous", selected_id: b.supplier_id || null, create_selected: b.create_supplier === true, candidates: [{ id: "s1", label: "Ambalaj Limited Şirketi" }, { id: "s2", label: "Ambalaj Ltd. (eski kayıt)" }], issues: supIssues },
+            lines,
+            decisions: {
+              stock_action: { available: true, selected: stock, reason: null },
+              warehouse: { required: whNeeded, selection_available: true, options_complete: true, selected_id: b.warehouse_id || null, options: [{ id: "w1", name: "Ana depo" }, { id: "w2", name: "Mağaza" }] },
+              supplier: { match_existing: { available: true, candidate_count: 2 }, create_new: { available: true } },
+              payment: { state: "payable" },
+            },
+          },
+        };
+        if (qm[2] === "preview") return send(res, 200, decision);
+        console.log("WRITE", path, raw);
+        if (anyIssue) return send(res, 409, { code: "CHOICES_CHANGED", detail: "Seçimler değişti; önizlemeyi yenileyin." });
+        importState[qm[1]] = "applied";
+        return send(res, 200, { status: "APPLIED", result: { invoice_id: "ex1" } });
+      });
+      return;
+    }
     if (path === "/parasut/incoming-e-invoices")
       return send(res, 200, { invoices: [
-        { id: "in1", invoice_no: "ABC2026000123", sender_name: "Kargo Lojistik A.Ş.", issue_date: "2026-11-09", gross_total: 1840.6, currency: "TRL", import_status: "none" },
+        { id: "in1", invoice_no: "ABC2026000123", sender_name: "Kargo Lojistik A.Ş.", issue_date: "2026-11-09", gross_total: 1840.6, currency: "TRL", import_status: importState.in1 || "none" },
         { id: "in2", invoice_no: "XYZ2026000456", sender_name: "Ambalaj Ltd.", issue_date: "2026-11-07", gross_total: 3275, currency: "TRL", import_status: "applied" },
       ], total: 2, page: 1, per_page: 30 });
     if (path === "/support/tickets" && req.method === "GET") return send(res, 200, { items: tickets, total: tickets.length, page: 1, per_page: 30 });

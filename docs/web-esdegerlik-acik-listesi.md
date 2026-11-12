@@ -63,6 +63,8 @@ Sıralama günlük kullanım sıklığına ve iş değerine göre yapıldı. Her
 
 ## 3. Ürün, stok, fiyat
 
+> **Dalga 2 tamamlandı (12 Kas 2026):** B1 ürün eşleştirme (mağaza + Paraşüt, `products/match`), B2 stok özeti ve tüm hareketler (Ürünler ekranında).
+
 | # | Web'de | Mobil | Önerilen mobil karşılığı | Sunucu | Büyüklük |
 |---|---|---|---|---|---|
 | B1 | Kanal eşleştirme: `GET /integrations/{id}/source-products`, `POST /products/{id}/link-channel` (`integration_id`, Trendyol `barcode`) / `unlink-channel`. Muhasebe eşleştirme: `GET /parasut/products`, `POST /products/{id}/link-parasut` / `unlink-parasut`. | Yok. Not metni "Ürün eşleştirme web panelinden yapılır" diyor. | Ürün detayında eşleşmemiş kanal satırına dokununca alt sayfa açılır: kanal ürünlerinde arama → seç → bağla. Eşleşmiş satırda "Eşleşmeyi kaldır". Barkod uyuşmazlığı varsa uyarı. | Mevcut. Mağaza ürün listesinde arama parametresi doğrulanmalı. | L |
@@ -74,6 +76,8 @@ Sıralama günlük kullanım sıklığına ve iş değerine göre yapıldı. Her
 | — | Ana stok Ekle/Çıkart/Eşitle, ana fiyat, kanal stok/fiyat (bekleyen değer, push rozeti), hareketler, muhasebe farkları, Elde/Ayrılmış/Satılabilir, barkod okutma, iş kuyruğu + yeniden dene | **Var** | — | — | — |
 
 ## 4. Finans ve muhasebe
+
+> **Dalga 3 tamamlandı (12 Kas 2026):** C1 gelen e-fatura İçeri Al (`incoming/[id]`, durum-önce kapısı, sonuç ve durum sorgusu, PDF), C2 gider detayı + borç ödeme (`expenses/[id]`, `expenses/pay`), C3 elle gider/alış (`expenses/new`; tevkifat ve KDV dışı vergi girişi web'de). Paraşüt kalemsiz faturada tek gider satırı girişi (manual_expense_line) mobilde yok; ret metni gösterilir.
 
 | # | Web'de | Mobil | Önerilen mobil karşılığı | Sunucu | Büyüklük |
 |---|---|---|---|---|---|
