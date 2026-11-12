@@ -112,6 +112,7 @@ const recon = [
   { id: "r2", product_id: "p5", product_name: "Deneme Ürün 5", sku: "SKU-5", program: "bizimhesap", remote_qty: 20, pending_out: 0, expected: 20, observed_stock: 28, diff: -8, status: "open" },
 ];
 const colKeys = new Map();
+const offers = [];
 // P11: c1'in tahsilat satırları (cari tahsilatı + li1'in kendi tahsilatı); silinenler ters kayıtla.
 function colLedgerRows(party) {
   const today = new Date().toISOString().slice(0, 10);
@@ -147,7 +148,7 @@ http
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -279,7 +280,7 @@ http
         id: `inv${i}`, invoice_no: `OBI2026${String(100 + i)}`, issue_date: new Date(Date.now() - i * 86400000).toISOString().slice(0, 10),
         gross_total: 1200 + i * 310.5, contact_name: NAMES[i % NAMES.length], can_officialize: i % 2 === 0,
       })), total: 6, page: 1, per_page: 600 });
-    if (path === "/parasut/sales-offers") return send(res, 200, { offers: [], total: 0 });
+    if (path === "/parasut/sales-offers" && req.method !== "POST") return send(res, 200, { offers, total: offers.length });
     if (path === "/reports/overview") {
       // Gerçek sunucu gibi: since_date'ten bugüne, sipariş tarihine göre; 30 güne kadar günlük kova.
       let raw = "";
@@ -645,6 +646,31 @@ http
     }
     if ((cm = path.match(/^\/customers\/([^/]+)\/orders$/)))
       return send(res, 200, { items: orders.slice(0, 3).map((o, i) => ({ id: o.id, channel_order_id: o.channel_order_id, channel: o.channel, status: o.status, total_amount: o.total_amount, currency: "TRY", order_date: o.order_date, ...(i === 0 ? { invoice_number: "OBI2026101" } : i === 1 ? { parasut_invoice_id: 98765 } : {}) })), total: 3 });
+    // C8: teklif oluşturma (Paraşüt kişi/ürün arama + POST /parasut/sales-offers; /__mode?offerFail=1 → teklif oluşur ama 502)
+    if (path === "/parasut/contacts") {
+      const q = (url.searchParams.get("search") || "").toLocaleLowerCase("tr-TR");
+      const all = [{ id: "k1", name: "Acme Ticaret A.Ş.", email: "satin@acme.test", city: "İstanbul" }, { id: "k2", name: "Elif Kaya", email: "elif@example.test", city: "Ankara" }, { id: "k3", name: "Acar Lojistik", city: "İzmir" }];
+      return send(res, 200, { contacts: all.filter((c) => !q || c.name.toLocaleLowerCase("tr-TR").includes(q)), total: 3 });
+    }
+    if (path === "/parasut/products") return send(res, 200, { items: [{ id: "pp1", name: "Danışmanlık (saat)", list_price: "1250.50", vat_rate: "20", currency: "TRL" }, { id: "pp2", name: "Kurulum hizmeti", sales_price: 800, vat_rate: "18" }, { id: "pp3", name: "Kitap", list_price: "95", vat_rate: "0" }], total: 3 });
+    if (path === "/parasut/sales-offers" && req.method === "POST")
+      return readBody((b) => {
+        console.log("OFFER-CREATE " + JSON.stringify(b));
+        if (!b.contact_id) return send(res, 422, { detail: "contact_id zorunlu" });
+        const r2 = (n) => Math.round(n * 100) / 100;
+        let sub = 0, disc = 0, vat = 0;
+        const line_items = b.items.map((it, i) => { const g = it.quantity * it.unit_price; const d = it.discount_type === "amount" ? it.discount_value : g * it.discount_value / 100; sub += g; disc += d; vat += (g - d) * it.vat_rate / 100; return { id: "ol" + i, description: it.description, quantity: it.quantity, unit_price: it.unit_price, vat_rate: it.vat_rate, discount_type: it.discount_type, discount_value: it.discount_value }; });
+        const c = { k1: "Acme Ticaret A.Ş.", k2: "Elif Kaya", k3: "Acar Lojistik" }[b.contact_id] || "Müşteri";
+        const offer = { id: "of" + Date.now(), description: b.description, issue_date: b.issue_date, due_date: b.due_date, currency: b.currency, status: "waiting", contact_id: b.contact_id, contact_name: c, net_total: r2(sub - disc + vat).toFixed(2), gross_total: r2(sub - disc + vat).toFixed(2), subtotal: r2(sub).toFixed(2), total_vat: r2(vat).toFixed(2), total_discount: r2(disc).toFixed(2), computed_total_discount: r2(disc).toFixed(2), line_items };
+        offers.unshift(offer);
+        if (state.offerFail === "1") { state.offerFail = "0"; return send(res, 502, { detail: "Bad gateway" }); }
+        send(res, 200, { id: offer.id, description: offer.description, status: offer.status, gross_total: offer.gross_total, currency: offer.currency, parasut_url: null });
+      });
+    let om;
+    if ((om = path.match(/^\/parasut\/sales-offers\/([^/]+)$/)) && req.method === "GET") {
+      const o = offers.find((x) => x.id === om[1]);
+      return o ? send(res, 200, o) : send(res, 404, { detail: "Teklif bulunamadı" });
+    }
     // Aşama 4 / P8: dağıtım durumu ve avans dağıtımı
     let am;
     const openFor = (cid) => localInvoices.filter((i) => i.customer_id === cid && i.currency === "TRY" && i.remaining_amount > 0.004).sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)));
