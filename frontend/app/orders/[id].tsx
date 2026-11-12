@@ -195,6 +195,10 @@ export default function OrderDetail() {
       if (r?.success) {
         toast(r.barcode ? `Gönderi oluşturuldu: ${r.barcode}` : r.message || "Gönderi oluşturuldu", "success");
         await load(true);
+      } else if (r?.in_progress) {
+        // Aynı sipariş için başka bir istek (web ya da ikinci dokunuş) gönderiyi zaten açıyor.
+        toast(r.message || "Bu sipariş için kargo oluşturma sürüyor.", "info");
+        await load(true);
       } else {
         toast(r?.message || "Gönderi oluşturulamadı.", "error");
       }

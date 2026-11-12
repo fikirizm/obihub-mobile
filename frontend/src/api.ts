@@ -179,7 +179,7 @@ export async function getShippingLabel(token: string, orderId: string) {
 
 export async function createHepsiJetShipment(token: string, orderId: string) {
   // Başarısızlıkta da HTTP 200 döner; `success` alanına bakılmalıdır. Sipariş için iç kimlik (order.id) gönderilir.
-  return request<{ success?: boolean; message?: string; barcode?: string }>(
+  return request<{ success?: boolean; in_progress?: boolean; message?: string; barcode?: string }>(
     `/hepsijet/create-shipment/${encodeURIComponent(orderId)}`,
     { method: "POST" },
     token

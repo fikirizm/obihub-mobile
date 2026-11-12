@@ -79,6 +79,8 @@ export function StockMovements({ token, productId, refreshKey }: { token: string
     if (t === "out" || t === "sale") return outgoing;
     if (t === "adjustment") return { fg: colors.amber, bg: colors.amberSoft, sign: "=", label: "Sayım" };
     if (t === "opening") return { ...incoming, label: "Açılış stoğu" };
+    if (t === "purchase_in") return { ...incoming, label: "Alış faturası" };
+    if (t === "purchase_reverse") return { ...outgoing, label: "Alış faturası ters kaydı" };
     if (t === "accounting_sync" || t === "reconcile") {
       const label = t === "reconcile" ? "Fark alındı" : "Muhasebe senkronu";
       if (dir === null) return { fg: colors.violet, bg: colors.violetSoft, sign: "±", label };
