@@ -79,13 +79,16 @@ const entries = [
   { id: "e2", account_id: "a1", entry_type: "expense", amount: 380.5, entry_date: "2026-11-09", description: "Kargo malzemesi" },
 ];
 const parties = [
-  { id: "c1", name: "Elif Kaya", phone: "0555 111 22 33", source: "registered", balance: 6200, payments: [] },
+  { id: "c1", name: "Elif Kaya", phone: "0555 111 22 33", source: "registered", balance: 4300, payments: [],
+    // P11: cari tahsilatı (faturaya dağıtılmış) — ekstrede düzenle / sil
+    collections: [{ id: "cp1", type: "customer", amount: "1500.00", currency: "TRY", date: "2026-11-05", method: "havale", note: "Kasım ödemesi", account_id: "a2", invoices: [{ invoice_id: "li1", invoice_number: "OBI2026101", amount: "1500.00" }], parasut: false }] },
   { id: "c2", name: "Can Öztürk", email: "can@example.test", source: "registered", balance: 12850.5, payments: [] },
   { id: "c3", name: "Tedarikçi A.Ş.", contact_role: "supplier", source: "registered", balance: -9400, payments: [] },
   { id: "e:ayse@example.test", name: "Ayşe Yılmaz", source: "orders", balance: 0, payments: [] },
 ];
 const localInvoices = [
-  { id: "li1", invoice_number: "OBI2026101", status: "gecikti", display_status: "gecikti", money_state: "overdue", customer_name: "Elif Kaya", issue_date: "2026-10-20", due_date: "2026-11-05", currency: "TRY", subtotal: 5166.67, discount_amount: 0, vat_amount: 1033.33, total: 6200, paid_amount: 0, remaining_amount: 6200, payments: [], parasut_invoice_id: "ps0", items: [{ name: "Deneme Ürün 3", quantity: 4, unit_price: 1291.67, vat_rate: 20, total: 6200 }] },
+  { id: "li1", invoice_number: "OBI2026101", status: "gecikti", display_status: "gecikti", money_state: "overdue", customer_id: "c1", customer_name: "Elif Kaya", issue_date: "2026-10-20", due_date: "2026-11-05", currency: "TRY", subtotal: 5166.67, discount_amount: 0, vat_amount: 1033.33, total: 6200, paid_amount: 1900, remaining_amount: 4300,
+    payments: [{ id: "ip1", amount: 400, date: "2026-11-06", method: "nakit", notes: "Elden", account_id: "a1", parasut_synced: true }, { id: "cp1", amount: 1500, date: "2026-11-05", method: "havale", source: "customer_payment" }], voided_payments: [], parasut_invoice_id: "ps0", items: [{ name: "Deneme Ürün 3", quantity: 4, unit_price: 1291.67, vat_rate: 20, total: 6200 }] },
   { id: "li2", invoice_number: "", status: "taslak", display_status: "taslak", money_state: "not_issued", customer_name: "Can Öztürk", issue_date: "2026-11-10", due_date: "2026-11-22", currency: "TRY", subtotal: 10708.75, discount_amount: 0, vat_amount: 2141.75, total: 12850.5, paid_amount: 0, remaining_amount: 12850.5, payments: [], items: [{ name: "Deneme Ürün 9", quantity: 10, unit_price: 1070.88, vat_rate: 20, total: 12850.5 }], notes: "Teslimat 15 Kasım." },
   { id: "li3", invoice_number: "OBI2026102", status: "gecikti", display_status: "gonderildi", money_state: "pending", customer_name: "Acme GmbH", issue_date: "2026-11-08", due_date: "2026-12-08", currency: "USD", subtotal: 1000, discount_amount: 0, vat_amount: 200, total: 1200, paid_amount: 0, remaining_amount: 1200, payments: [], items: [{ name: "İhracat", quantity: 1, unit_price: 1000, vat_rate: 20, total: 1200 }] },
 ];
@@ -102,6 +105,26 @@ const recon = [
   { id: "r1", product_id: "p4", product_name: "Deneme Ürün 4", sku: "SKU-4", program: "bizimhesap", remote_qty: 25, pending_out: 1, expected: 24, observed_stock: 21, diff: 3, status: "open" },
   { id: "r2", product_id: "p5", product_name: "Deneme Ürün 5", sku: "SKU-5", program: "bizimhesap", remote_qty: 20, pending_out: 0, expected: 20, observed_stock: 28, diff: -8, status: "open" },
 ];
+const colKeys = new Map();
+// P11: c1'in tahsilat satırları (cari tahsilatı + li1'in kendi tahsilatı); silinenler ters kayıtla.
+function colLedgerRows(party) {
+  const today = new Date().toISOString().slice(0, 10);
+  const li1 = localInvoices.find((i) => i.id === "li1");
+  const rows = [];
+  const own = [...li1.payments, ...li1.voided_payments].filter((p) => p.source !== "customer_payment");
+  for (const c of party.collections) {
+    const col = { type: "customer", id: c.id, customer_id: party.id, amount: c.amount, currency: "TRY", date: c.date, method: c.method, note: c.note, account_id: c.account_id, allocated_amount: c.amount, invoices: c.invoices, parasut: false };
+    rows.push({ id: "col-" + c.id, date: c.date, description: "Tahsilat (" + c.method + ")", credit: Number(c.amount), currency: "TRY", source: "customer_payment", reversed: Boolean(c.voided), actions: c.voided ? { edit: false, void: false } : { edit: true, void: true }, collection: c.voided ? null : col });
+    if (c.voided) rows.push({ id: "rev-" + c.id, date: today, description: "Ters kayıt: tahsilat iptal edildi", debit: Number(c.amount), currency: "TRY", reversed: true, actions: null, collection: null });
+  }
+  for (const p of own) {
+    const col = { type: "invoice", id: p.id, customer_id: party.id, invoice_id: "li1", invoice_number: "OBI2026101", amount: String(Number(p.amount).toFixed(2)), currency: "TRY", date: p.date, method: p.method, note: p.notes || "", account_id: p.account_id, parasut: Boolean(p.parasut_synced) };
+    rows.push({ id: "col-" + p.id, date: p.date, description: "Fatura tahsilatı OBI2026101", credit: Number(p.amount), currency: "TRY", source: "invoice_payment", reversed: Boolean(p.voided), actions: p.voided ? { edit: false, void: false } : { edit: true, void: true }, collection: p.voided ? null : col });
+    if (p.voided) rows.push({ id: "rev-" + p.id, date: today, description: "Ters kayıt: fatura tahsilatı iptal edildi", debit: Number(p.amount), currency: "TRY", reversed: true, actions: null, collection: null });
+  }
+  return rows;
+}
+
 function send(res, status, body) {
   res.writeHead(status, {
     "Content-Type": "application/json",
@@ -118,7 +141,7 @@ http
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -615,7 +638,7 @@ http
       if (req.method === "PUT") return readBody((b) => { if ("opening_balance" in b) console.log("UYARI: opening_balance gönderildi"); Object.assign(party, b); send(res, 200, party); });
     }
     if ((cm = path.match(/^\/customers\/([^/]+)\/orders$/)))
-      return send(res, 200, { items: orders.slice(0, 3).map((o) => ({ id: o.id, channel_order_id: o.channel_order_id, channel: o.channel, status: o.status, total_amount: o.total_amount, currency: "TRY", order_date: o.order_date })), total: 3 });
+      return send(res, 200, { items: orders.slice(0, 3).map((o, i) => ({ id: o.id, channel_order_id: o.channel_order_id, channel: o.channel, status: o.status, total_amount: o.total_amount, currency: "TRY", order_date: o.order_date, ...(i === 0 ? { invoice_number: "OBI2026101" } : i === 1 ? { parasut_invoice_id: 98765 } : {}) })), total: 3 });
     const partyMatch = path.match(/^\/customers\/([^/]+)\/(ledger|payments)$/);
     if (partyMatch) {
       const party = parties.find((p) => p.id === partyMatch[1]);
@@ -625,6 +648,7 @@ http
         // P3: sayfalı ekstre (en yeni önce). 130 satır → 100 + 30.
         const all = [
           ...party.payments.map((pay, i) => ({ id: "pay" + i, date: today, description: "Tahsilat", credit: pay, balance: party.balance, currency: "TRY" })),
+          ...(party.id === "c1" ? colLedgerRows(party) : []),
           { id: "l1", date: "2026-11-02", description: "Satış faturası OBI2026101", debit: 6200, balance: 6200, currency: "TRY", reversed: false },
           { id: "l2", date: "2026-10-30", description: "Satış faturası OBI2026099", debit: 900, balance: 0, currency: "TRY", reversed: true },
           ...Array.from({ length: 127 }, (_, i) => ({ id: "old" + i, date: "2026-0" + (1 + (i % 9)) + "-15", description: "Satış faturası ESK" + (1000 + i), debit: 100, balance: 0, currency: "TRY" })),
@@ -644,6 +668,65 @@ http
         const out = { id: "pm" + Date.now(), amount: b.amount, currency: party.currency || "TRY", allocated_amount: allocated.toFixed(2), advance_amount: (b.amount - allocated).toFixed(2), allocations: allocated > 0 ? [{ invoice_id: "li1", invoice_number: "OBI2026101", amount: allocated.toFixed(2) }] : [], skipped: [], replayed: false };
         if (pk) payKeys.set(pk, out);
         if (state.payFail === "1") { state.payFail = "0"; return send(res, 500, { code: "INTERNAL", detail: "Sunucu hatası" }); }
+        send(res, 200, out);
+      });
+    }
+    // Aşama 4 / P11: tahsilat sil / düzenle (cari ve fatura)
+    let cx;
+    if ((cx = path.match(/^\/(customers|local-invoices)\/([^/]+)\/payments\/([^/]+)$/)) && (req.method === "DELETE" || req.method === "PATCH")) {
+      const [, kind, ownerId, pid] = cx;
+      const key = req.headers["idempotency-key"];
+      if (!key) return send(res, 400, { code: "IDEMPOTENCY_KEY_REQUIRED", detail: "İşlem anahtarı gerekli." });
+      if (colKeys.get(key)) return send(res, 200, { ...colKeys.get(key), replayed: true });
+      const li1 = localInvoices.find((i) => i.id === "li1");
+      const c1 = parties.find((p) => p.id === "c1");
+      return readBody((b) => {
+        console.log(`COLLECTION ${req.method} ${path} key=${key} body=${JSON.stringify(b)}`);
+        let target, inv, parasut = false;
+        if (kind === "customers") {
+          const party = parties.find((p) => p.id === decodeURIComponent(ownerId));
+          target = (party?.collections || []).find((c) => c.id === pid);
+          if (!target) {
+            inv = li1; target = inv.payments.find((p) => p.id === pid && p.source !== "customer_payment");
+            if (!target) return send(res, 404, { code: "COLLECTION_NOT_FOUND", detail: "Tahsilat bulunamadı." });
+            parasut = Boolean(target.parasut_synced);
+          }
+        } else {
+          inv = localInvoices.find((i) => i.id === decodeURIComponent(ownerId));
+          target = inv && inv.payments.find((p) => p.id === pid);
+          if (!target) return send(res, 404, { code: "COLLECTION_NOT_FOUND", detail: "Tahsilat bulunamadı." });
+          if (target.source === "customer_payment") return send(res, 409, { code: "COLLECTION_IS_CUSTOMER_PAYMENT", detail: "Bu satır cari tahsilatından dağıtılmış; cariden silin." });
+          parasut = Boolean(target.parasut_synced);
+        }
+        if (target.voided) return send(res, 409, { code: "COLLECTION_VOIDED", detail: "Tahsilat zaten silinmiş." });
+        if (state.colFail === "1") { state.colFail = "0"; colKeys.set(key, null); return send(res, 500, { code: "MONEY_INCOMPLETE", detail: "İşlem tamamlanamadı." }); }
+        const warn = parasut ? { warnings: ["PARASUT_NOT_UPDATED"], warning_texts: ["Bu tahsilat Paraşüt'e de işlenmişti; Paraşüt'teki kayıt değiştirilmedi."] } : { warnings: [], warning_texts: [] };
+        const amt = Number(target.amount);
+        let out;
+        if (req.method === "DELETE") {
+          target.voided = true;
+          c1.balance += amt;
+          if (inv) { inv.payments = inv.payments.filter((p) => p !== target); inv.voided_payments.push(target); }
+          const back = inv ? [{ invoice_id: inv.id, amount: amt }] : (target.invoices || []);
+          for (const x of back) { const i = localInvoices.find((q) => q.id === x.invoice_id); if (i) { i.paid_amount -= Number(x.amount); i.remaining_amount += Number(x.amount); if (!inv) i.payments = i.payments.filter((p) => p.id !== target.id); } }
+          out = { ok: true, voided: true, payment_id: pid, operation_id: "op" + Date.now(), invoices: back.map((x) => ({ invoice_id: x.invoice_id, invoice_number: "OBI2026101" })), ...warn, replayed: false };
+        } else {
+          const newAmt = Number(b.amount ?? amt);
+          const newDate = b.payment_date || b.date || target.date;
+          const newAcc = b.account_id || target.account_id;
+          const moneyChanged = Math.round(newAmt * 100) !== Math.round(amt * 100) || newDate !== target.date || newAcc !== target.account_id;
+          if (inv && newAmt - amt > inv.remaining_amount + 0.004) return send(res, 409, { code: "PAYMENT_EXCEEDS_REMAINING", detail: "Tutar kalan borçtan büyük." });
+          const diff = newAmt - amt;
+          c1.balance -= diff;
+          const invs = inv ? [inv] : (target.invoices || []).map((x) => localInvoices.find((q) => q.id === x.invoice_id)).filter(Boolean);
+          for (const i of invs) { i.paid_amount += diff; i.remaining_amount -= diff; const row = i.payments.find((p) => p.id === target.id); if (row && row !== target) row.amount = newAmt; }
+          Object.assign(target, { amount: typeof target.amount === "string" ? newAmt.toFixed(2) : newAmt, date: newDate, account_id: newAcc });
+          if (kind === "customers" && !inv) Object.assign(target, { method: b.payment_method || target.method, note: b.note ?? target.note });
+          else Object.assign(target, { method: b.method || b.payment_method || target.method, notes: b.notes ?? b.note ?? target.notes });
+          out = { mode: moneyChanged ? "replaced" : "in_place", payment: target, replaced_by: moneyChanged ? "r" + Date.now() : null, ...warn, replayed: false,
+            ...(inv ? { paid_amount: inv.paid_amount, remaining_amount: inv.remaining_amount, status: inv.status } : {}) };
+        }
+        colKeys.set(key, out);
         send(res, 200, out);
       });
     }

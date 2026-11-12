@@ -137,6 +137,7 @@ function RootInner() {
         <Stack.Screen name="local-invoices/new" options={{ animation: "slide_from_bottom" }} />
         <Stack.Screen name="expenses/new" options={{ animation: "slide_from_bottom" }} />
         <Stack.Screen name="expenses/pay" options={{ animation: "slide_from_bottom" }} />
+        <Stack.Screen name="collections/edit" options={{ animation: "slide_from_bottom" }} />
         <Stack.Screen name="cash/new" options={{ animation: "slide_from_bottom" }} />
         <Stack.Screen name="cash/transfer" options={{ animation: "slide_from_bottom" }} />
         <Stack.Screen name="support/new" options={{ animation: "slide_from_bottom" }} />

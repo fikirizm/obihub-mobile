@@ -9,6 +9,8 @@ import { getCashAccounts, newIdempotencyKey } from "../../src/api";
 import { collectPartyPaymentCompat, getLegacyPartyCurrency, getPartyLedgerCompat, legacyIdOf } from "../../src/api-gider";
 import { accountOptionLabel, accountsForCurrency, collectErrorText, deleteParty, deletePartyErrorText, getParty, getPartyOrders, isUncertainWrite, sendKeyedMoney, type PartyOrder } from "../../src/api-finans";
 import { PAYMENT_METHODS, todayIso } from "../../src/finance";
+import { ledgerCollection, ledgerRowActions } from "../../src/collection-actions";
+import { runVoidCollection } from "../../src/collection-flow";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney } from "../../src/utils";
@@ -69,6 +71,8 @@ export default function CustomerDetailScreen() {
   const focusedOnce = React.useRef(false);
   useFocusEffect(
     useCallback(() => {
+      // Tahsilat düzenleme ekranından dönüşte ekstre yeniden okunur.
+      if (focusedOnce.current && token) loadRef.current?.();
       if (focusedOnce.current && canEditParty && token) {
         getParty(token, legacyIdOf(id))
           .then((c: any) => c?.name && setNameOverride(String(c.name)))
@@ -169,6 +173,26 @@ export default function CustomerDetailScreen() {
   useEffect(() => {
     load();
   }, [load]);
+  const loadRef = useRef<(() => Promise<void>) | null>(null);
+  loadRef.current = load;
+
+  // Aşama 4 / P11: tahsilat satırında Düzenle / Sil (yalnız sunucunun actions'ına göre).
+  const [voiding, setVoiding] = useState<string | null>(null);
+  const onEditCollection = (r: PartyLedgerRow, rowCur: string) => {
+    if (!r.collection) return;
+    const c = ledgerCollection(r, legacyIdOf(id));
+    router.push({ pathname: "/collections/edit", params: { c: JSON.stringify(c), currency: c.currency || rowCur, title: nameOverride || String(params.name || "") } });
+  };
+  const onVoidCollection = async (r: PartyLedgerRow, rowCur: string) => {
+    if (!token || !r.collection || voiding) return;
+    const c = ledgerCollection(r, legacyIdOf(id));
+    setVoiding(r.id || c.id);
+    try {
+      if (await runVoidCollection({ token, c, currency: c.currency || rowCur, confirm, toast })) await load();
+    } finally {
+      setVoiding(null);
+    }
+  };
 
   const hasMore = rows.length < ledgerTotal;
   const loadMore = async () => {
@@ -363,6 +387,7 @@ export default function CustomerDetailScreen() {
                   }
                   title={`#${o.channel_order_id || o.id}`}
                   subtitle={[o.channel, o.order_date ? formatDate(o.order_date) : null].filter(Boolean).join(" · ")}
+                  meta={o.invoice_label ? `Fatura ${o.invoice_label}` : "Faturalanmadı"}
                   trailing={<Text style={[type.callout, tabular, { color: colors.textPrimary, fontWeight: "600" }]}>{formatMoney(o.total_amount, o.currency)}</Text>}
                   onPress={() => router.push({ pathname: "/orders/[id]", params: { id: o.id } })}
                 />
@@ -414,9 +439,10 @@ export default function CustomerDetailScreen() {
                 const credit = Number(r.credit || 0);
                 const isCredit = credit > 0;
                 const rowCur = (r.currency || curLabel).toUpperCase().replace("TRL", "TRY");
+                const acts = mayCollect ? ledgerRowActions(r) : null;
                 return (
+                  <View key={r.id || i}>
                   <ListRow
-                    key={r.id || i}
                     divider={i > 0}
                     leading={
                       <IconTile tint={isCredit ? colors.successBg : colors.surfaceMuted}>
@@ -432,6 +458,17 @@ export default function CustomerDetailScreen() {
                       </Text>
                     }
                   />
+                  {acts ? (
+                    <View style={styles.rowActs}>
+                      {acts.edit ? (
+                        <Button testID={`ledger-edit-${r.id}`} size="sm" variant="secondary" label="Düzenle" disabled={Boolean(voiding)} onPress={() => onEditCollection(r, rowCur)} />
+                      ) : null}
+                      {acts.void ? (
+                        <Button testID={`ledger-void-${r.id}`} size="sm" variant="secondary" label="Sil" busy={voiding === (r.id || r.collection?.id)} disabled={Boolean(voiding)} onPress={() => onVoidCollection(r, rowCur)} />
+                      ) : null}
+                    </View>
+                  ) : null}
+                  </View>
                 );
               })}
             </Card>
@@ -454,6 +491,7 @@ export default function CustomerDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  rowActs: { flexDirection: "row", justifyContent: "flex-end", gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, marginTop: -spacing.xs },
   manageRow: { flexDirection: "row", gap: spacing.sm, marginHorizontal: spacing.lg, marginTop: spacing.md },
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },

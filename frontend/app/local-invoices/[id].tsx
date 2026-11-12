@@ -7,6 +7,8 @@ import { canManage } from "../../src/auth/permissions";
 import { addLocalInvoicePayment, checkLocalInvoiceEdocStatus, getCashAccounts, getLocalInvoice, newIdempotencyKey, officializeLocalInvoice } from "../../src/api";
 import { accountOptionLabel, accountsForCurrency, collectErrorText, deleteLocalInvoice, isInvoiceEditable, isUncertainWrite, sendKeyedMoney } from "../../src/api-finans";
 import { invoiceStatus, isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
+import { invoicePaymentActions, invoicePaymentCollection } from "../../src/collection-actions";
+import { runVoidCollection } from "../../src/collection-flow";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney } from "../../src/utils";
@@ -80,7 +82,8 @@ export default function LocalInvoiceDetailScreen() {
   const [inv, setInv] = useState<LocalInvoice | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [busy, setBusy] = useState<"official" | "payment" | "edoc" | "delete" | null>(null);
+  const [busy, setBusy] = useState<"official" | "payment" | "edoc" | "delete" | "void" | null>(null);
+  const [voidingId, setVoidingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
@@ -274,6 +277,25 @@ export default function LocalInvoiceDetailScreen() {
     }
   };
 
+  // Aşama 4 / P11: tahsilatı düzenle / sil (web SalesInvoiceFormOS.payRowActions).
+  type Pay = NonNullable<LocalInvoice["payments"]>[number];
+  const onEditPayment = (p: Pay) => {
+    const c = invoicePaymentCollection(inv, p);
+    router.push({ pathname: "/collections/edit", params: { c: JSON.stringify(c), currency: String(cur || "TRY"), title: inv.invoice_number || "Fatura" } });
+  };
+  const onVoidPayment = async (p: Pay) => {
+    if (!token || busy) return;
+    const c = invoicePaymentCollection(inv, p);
+    setBusy("void");
+    setVoidingId(c.id);
+    try {
+      if (await runVoidCollection({ token, c, currency: String(cur || "TRY"), confirm, toast })) await load();
+    } finally {
+      setBusy(null);
+      setVoidingId(null);
+    }
+  };
+
   const lines = inv.items || [];
   const payments = inv.payments || [];
 
@@ -437,9 +459,11 @@ export default function LocalInvoiceDetailScreen() {
           <SafeAnimatedView entering={FadeInDown.delay(260).duration(380)}>
             <SectionTitle title="Tahsilatlar" action={<Text style={[type.footnote, tabular, { color: colors.textSecondary }]}>{payments.length} kayıt</Text>} />
             <Card style={styles.block}>
-              {payments.map((p, i) => (
+              {payments.map((p, i) => {
+                const acts = mayWrite ? invoicePaymentActions(inv, p) : null;
+                return (
+                <View key={p.id || i}>
                 <ListRow
-                  key={p.id || i}
                   divider={i > 0}
                   leading={
                     <IconTile tint={colors.emeraldSoft}>
@@ -448,9 +472,20 @@ export default function LocalInvoiceDetailScreen() {
                   }
                   title={PAYMENT_METHODS.find((m) => m.value === p.method)?.label || p.method || "Ödeme"}
                   subtitle={formatDate(p.date)}
+                  meta={acts?.customerPayment ? "Cari tahsilatından · cariden düzenlenir" : p.notes || undefined}
                   trailing={<Text style={amount(colors.success)}>{formatMoney(p.amount, cur)}</Text>}
                 />
-              ))}
+                {acts && (acts.edit || acts.void) ? (
+                  <View style={styles.rowActs}>
+                    {acts.edit ? (
+                      <Button testID={`invoice-pay-edit-${p.id}`} size="sm" variant="secondary" label="Düzenle" disabled={Boolean(busy)} onPress={() => onEditPayment(p)} />
+                    ) : null}
+                    <Button testID={`invoice-pay-void-${p.id}`} size="sm" variant="secondary" label="Sil" busy={voidingId === p.id} disabled={Boolean(busy)} onPress={() => onVoidPayment(p)} />
+                  </View>
+                ) : null}
+                </View>
+                );
+              })}
             </Card>
           </SafeAnimatedView>
         ) : null}
@@ -479,6 +514,7 @@ const styles = StyleSheet.create({
   progressFill: { height: 6, borderRadius: 3, backgroundColor: ON_HERO.live },
   progressText: { color: ON_HERO.soft, fontSize: 12, fontWeight: "500" },
   alert: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, marginHorizontal: spacing.lg, marginTop: spacing.md, padding: spacing.md, borderRadius: radius.md },
+  rowActs: { flexDirection: "row", justifyContent: "flex-end", gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, marginTop: -spacing.xs },
   actions: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginTop: spacing.md },
   skeleton: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, gap: spacing.md },
   skeletonHero: { borderRadius: radius.xxl, borderWidth: 1, padding: spacing.lg, gap: spacing.lg },

@@ -3,6 +3,7 @@
 import { request } from "./api";
 import type { CashAccount, LocalInvoice, Party } from "./types";
 import { isUncertainWrite, moneyRetryable, sendKeyedMoney, type KeyedMoneyOutcome } from "./money-retry";
+import { collectionPath, orderInvoiceLabel, type Collection } from "./collection-actions";
 
 export { isUncertainWrite, moneyRetryable, sendKeyedMoney, type KeyedMoneyOutcome };
 
@@ -307,7 +308,7 @@ export function deletePartyErrorText(e: any) {
   return e?.message || "Cari silinemedi.";
 }
 
-export type PartyOrder = { id: string; channel_order_id: string; channel: string; status: string; total_amount: number; currency: string; order_date: string };
+export type PartyOrder = { id: string; channel_order_id: string; channel: string; status: string; total_amount: number; currency: string; order_date: string; invoice_label: string | null };
 
 // GET /customers/{id}/orders?limit → {items[], total}
 export async function getPartyOrders(token: string, id: string, limit = 20): Promise<{ items: PartyOrder[]; total: number }> {
@@ -320,6 +321,21 @@ export async function getPartyOrders(token: string, id: string, limit = 20): Pro
     total_amount: Number(o?.total_amount) || 0,
     currency: String(o?.currency || "TRY"),
     order_date: String(o?.order_date || o?.created_at || ""),
+    invoice_label: orderInvoiceLabel(o || {}),
   }));
   return { items, total: Number(d?.total ?? items.length) };
+}
+
+// ---------------------------------------------------------------------------
+// Aşama 4 / P11: tahsilat sil / düzenle (web components/money/CollectionActions.jsx).  Her ikisi Idempotency-Key ile.
+export async function voidCollection(token: string, c: Collection, idempotencyKey: string, reason?: string) {
+  return request<any>(
+    collectionPath(c),
+    { method: "DELETE", ...(reason ? { body: JSON.stringify({ reason }) } : {}), headers: { "Idempotency-Key": idempotencyKey } },
+    token
+  );
+}
+
+export async function editCollection(token: string, c: Collection, body: Record<string, string>, idempotencyKey: string) {
+  return request<any>(collectionPath(c), { method: "PATCH", body: JSON.stringify(body), headers: { "Idempotency-Key": idempotencyKey } }, token);
 }

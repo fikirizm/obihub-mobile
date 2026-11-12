@@ -360,7 +360,13 @@ export type Party = {
   contact_role?: string;
 };
 
-export type PartyLedgerRow = { id: string; date?: string; description?: string; reference?: string; debit?: number; credit?: number; balance?: number; currency?: string; reversed?: boolean; due_date?: string };
+export type PartyLedgerRow = {
+  id: string; date?: string; description?: string; reference?: string; debit?: number; credit?: number; balance?: number; currency?: string; reversed?: boolean; due_date?: string;
+  // Aşama 4 / P11: tahsilat satırında düzenle / sil (yalnız sunucunun actions'ına göre).
+  source?: string;
+  actions?: { edit?: boolean; void?: boolean } | null;
+  collection?: import("./collection-actions").Collection | null;
+};
 
 export type LocalInvoice = {
   id: string;
@@ -382,7 +388,11 @@ export type LocalInvoice = {
   remaining_amount?: number;
   notes?: string;
   items?: { name?: string; description?: string; product_id?: string | null; product_name?: string; quantity?: number; unit_price?: number; vat_rate?: number; total?: number; line_total?: number }[];
-  payments?: { id?: string; amount?: number; date?: string; method?: string }[];
+  payments?: {
+    id?: string; amount?: number; date?: string; method?: string; notes?: string; account_id?: string;
+    source?: string; void_op?: unknown; parasut_sync_state?: string; parasut_synced?: boolean;
+  }[];
+  parasut_item_type?: string;
   parasut_invoice_id?: string;
   // Düzenleme formu için cari alanları ve resmileştirme kilidi.
   customer_id?: string | null;
