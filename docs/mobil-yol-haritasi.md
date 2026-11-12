@@ -169,6 +169,49 @@ Doğrulama: tip denetimi geçti. Cihazda ve sahte API ile denenmedi.
 
 Sunucu oturumuna iletilenler: yukarıdaki 1–4.
 
+### Web ile birebir eşitleme (12 Kasım 2026, 1.1.04 hazırlığı, `surum-1.1.03` dalı)
+
+Kullanıcı kuralı: "web'de nasıl çalışıyorsa mobilde de aynı çalışmalı". Dört alanda mobil–web–sunucu denetimi yapıldı.
+PM de `docs/mobil-web-esitleme-raporu.md` (ana repo) raporunu hazırladı. Bağımsız inceleme 7 bulgu verdi, hepsi düzeltildi.
+
+Mobilde yapılanlar:
+- **Ürün:** Ana stokta web gibi Ekle/Çıkart/Eşitle ve sebep alanı, stok etkin muhasebe programına gidiyor
+  (`settings.provider`, BenimPOS dahil). Ana fiyatın varsayılanı bağlı tüm kanallar. Kanal set yanıtında
+  `status:"pending"` gelirse değer uygulanmıyor. Belirsiz yazımda (ağ/5xx) uyarı veriliyor.
+- **Sipariş:**
+  - Durum değiştirme (onay; 409/502 işleme).
+  - n11/Idefix/Pazarama için ürün etiketi PDF.
+  - Trendyol/HB etiketinde web şablonu ve HB geri düşüşü.
+  - Bulut yazdırmada `success` denetimi.
+  - Mağaza senkronu tüm kanallarda (Woo sonrası tarih eşitleme dahil).
+  - Woo durum etiketleri web ile aynı; detayda liste alanları birleştiriliyor; süzgeçler panel kartıyla aynı durum kümesi.
+- **Finans:**
+  - Fatura tahsilatında para birimine göre hesap seçimi (`account_id`).
+  - E-belge "Durumu sorgula".
+  - ObiHub gider defteri (ui-capabilities, expense-settings, sayfalı liste ve özet).
+  - Cari: okuma modeli + 404 geri düşüşü; ObiHub kaynaklı caride tahsilat kapalı; tahsilatta hesap seçimi.
+  - Gelen kutusu (`inbox_read`).
+  - Finans özeti rapor izniyle açılıyor.
+- **Oturum:** rol + açık izin birleşimi (web `permissionSet`), e-posta küçük harf, kilitte Abonelik/Destek erişimi,
+  süresi dolan hesapta web yönlendirmesi, destek menüsü modül durumuna göre, çıkışta `DELETE /push-token`
+  (401 çıkışında atlanır), rapor hazır dönemleri gün sayısıyla.
+
+Doğrulama:
+- Tip denetimi temiz.
+- Sahte API ile tarayıcıda denendi: stok Ekle (7+3=10, `in` ve `Idempotency-Key` gidiyor), fatura tahsilatı hesap seçimi
+  (`account_id` gidiyor), gider defteri, sipariş durumu değiştirme.
+- Cihazda denenmedi.
+
+1.1.04 gönderim koşulları (sunucu deploy'ları bekleniyor):
+1. Kanal gönderimi dilimi canlıda olmalı (pending yanıtı, kanal fiyatının korunması mesajı buna göre).
+2. `/customers/{id}/payments` `account_id` kabul etmeli; etmiyorsa seçilen hesap yok sayılır.
+   Gönderimden önce canlıda doğrula.
+3. Ciro tanımı (Europe/Istanbul, order_date) canlıya çıkınca Panel "bugün" sunucu rakamına geçirilecek.
+4. `channel_push` rozeti (kabul/bekliyor/red) eklenecek.
+
+Sonraki tura kalanlar: fatura kesme ve mağazaya iletme, işleme al, toplu silme, HepsiJet il/ilçe listeleri, gider
+detayı, elle gider girişi, borç ödeme, Woo/kargo siparişlerinde orijinal HepsiJet etiketi varsayılanı.
+
 ## 4. Web'de olup mobilde olmayanlar
 
 Öncelik, özelliğin telefonda ne kadar işe yaradığına göre verildi.
