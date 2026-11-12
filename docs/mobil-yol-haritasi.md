@@ -204,9 +204,10 @@ Doğrulama:
 
 1.1.04 gönderim koşulları (sunucu deploy'ları bekleniyor):
 1. ~~Kanal gönderimi dilimi canlıda olmalı~~ — canlıda (`12532a3d2`, 12 Kas 08:26 UTC).
-2. `/customers/{id}/payments` `account_id` kabul etmeli; etmiyorsa seçilen hesap yok sayılır.
-   Gönderimden önce canlıda doğrula.
-3. Ciro tanımı (Europe/Istanbul, order_date) canlıya çıkınca Panel "bugün" sunucu rakamına geçirilecek.
+2. ~~`/customers/{id}/payments` `account_id`~~ — canlıda (`88a086a17`); dövizli caride de tahsilat açıldı (yalnız aynı
+   para birimli hesaplar).
+3. ~~Ciro tanımı~~ — canlıda; Panel "bugün" `/dashboard/stats`, grafik `/dashboard/sales-chart?days=30` (web ile aynı).
+   Sipariş süzgeçleri tek istekte `status=a,b`.
 4. ~~`channel_push` rozeti~~ — eklendi: ürün detayında kanal stok ve fiyat satırlarında "Pazaryeri kabul etti" /
    "onayı bekleniyor" / "Reddedildi: …" (kodlar: BARCODE_UNKNOWN, REJECTED, STORE_DELETED, CATALOG_UNAVAILABLE,
    RATE_LIMITED, RESULT_UNKNOWN; bilinmeyen kod genel hata). Değer `GET /products/{id}`den okunur; her yazımdan ve

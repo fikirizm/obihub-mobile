@@ -5,7 +5,7 @@ import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
-import { getDashboardStats, getFinanceOverview, getOrdersPage, getSalesReportsOverview, getSmartAlerts, getTodaySales } from "../../src/api";
+import { getDashboardStats, getFinanceOverview, getOrdersPage, getSalesChart, getSmartAlerts } from "../../src/api";
 import { canAccess } from "../../src/auth/permissions";
 import { formatCompact, formatTry } from "../../src/utils";
 import { AnimatedNumber, Sparkline } from "../../src/components/Charts";
@@ -37,38 +37,15 @@ type DashData = {
 const EMPTY: DashData = { stats: null, today: null, daily: null, alerts: [], recent: [], overdueReceivable: 0 };
 const CACHE_KEY = "dashboard_v4";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-// Sunucudaki rapor ucunun okuduğu en çok sipariş sayısı (backend/routers/reports.py).
-const REPORT_ORDER_LIMIT = 5000;
 
 const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-// Günlük satış, Raporlar ekranıyla aynı uçtan (sipariş tarihine göre) alınır ve bugün dahil 30 güne tamamlanır.
-// Panel özetindeki grafik ucu kaydın sisteme düştüğü ana bakar; mağaza eşitlenince eski siparişler tek güne yığılır.
+// Günlük satış web paneliyle aynı uçtan (/dashboard/sales-chart): Europe/Istanbul günü, sipariş tarihi, iptal/silinen
+// hariç, bugün dahil son 30 gün (en eski → bugün). "Bugün" rakamı da aynı tanımla /dashboard/stats'tan gelir.
 async function getDailySales(token: string): Promise<SalesChartPoint[]> {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - 29);
-  const [report, edge] = await Promise.all([
-    getSalesReportsOverview(token, 30, { startDate: start }),
-    // Rapor ucu sisteme en son düşen REPORT_ORDER_LIMIT siparişi okur; sınırdaki kaydın düşme anına bakılır.
-    getOrdersPage(token, { page: REPORT_ORDER_LIMIT, perPage: 1, sortBy: "-created_at" }).then((r) => r.items[0] ?? null),
-  ]);
-  // Sınırdaki kayıt dönemin içindeyse (bir gün payla) daha eski günler eksik gelir; yanlış toplam yerine veri yok sayılır.
-  if (edge) {
-    const edgeTs = Date.parse(String(edge.created_at || ""));
-    if (Number.isNaN(edgeTs) || edgeTs >= start.getTime() - DAY_MS) throw new Error("Dönem verisi eksik: sipariş sayısı rapor sınırını aşıyor.");
-  }
-  // Telefon UTC'nin gerisindeyken sunucu dönemi 31 gün sayıp haftalık kova döndürebilir; günlük anahtar değilse veri yok sayılır.
-  if ((report.daily_sales || []).some((d) => !/^\d{4}-\d{2}-\d{2}$/.test(d.date))) throw new Error("Dönem verisi günlük değil.");
-  const byDay = new Map((report.daily_sales || []).map((d) => [d.date, d]));
-  return Array.from({ length: 30 }, (_, i) => {
-    const d = new Date(start);
-    d.setDate(start.getDate() + i);
-    const key = dayKey(d);
-    const hit = byDay.get(key);
-    return { date: key, total: Number(hit?.revenue || 0), count: Number(hit?.orders || 0) };
-  });
+  const rows = await getSalesChart(token, 30);
+  if (rows.some((d) => !/^\d{4}-\d{2}-\d{2}$/.test(String(d?.date || "")))) throw new Error("Dönem verisi günlük değil.");
+  return rows.map((d) => ({ date: String(d.date), total: Number(d.total || 0), count: Number(d.count || 0) }));
 }
 
 // Sunucudaki uyarı hedeflerinden mobilde karşılığı olanlar.
@@ -108,15 +85,14 @@ export default function DashboardScreen() {
       }
       try {
         // Rakamlar sunucuda hesaplanır; web paneliyle aynı uçlar kullanılır.
-        const [stats, today, daily, alerts, recent, overdueReceivable] = await Promise.all([
+        const [stats, daily, alerts, recent, overdueReceivable] = await Promise.all([
           getDashboardStats(token),
-          getTodaySales(token).catch(() => null),
           getDailySales(token).catch(() => null),
           getSmartAlerts(token).catch(() => []),
           getOrdersPage(token, { page: 1, perPage: 5 }).then((r) => r.items).catch(() => []),
           billing ? getFinanceOverview(token).then((f) => f.overdue_receivable).catch(() => 0) : Promise.resolve(0),
         ]);
-        const next: DashData = { stats, today, daily, alerts, recent, overdueReceivable };
+        const next: DashData = { stats, today: null, daily, alerts, recent, overdueReceivable };
         setData(next);
         setOffline(false);
         setFailed(false);
@@ -133,9 +109,9 @@ export default function DashboardScreen() {
 
   useFocusLoad(load, { hasData: Boolean(data.stats) });
 
-  // Bugün: sipariş tarihine ve yerel güne göre; alınamazsa sunucu özetindeki değer.
-  const todayRevenue = Number(data.today?.revenue ?? data.stats?.revenue_today ?? 0);
-  const todayOrders = Number(data.today?.orders ?? data.stats?.orders_today ?? 0);
+  // Bugün: web paneliyle aynı sunucu değeri (İstanbul günü, sipariş tarihi, iptal/silinen hariç).
+  const todayRevenue = Number(data.stats?.revenue_today ?? 0);
+  const todayOrders = Number(data.stats?.orders_today ?? 0);
   // Bugün dahil son 7 ya da 30 gün. Dönem toplamı Raporlar ekranıyla aynı sunucu verisinden gelir.
   const periodReady = Array.isArray(data.daily);
   const points = useMemo(() => (data.daily || []).slice(-Number(range)), [data.daily, range]);
@@ -144,7 +120,7 @@ export default function DashboardScreen() {
   const periodOrders = useMemo(() => points.reduce((s, p) => s + Number(p.count || 0), 0), [points]);
   // Grafiğin son noktası üstteki "Bugün" rakamıyla aynı değeri gösterir.
   const chartValues = useMemo(() => {
-    const today = dayKey(new Date());
+    const today = points.length > 0 ? points[points.length - 1].date : dayKey(new Date());
     return points.map((p) => (p.date === today ? Math.max(Number(p.total || 0), todayRevenue) : Number(p.total || 0)));
   }, [points, todayRevenue]);
   const todayLabel = new Intl.DateTimeFormat("tr-TR", { weekday: "long", day: "numeric", month: "long" }).format(new Date());

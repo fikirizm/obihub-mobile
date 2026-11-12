@@ -541,81 +541,29 @@ export async function getAccountingSettings(token: string) {
   return request<AccountingSettings>("/settings/accounting", { method: "GET" }, token);
 }
 
-// Sayfalı sipariş listesi. Sunucu tek durum değeri süzdüğü için birden çok durum ayrı çağrılarla birleştirilir.
+// Sayfalı sipariş listesi. Birden çok durum tek istekte virgülle gönderilir (sunucu 88a086a17: status=a,b);
+// sayfalama ve toplam sunucudan gelir.
 export async function getOrdersPage(
   token: string,
   options: { page?: number; perPage?: number; search?: string; statuses?: string[]; integrationId?: string; sortBy?: string } = {}
 ): Promise<OrdersPage> {
   const page = options.page ?? 1;
   const perPage = options.perPage ?? 30;
-  const fetchOne = async (status?: string) => {
-    const qs = new URLSearchParams();
-    qs.set("page", String(page));
-    qs.set("per_page", String(perPage));
-    qs.set("sort_by", options.sortBy ?? "-order_date");
-    if (options.search) qs.set("search", escapeSearch(options.search));
-    if (options.integrationId) qs.set("integration_id", options.integrationId);
-    if (status) qs.set("status", status);
-    const payload = await request<any>(`/orders?${qs.toString()}`, { method: "GET" }, token);
-    const items: Order[] = Array.isArray(payload) ? payload : Array.isArray(payload?.items) ? payload.items : [];
-    const total = Number(payload?.total ?? items.length);
-    return { items, total, totalPages: Number(payload?.total_pages ?? Math.ceil(total / perPage)) };
-  };
-  const statuses = options.statuses && options.statuses.length > 0 ? options.statuses : [undefined];
-  const parts = await Promise.all(statuses.map((s) => fetchOne(s)));
-  const seen = new Set<string>();
-  const items = parts
-    .flatMap((p) => p.items)
-    .filter((o) => (seen.has(o.id) ? false : (seen.add(o.id), true)));
-  // Özel sıralama istendiyse sunucunun sırası korunur.
-  if (!options.sortBy) items.sort((a, b) => String(b.order_date || b.created_at || "").localeCompare(String(a.order_date || a.created_at || "")));
-  return {
-    items,
-    total: parts.reduce((n, p) => n + p.total, 0),
-    page,
-    totalPages: Math.max(1, ...parts.map((p) => p.totalPages)),
-  };
+  const qs = new URLSearchParams();
+  qs.set("page", String(page));
+  qs.set("per_page", String(perPage));
+  qs.set("sort_by", options.sortBy ?? "-order_date");
+  if (options.search) qs.set("search", escapeSearch(options.search));
+  if (options.integrationId) qs.set("integration_id", options.integrationId);
+  if (options.statuses && options.statuses.length > 0) qs.set("status", options.statuses.join(","));
+  const payload = await request<any>(`/orders?${qs.toString()}`, { method: "GET" }, token);
+  const items: Order[] = Array.isArray(payload) ? payload : Array.isArray(payload?.items) ? payload.items : [];
+  const total = Number(payload?.total ?? items.length);
+  return { items, total, page, totalPages: Math.max(1, Number(payload?.total_pages ?? Math.ceil(total / perPage))) };
 }
 
 export async function getDashboardStats(token: string) {
   return request<DashboardStats>("/dashboard/stats", { method: "GET" }, token);
-}
-
-// Bugünün satışı telefonun yerel gününe ve sipariş tarihine göre hesaplanır.
-// Sunucunun özetindeki "bugün" değeri kaydın sisteme düştüğü ana ve UTC gece yarısına
-// bakar; Türkiye saatinde gün 03:00'te başlar ve eşitleme anına göre sıfır görünebilir.
-export async function getTodaySales(token: string): Promise<{ revenue: number; orders: number }> {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const perPage = 100;
-  let revenue = 0;
-  let orders = 0;
-  // Yoğun günde toplam sessizce kesilmez: bugüne ait kayıt bitene dek sürer; üst sınır da aşılırsa
-  // hata verilir ve çağıran sunucu özetindeki değere döner.
-  const maxPages = 30;
-  for (let page = 1; ; page += 1) {
-    if (page > maxPages) throw new Error("Bugünün satışı hesaplanamadı: sipariş sayısı sınırı aşıldı.");
-    const payload = await request<any>(`/orders?page=${page}&per_page=${perPage}&sort_by=-order_date`, { method: "GET" }, token);
-    const items: any[] = Array.isArray(payload) ? payload : Array.isArray(payload?.items) ? payload.items : [];
-    let hits = 0;
-    for (const o of items) {
-      const raw = o?.order_date || o?.created_at;
-      const ts = raw ? Date.parse(String(raw)) : NaN;
-      if (Number.isNaN(ts) || ts < start) continue;
-      hits += 1;
-      if (String(o?.status || "").toLowerCase() === "deleted") continue;
-      // n11'de sipariş tarihi son değişiklik anıdır; durumu bugün değişen eski sipariş bugüne sayılmaz.
-      if (String(o?.channel || o?.integration_provider || "").toLowerCase() === "n11") {
-        const first = o?.created_at ? Date.parse(String(o.created_at)) : NaN;
-        if (!Number.isNaN(first) && first < start) continue;
-      }
-      orders += 1;
-      revenue += Number(o?.total_amount || 0) || 0;
-    }
-    // Liste yeniden eskiye sıralıdır; bugüne ait kayıt kalmayan sayfada durulur.
-    if (items.length < perPage || hits === 0) break;
-  }
-  return { revenue, orders };
 }
 
 export async function getSalesChart(token: string, days: number) {

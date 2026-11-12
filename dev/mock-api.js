@@ -101,7 +101,7 @@ http
       const search = (q.get("search") || "").toLocaleLowerCase("tr-TR");
       let rows = orders.filter(
         (o) =>
-          (!q.get("status") || o.status === q.get("status")) &&
+          (!q.get("status") || q.get("status").split(",").includes(o.status)) &&
           (!q.get("integration_id") || o.integration_id === q.get("integration_id")) &&
           (!search || o.customer_name.toLocaleLowerCase("tr-TR").includes(search) || o.channel_order_id.toLowerCase().includes(search))
       );

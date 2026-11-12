@@ -62,9 +62,9 @@ export default function CustomerDetailScreen() {
   const registered = params.registered === "1";
   // Web (CustomersPage.js): kaynağı ObiHub defteri olan caride tahsilat bu ekrandan alınmaz.
   const mayCollect = (canManage(user, "customers") || canManage(user, "billing")) && source !== "obihub";
-  // Sunucu tahsilatı para birimine bakmadan ilk kasa hesabına gelir yazar; dövizli caride tutar TL kasaya
-  // döviz tutarıyla işlenirdi. Sunucu hesap seçimi sunana kadar dövizli caride mobilden tahsilat alınmaz.
-  const foreign = cur !== "TRY";
+  // Sunucu (88a086a17) `account_id`'yi para birimiyle denetler; web gibi dövizli caride de tahsilat alınır,
+  // yalnız carinin para birimindeki hesaplar listelenir.
+  const foreign = false;
   const curLabel = cur || "TRY";
 
   const load = useCallback(async () => {
