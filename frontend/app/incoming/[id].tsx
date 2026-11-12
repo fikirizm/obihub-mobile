@@ -545,6 +545,11 @@ export default function IncomingImportScreen() {
           {stockAction.available !== true && stockAction.reason === "INVENTORY_OWNED_BY_ACCOUNTING" ? (
             <Text style={[type.caption, styles.pad, { color: colors.textTertiary }]}>Stok sahibi muhasebe programınız; mal girişini orada yapın. Bu fatura gider olarak işlenir.</Text>
           ) : null}
+          {stockAction.available !== true && stockAction.reason === "STOCK_ALREADY_RECEIVED" ? (
+            <Text testID="import-stock-received" style={[type.caption, styles.pad, { color: colors.textTertiary }]}>
+              Bu fatura daha önce Stoğa işle ile stoğa girdi; stok tekrar girmez. Fatura gider olarak işlenir.
+            </Text>
+          ) : null}
         </SafeAnimatedView>
 
         {supplierBlock ? (

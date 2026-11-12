@@ -4,7 +4,8 @@ import { useLocalSearchParams } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { createCashEntry, getCashAccount } from "../../src/api";
+import { createCashEntry, getCashAccount, newIdempotencyKey } from "../../src/api";
+import { moneyRetryable } from "../../src/api-finans";
 import { todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
@@ -73,7 +74,7 @@ export default function CashAccountScreen() {
   const id = String(params.id || "");
   const { token, user } = useAuth();
   const { colors } = useTheme();
-  const { toast, promptEntry } = useFeedback();
+  const { toast, promptEntry, confirm } = useFeedback();
   const [account, setAccount] = useState<CashAccount | null>(null);
   const [entries, setEntries] = useState<CashEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,12 +104,29 @@ export default function CashAccountScreen() {
     const entry = await promptEntry({ title: kind === "income" ? "Gelir ekle" : "Gider ekle", message: account.name, initial: 0, decimal: true, noteLabel: "Açıklama" });
     if (!entry || entry.amount <= 0) return;
     setBusy(kind);
+    // Aşama 4 P1: işlem başına bir anahtar; sonuç belirsizse AYNI anahtar ve gövdeyle yeniden gönderilir (ikinci kayıt açılmaz).
+    const key = newIdempotencyKey("cash");
+    const body = { account_id: account.id, entry_type: kind, amount: entry.amount, entry_date: todayIso(), description: entry.note || undefined };
     try {
-      await createCashEntry(token, { account_id: account.id, entry_type: kind, amount: entry.amount, entry_date: todayIso(), description: entry.note || undefined });
-      toast(kind === "income" ? "Gelir kaydedildi" : "Gider kaydedildi", "success");
+      for (;;) {
+        try {
+          const r = await createCashEntry(token, body, key);
+          toast(r?.replayed ? "Hareket zaten kaydedilmişti." : kind === "income" ? "Gelir kaydedildi" : "Gider kaydedildi", "success");
+          break;
+        } catch (e: any) {
+          if (!moneyRetryable(e)) {
+            toast(e?.message || "Kaydedilemedi.", "error");
+            break;
+          }
+          const again = await confirm({
+            title: "Sonuç alınamadı",
+            message: `${formatMoney(entry.amount, account.currency)} ${kind === "income" ? "gelir" : "gider"} kaydedilmiş olabilir. Aynı işlemi yeniden gönderebilirsiniz; ikinci kez kaydedilmez.`,
+            confirmLabel: "Yeniden gönder",
+          });
+          if (!again) break;
+        }
+      }
       await load();
-    } catch (e: any) {
-      toast(e?.message || "Kaydedilemedi.", "error");
     } finally {
       setBusy(null);
     }

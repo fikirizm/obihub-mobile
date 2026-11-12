@@ -19,6 +19,7 @@ import { PlatformLogo } from "../../src/components/PlatformLogo";
 import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { StockMovements } from "../../src/components/StockMovements";
 import { ProductMedia, ProductSalesStatus } from "../../src/components/ProductMedia";
+import { ProductInsightsCard } from "../../src/components/ProductInsightsCard";
 import { DetailHero } from "../../src/ui/DetailHero";
 import { useFeedback } from "../../src/ui/Feedback";
 import { StackHeader } from "../../src/ui/Header";
@@ -783,6 +784,12 @@ export default function ProductDetailScreen() {
             </Card>
           </SafeAnimatedView>
         )}
+
+        {token ? (
+          <SafeAnimatedView entering={FadeInDown.delay(240).duration(380)}>
+            <ProductInsightsCard token={token} productId={product.id} refreshKey={movementsKey} />
+          </SafeAnimatedView>
+        ) : null}
 
         <SafeAnimatedView entering={FadeInDown.delay(260).duration(380)}>
           <StockMovements token={token} productId={product.id} refreshKey={movementsKey} />

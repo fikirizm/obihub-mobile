@@ -5,7 +5,7 @@ import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
-import { getDashboardStats, getFinanceOverview, getOrdersPage, getSalesChart, getSmartAlerts } from "../../src/api";
+import { getDashboardStats, getFinanceOverview, getOrdersPage, getRecentOrders, getSalesChart, getSmartAlerts } from "../../src/api";
 import { canAccess, canManage } from "../../src/auth/permissions";
 import { QuickSaleCard } from "../../src/components/QuickSaleCard";
 import { formatCompact, formatTry } from "../../src/utils";
@@ -90,7 +90,8 @@ export default function DashboardScreen() {
           getDashboardStats(token),
           getDailySales(token).catch(() => null),
           getSmartAlerts(token).catch(() => []),
-          getOrdersPage(token, { page: 1, perPage: 5 }).then((r) => r.items).catch(() => []),
+          // Web panosuyla aynı uç; okunamazsa sipariş listesinin ilk sayfası.
+          getRecentOrders(token, 5).catch(() => getOrdersPage(token, { page: 1, perPage: 5 }).then((r) => r.items)).catch(() => []),
           billing ? getFinanceOverview(token).then((f) => f.overdue_receivable).catch(() => 0) : Promise.resolve(0),
         ]);
         const next: DashData = { stats, today: null, daily, alerts, recent, overdueReceivable };

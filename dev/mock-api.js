@@ -69,6 +69,7 @@ const expenseState = {
 // Dalga 3 / C1: gelen fatura içeri alma durumları.
 const importState = { in2: "applied" };
 const posSales = [];
+const entryKeys = new Set();
 const hjCustomers = [{ id: "hc1", full_name: "Ayşe Demir", phone: "05551112233", city: "İstanbul", town: "Kadıköy", district: "Moda", address_line: "Moda Cad. 1" }];
 const hjShipments = [];
 const entries = [
@@ -113,7 +114,7 @@ http
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -290,6 +291,16 @@ http
       return send(res, 200, { products: slice.map((p) => ({ id: p.id, price: p.price.toFixed(2), integration_prices: [{ integration_id: "i1", price: p.ch.i1.price.toFixed(2), active: true, ...(p.id === "p3" ? { pending: true, pending_price: (p.ch.i1.price + 10).toFixed(2), pending_at: new Date().toISOString() } : {}) }, { integration_id: "i2", price: p.ch.i2.price.toFixed(2), active: true }].filter((r) => r.integration_id !== "i2" || p.links.trendyol) })), integrations, total: rows.length, page, per_page: per });
     }
     // Ürün kimliği (ad / SKU / barkod) ve stok hareketleri — gerçek uçlar: GET|PATCH /products/{id}, GET /stock/movements.
+    // --- F2 / F3 / B5
+    if (path === "/dashboard/recent-orders") return send(res, 200, orders.slice(0, Number(url.searchParams.get("limit") || 5)));
+    if (path === "/support/notifications/mark-read" && req.method === "POST") { console.log("WRITE mark-read"); return send(res, 200, { success: true, updated: 1 }); }
+    if (/^\/products\/[^/]+\/insights$/.test(path)) {
+      const r = url.searchParams.get("range") || "month"; const k = r === "week" ? 1 : r === "year" ? 12 : 3;
+      return send(res, 200, { range: r, sales: { total_revenue: 1240.5 * k, total_quantity: 11 * k, total_orders: 7 * k, by_provider: [
+        { provider: "trendyol", integration_name: "Trendyol", revenue: 840.5 * k, quantity: 7 * k, orders: 5 * k },
+        { provider: "woocommerce", integration_name: "Deneme Mağaza", revenue: 400 * k, quantity: 4 * k, orders: 2 * k },
+        { provider: "n11", integration_name: "N11", revenue: 0, quantity: 0, orders: 0 } ] } });
+    }
     // --- D1: POS. /__mode?posFail=1 → satış kaydedilir ama yanıt 500 (bir kez).
     if (req.method === "POST" && path === "/pos/sales") {
       let raw = "";
@@ -536,6 +547,12 @@ http
     }
     if (path === "/finance/entries" && req.method === "POST")
       return readBody((b) => {
+        // Aşama 4 P1: işlem anahtarı (aynı anahtar → ilk sonuç, replayed); /__mode?entryFail=1 → işlenir ama 500 (bir kez).
+        const ek = req.headers["idempotency-key"];
+        console.log("entries key=" + ek + " category=" + b.category);
+        if (ek && entryKeys.has(ek)) return send(res, 200, { id: "cash_entry:" + ek + ":main", replayed: true });
+        if (ek) entryKeys.add(ek);
+        if (state.entryFail === "1") { state.entryFail = "0"; const acc0 = accounts.find((a) => a.id === b.account_id); if (acc0) acc0.balance += b.entry_type === "income" ? b.amount : -b.amount; return send(res, 500, { code: "INTERNAL", detail: "Sunucu hatası" }); }
         const acc = accounts.find((a) => a.id === b.account_id);
         if (!acc) return send(res, 404, { detail: "Hesap bulunamadı" });
         acc.balance += b.entry_type === "income" ? b.amount : -b.amount;

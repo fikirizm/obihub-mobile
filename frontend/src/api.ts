@@ -807,9 +807,19 @@ export async function getCashAccount(token: string, accountId: string) {
 
 export async function createCashEntry(
   token: string,
-  body: { account_id: string; entry_type: "income" | "expense"; amount: number; entry_date: string; description?: string }
+  body: { account_id: string; entry_type: "income" | "expense"; amount: number; entry_date: string; description?: string },
+  idempotencyKey?: string
 ) {
-  return request<any>("/finance/entries", { method: "POST", body: JSON.stringify({ ...body, source_type: "manual" }) }, token);
+  // C6 / Aşama 4 P1: web KasaOS gibi kategori "other"; işlem anahtarı başlıkta (aynı anahtar + aynı gövde → ilk sonuç, replayed).
+  return request<any>(
+    "/finance/entries",
+    {
+      method: "POST",
+      body: JSON.stringify({ ...body, category: "other", source_type: "manual" }),
+      headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+    },
+    token
+  );
 }
 
 export async function getParties(
@@ -858,7 +868,7 @@ export async function getLocalInvoice(token: string, id: string) {
 }
 
 export async function officializeLocalInvoice(token: string, id: string) {
-  return request<{ ok?: boolean; message?: string; edoc_state?: string; pending?: boolean }>(
+  return request<{ ok?: boolean; message?: string; edoc_state?: string; pending?: boolean; amount_note?: string }>(
     `/local-invoices/${encodeURIComponent(id)}/resmilestir`,
     { method: "POST" },
     token
@@ -1035,4 +1045,16 @@ export async function getTrialStatus(token: string) {
 
 export async function getUsageSummary(token: string) {
   return request<UsageSummary>("/usage/summary", { method: "GET" }, token);
+}
+
+
+// F2 — web DashboardPage: GET /dashboard/recent-orders?limit (sunucu kayıt tarihine göre sıralar; düz Order dizisi).
+export async function getRecentOrders(token: string, limit = 5) {
+  const d = await request<any>(`/dashboard/recent-orders?limit=${limit}`, { method: "GET" }, token);
+  return (Array.isArray(d) ? d : []) as Order[];
+}
+
+// F3 — web Header: POST /support/notifications/mark-read (destek yanıtlarını sunucuda okundu sayar; başka cihazda da düşer).
+export async function markSupportNotificationsRead(token: string) {
+  return request<{ success?: boolean; updated?: number }>("/support/notifications/mark-read", { method: "POST" }, token);
 }

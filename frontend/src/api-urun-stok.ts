@@ -181,6 +181,8 @@ export type ProductLinks = {
   // Görseller (adresler) ve birincil görsel; kanal satış durumu (sağlayıcı → active | inactive).
   images: string[];
   imageUrl: string;
+  // Aşama 4 sonrası sunucu: ObiHub'a yüklenmiş görsellerin kimlikleri (silmede R2'den de kaldırılır).
+  uploadedImages: { id: string; url: string }[];
   salesStatus: Record<string, string>;
   barcode: string;
   sku: string;
@@ -201,6 +203,9 @@ export async function getProductLinks(token: string, productId: string): Promise
     name: String(p?.name || ""),
     images: (Array.isArray(p?.images) ? p.images : []).map((x: any) => (typeof x === "string" ? x : String(x?.url || x?.src || ""))).filter((u: string) => /^https?:\/\//i.test(u)),
     imageUrl: String(p?.image_url || ""),
+    uploadedImages: (Array.isArray(p?.uploaded_images) ? p.uploaded_images : [])
+      .map((x: any) => ({ id: String(x?.id || ""), url: String(x?.url || "") }))
+      .filter((x: { id: string; url: string }) => x.id && x.url),
     salesStatus: obj(p?.channel_sales_status) as Record<string, string>,
     barcode: String(p?.barcode || ""),
     sku: String(p?.sku || ""),
@@ -371,4 +376,32 @@ export async function setProductSalesStatus(token: string, productId: string, ac
     { method: "POST", body: JSON.stringify({ action }) },
     token
   );
+}
+
+// ---- B5: ürün satış içgörüleri (web ProductDetailPage "sales-reports"; GET /products/{id}/insights?range=week|month|year) ----
+export type ProductInsights = {
+  revenue: number;
+  quantity: number;
+  orders: number;
+  byProvider: { provider: string; label: string; revenue: number; quantity: number; orders: number }[];
+};
+
+export async function getProductInsights(token: string, productId: string, range: "week" | "month" | "year"): Promise<ProductInsights> {
+  const d = await request<any>(`/products/${encodeURIComponent(productId)}/insights?range=${range}`, {}, token);
+  const s = d?.sales || {};
+  return {
+    revenue: Number(s.total_revenue) || 0,
+    quantity: Number(s.total_quantity) || 0,
+    orders: Number(s.total_orders) || 0,
+    byProvider: (Array.isArray(s.by_provider) ? s.by_provider : [])
+      .map((x: any) => ({
+        provider: String(x?.provider || ""),
+        label: String(x?.integration_name || x?.provider_label || x?.provider || ""),
+        revenue: Number(x?.revenue) || 0,
+        quantity: Number(x?.quantity) || 0,
+        orders: Number(x?.orders) || 0,
+      }))
+      .filter((x: any) => x.orders > 0 || x.quantity > 0)
+      .sort((a: any, b: any) => b.revenue - a.revenue),
+  };
 }

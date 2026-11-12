@@ -161,7 +161,8 @@ export default function LocalInvoiceDetailScreen() {
   };
   const canOfficialize =
     mayWrite && parasutConnected === true && !inv.parasut_invoice_id && inv.status !== "resmilesti" && !isCancelled;
-  const canCollect = mayWrite && !isCancelled && remaining > 0.004;
+  // Aşama 4 P6: e-belge tutarı Paraşüt'le uyuşmadığında (blocked_mismatch) sunucu tahsilatı 409 ile reddeder; düğme gizlenir.
+  const canCollect = mayWrite && !isCancelled && remaining > 0.004 && inv?.edoc_state !== "blocked_mismatch";
 
   const onOfficialize = async () => {
     if (!token) return;
@@ -177,6 +178,8 @@ export default function LocalInvoiceDetailScreen() {
     try {
       const r = await officializeLocalInvoice(token, inv.id);
       toast(r?.message || (r?.pending ? "E-belge sıraya alındı" : "Fatura resmileşti"), "success");
+      // P6: tutar Paraşüt iskontosu nedeniyle yeniden hesaplandıysa kısa not.
+      if (r?.amount_note) toast(String(r.amount_note), "info");
       await load();
     } catch (e: any) {
       toast(e?.message || "Resmileştirilemedi.", "error");
@@ -318,6 +321,17 @@ export default function LocalInvoiceDetailScreen() {
             <View style={[styles.alert, { backgroundColor: colors.errorBg }]}>
               <AlertIcon size={18} color={colors.error} />
               <Text style={[type.footnote, { color: colors.error, flex: 1 }]}>E-belge hatası: {inv.edoc_error}</Text>
+            </View>
+          </SafeAnimatedView>
+        ) : null}
+
+        {inv.edoc_state === "blocked_mismatch" ? (
+          <SafeAnimatedView entering={FadeInDown.delay(60).duration(380)}>
+            <View testID="invoice-edoc-mismatch" style={[styles.alert, { backgroundColor: colors.warningBg }]}>
+              <AlertIcon size={18} color={colors.amber} />
+              <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>
+                {inv.edoc_error || "Fatura tutarı Paraşüt'teki tutarla uyuşmuyor. Uyuşmazlık giderilene kadar tahsilat eklenemez; web panelinden kontrol edin."}
+              </Text>
             </View>
           </SafeAnimatedView>
         ) : null}

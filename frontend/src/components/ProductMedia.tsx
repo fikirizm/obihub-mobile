@@ -1,7 +1,7 @@
 // Dalga B3 — ürün detayında görseller ve satış durumu.
 // Görsel: kamera / fotoğraflardan seçilir, POST /products/{id}/images (multipart) ile yüklenir. Ana görsel ve kaldırma
-// PATCH /products/{id} {images, image_url} ile (web ile aynı); bu oturumda yüklenen görsel kaldırılınca R2'den de silinir
-// (DELETE /products/{id}/images/{image_id}; ürün belgesi görsel kimliklerini taşımadığı için yalnız bilinenler).
+// PATCH /products/{id} {images, image_url} ile (web ile aynı). Yüklenmiş görsel (uploaded_images) DELETE ile kaldırılır;
+// sunucu PATCH ile listeden çıkan yüklenmiş görseli de R2'den siler.
 // Satış durumu: POST /products/{id}/bulk-sales-status {open|close} — eşleşik tüm kanallarda.
 import React, { useState } from "react";
 import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -117,7 +117,8 @@ export function ProductMedia({
         haptic.success();
         onChanged(url);
       } else {
-        const id = uploadedIds.get(url);
+        // Yüklenmiş görselin kimliği sunucudan (uploaded_images) ya da bu oturumdaki yüklemeden; yoksa PATCH (sunucu R2'den de siler).
+        const id = uploadedIds.get(url) || links?.uploadedImages.find((u) => u.url === url)?.id;
         if (id) {
           const r = await deleteProductImage(token, productId, id);
           uploadedIds.delete(url);

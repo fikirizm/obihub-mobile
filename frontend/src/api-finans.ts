@@ -30,8 +30,20 @@ export type TransferBody = {
   reference: string;
 };
 
-export async function createTransfer(token: string, body: TransferBody) {
-  return request<{ transfer_id?: string }>("/finance/transfers", { method: "POST", body: JSON.stringify(body) }, token);
+export async function createTransfer(token: string, body: TransferBody, idempotencyKey?: string) {
+  // Aşama 4 P1: atomik virman; aynı anahtarla yeniden deneme yarıda kalanı tamamlar, ikinci virman açmaz.
+  return request<{ transfer_id?: string; replayed?: boolean }>(
+    "/finance/transfers",
+    { method: "POST", body: JSON.stringify(body), headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined },
+    token
+  );
+}
+
+// Aşama 4 P1: belirsiz para sonucu. Ağ hatası / 5xx (MONEY_PARTIAL hariç) → aynı anahtarla güvenle yeniden gönderilebilir.
+// MONEY_PARTIAL: sunucu yarım kalan işlemi geri alamadı; yeniden göndermeden önce hareketler kontrol edilmeli.
+export function moneyRetryable(e: unknown): boolean {
+  const code = (e as { code?: string } | null)?.code;
+  return isUncertainWrite(e) && code !== "MONEY_PARTIAL";
 }
 
 // ---------------------------------------------------------------------------

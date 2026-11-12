@@ -3,8 +3,8 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } fr
 import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { getCashAccounts } from "../../src/api";
-import { createTransfer, isUncertainWrite } from "../../src/api-finans";
+import { getCashAccounts, newIdempotencyKey } from "../../src/api";
+import { createTransfer, moneyRetryable } from "../../src/api-finans";
 import { todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing, tabular, type } from "../../src/theme/tokens";
@@ -39,6 +39,8 @@ export default function TransferScreen() {
   const sending = useRef(false);
   // Önceki gönderimin sonucu belirsiz kaldıysa (yanıt alınamadı) doğrudur; yeniden gönderim ayrıca onaylatılır.
   const [uncertain, setUncertain] = useState(false);
+  // Aşama 4 P1: virman başına bir anahtar; belirsiz sonuçta alanlar kilitlenir ve AYNI anahtarla gönderilir.
+  const keyRef = useRef<string | null>(null);
   const mayWrite = canManage(user, "billing");
 
   const load = useCallback(async () => {
@@ -78,35 +80,39 @@ export default function TransferScreen() {
     if (!token || !source || !target || !amount || amount <= 0 || sending.current) return;
     const after = Number(source.balance || 0) - amount;
     const ok = await confirm({
-      title: uncertain ? "Virman yeniden gönderilsin mi?" : "Virman kaydedilsin mi?",
+      title: uncertain ? "Aynı virman yeniden gönderilsin mi?" : "Virman kaydedilsin mi?",
       message:
-        (uncertain ? "Önceki gönderimin sonucu alınamadı; virman kaydedilmiş olabilir. Hesap hareketlerinde görünüyorsa yeniden göndermeyin, aksi halde tutar iki kez aktarılır.\n" : "") +
+        (uncertain ? "Önceki gönderimin sonucu alınamadı. Aynı virman aynı anahtarla gönderilir; kaydedildiyse ikinci kez aktarılmaz.\n" : "") +
         `${source.name} hesabından ${target.name} hesabına ${formatMoney(amount, source.currency)} aktarılacak.\nTarih: ${formatDate(todayIso())}` +
         (after < 0 ? `\nDikkat: ${source.name} bakiyesi ${formatMoney(after, source.currency)} olacak.` : ""),
-      confirmLabel: uncertain ? "Yine de gönder" : "Virmanı kaydet",
-      destructive: uncertain,
+      confirmLabel: uncertain ? "Yeniden gönder" : "Virmanı kaydet",
     });
     if (!ok || sending.current) return;
     sending.current = true;
     setBusy(true);
+    if (!uncertain || !keyRef.current) keyRef.current = newIdempotencyKey("trf");
     try {
-      await createTransfer(token, {
+      const r = await createTransfer(token, {
         from_account_id: source.id,
         to_account_id: target.id,
         amount,
         entry_date: todayIso(),
         description: description.trim(),
         reference: "",
-      });
-      toast("Virman kaydedildi", "success");
+      }, keyRef.current);
+      toast(r?.replayed ? "Virman zaten kaydedilmişti." : "Virman kaydedildi", "success");
       router.back();
     } catch (e: any) {
-      if (isUncertainWrite(e)) {
-        // İstek sunucuda işlenmiş olabilir: güncel bakiyeler yeniden yüklenir, form uyarıyla açık kalır.
+      if (moneyRetryable(e)) {
+        // İstek sunucuda işlenmiş olabilir: alanlar kilitlenir, yeniden gönderim aynı anahtarla yapılır.
         setUncertain(true);
-        toast("Sonuç alınamadı. Virman kaydedilmiş olabilir; hesap hareketlerini kontrol edin.", "error");
+        toast("Sonuç alınamadı. Aynı virmanı yeniden gönderebilirsiniz; ikinci kez aktarılmaz.", "error");
+        load();
+      } else if (e?.code === "MONEY_PARTIAL") {
+        toast(e?.message || "İşlem yarım kaldı; yeniden göndermeden önce hesap hareketlerini kontrol edin.", "error");
         load();
       } else {
+        keyRef.current = null;
         toast(e?.message || "Virman kaydedilemedi.", "error");
       }
     } finally {
@@ -152,7 +158,7 @@ export default function TransferScreen() {
           <Card style={styles.block}>
             <View accessibilityRole="radiogroup">
               {accounts.map((a, i) => (
-                <AccountOption key={a.id} testID={`transfer-from-${a.id}`} account={a} selected={a.id === fromId} divider={i > 0} onPress={() => setFromId(a.id)} />
+                <AccountOption key={a.id} testID={`transfer-from-${a.id}`} account={a} selected={a.id === fromId} divider={i > 0} onPress={() => !uncertain && setFromId(a.id)} />
               ))}
             </View>
           </Card>
@@ -166,7 +172,7 @@ export default function TransferScreen() {
             <Card style={styles.block}>
               <View accessibilityRole="radiogroup">
                 {targets.map((a, i) => (
-                  <AccountOption key={a.id} testID={`transfer-to-${a.id}`} account={a} selected={a.id === toId} divider={i > 0} onPress={() => setToId(a.id)} />
+                  <AccountOption key={a.id} testID={`transfer-to-${a.id}`} account={a} selected={a.id === toId} divider={i > 0} onPress={() => !uncertain && setToId(a.id)} />
                 ))}
               </View>
             </Card>
@@ -178,6 +184,7 @@ export default function TransferScreen() {
               label={`Tutar (${cur(source)})`}
               value={amountText}
               onChangeText={setAmountText}
+              editable={!uncertain}
               placeholder="0,00"
               keyboardType="decimal-pad"
               suffix={cur(source)}
@@ -188,6 +195,7 @@ export default function TransferScreen() {
               label="Açıklama (isteğe bağlı)"
               value={description}
               onChangeText={setDescription}
+              editable={!uncertain}
               placeholder="Örn. Kasadan bankaya yatırılan"
               maxLength={140}
               returnKeyType="done"
