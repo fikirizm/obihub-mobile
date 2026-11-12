@@ -28,11 +28,13 @@ const HERO_BAD = palette.dark.error;
 
 // Yenilemede ürün aranırken okunacak en çok sayfa (sayfa başına 100 ürün).
 const RELOAD_MAX_PAGES = 5;
+type StockMode = "in" | "out" | "adjustment";
 const UNSENT_NOTE = "Pazaryerine gönderilmedi";
 const ASYNC_STOCK_CHANNELS = new Set(["trendyol", "hepsiburada", "n11"]);
-const BASE_SENT_NOTE = "Pazaryerine ana fiyat gönderildi";
+const CHANNEL_KEPT_NOTE = "Kanala özel fiyat korundu";
 
-type SyncOutcome = { message?: string; synced_providers?: string[]; skipped_providers?: Record<string, string> };
+// `status: "pending"`: pazaryeri (Trendyol) isteği kuyruğa aldı, sonuç kesinleşmedi; sunucu değeri henüz kaydetmedi.
+type SyncOutcome = { message?: string; status?: string; synced_providers?: string[]; skipped_providers?: Record<string, string> };
 
 function samePrice(a: number, b: number) {
   return Math.abs(a - b) < 0.005;
@@ -164,7 +166,7 @@ function ChannelRow({
 export default function ProductDetailScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const id = String(params.id || "");
-  const { token, user, accountingProvider, accountingLoaded, reloadAccounting } = useAuth();
+  const { token, user, accountingProgram, accountingLoaded, reloadAccounting } = useAuth();
   const { colors } = useTheme();
   const { toast, promptNumber, promptEntry } = useFeedback();
   const [product, setProduct] = useState<CatalogProduct | null>(() => recallProduct(id));
@@ -173,8 +175,8 @@ export default function ProductDetailScreen() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   // Bu ekranda ana değer değiştiği hâlde pazaryerine gönderilmemiş kanal satırları (kanal kimlikleri).
   const [unsent, setUnsent] = useState<{ stock: string[]; price: string[] }>({ stock: [], price: [] });
-  // Toplu gönderimde pazaryerine ana fiyat giden, ancak kanala özel fiyat kaydı eski kalan satırlar (kanal kimlikleri).
-  const [baseSent, setBaseSent] = useState<string[]>([]);
+  // Toplu gönderimde kanala özel fiyatı olduğu için ana fiyat yerine kendi fiyatı gönderilen satırlar (kanal kimlikleri).
+  const [keptChannel, setKeptChannel] = useState<string[]>([]);
   const canEdit = canManage(user, "inventory");
   // Ad / SKU / barkod ürün kartı bilgisidir: katalog yönetme izni ister.
   const canEditInfo = canManage(user, "catalog");
@@ -232,6 +234,12 @@ export default function ProductDetailScreen() {
     setBusyKey(key);
     try {
       const res = await action();
+      if (res?.status === "pending") {
+        // Web gibi: değer ekrana uygulanmaz, sunucu sonucu kesinleşince kaydeder.
+        toast(res.message || "Pazaryeri işlemi sürüyor; birkaç dakika içinde kesinleşir.", "info");
+        await reload(false);
+        return null;
+      }
       setProduct((prev) => {
         if (!prev) return prev;
         const next = apply(prev);
@@ -275,20 +283,44 @@ export default function ProductDetailScreen() {
       toast("Muhasebe ayarı okunamadı. Bağlantıyı kontrol edip tekrar deneyin.", "error");
       return;
     }
-    const v = await promptNumber({
-      title: "Ana stok",
-      message: accountingProvider ? `${product.name}\nMuhasebe programına da yansıtılır; pazaryeri stokları ayrı güncellenir.` : product.name,
-      initial: product.stock,
+    // Web ürün detayıyla aynı: Ekle / Çıkar / Sayım ve isteğe bağlı sebep (frontend/src/pages/ProductDetailPage.js).
+    const entry = await promptEntry({
+      title: "Stok güncelle",
+      message: `${product.name}\nMevcut stok: ${product.stock} adet${accountingProgram ? "\nMuhasebe programına da yansıtılır; pazaryeri stokları ayrı güncellenir." : ""}`,
+      initial: 0,
       suffix: "adet",
+      noteLabel: "Sebep (isteğe bağlı)",
+      methods: [
+        { value: "in", label: "Ekle" },
+        { value: "out", label: "Çıkar" },
+        { value: "adjustment", label: "Sayım" },
+      ],
     });
-    if (v === null || v === product.stock) return;
+    if (!entry) return;
+    const mode = (entry.method || "in") as StockMode;
+    const qty = Math.max(0, Math.round(entry.amount));
+    if (mode !== "adjustment" && qty <= 0) {
+      toast("Miktar sıfırdan büyük olmalı.", "error");
+      return;
+    }
+    if (mode === "out" && qty > product.stock) {
+      toast("Çıkarılan miktar mevcut stoktan büyük olamaz.", "error");
+      return;
+    }
+    const next = mode === "in" ? product.stock + qty : mode === "out" ? product.stock - qty : qty;
+    if (next === product.stock) return;
     // Kanala özel değeri olmayan satırlar ana stoğu yansıtır; bu değişiklik pazaryerine gitmediği için işaretlenir.
     const mirrored = product.channelStocks.filter((x) => x.stock === product.stock).map((x) => x.integration_id);
-    // Web panelindeki gibi: ana stok yalnızca muhasebe programına yansıtılır.
     const out = await run(
       "stock",
-      () => setProductStock(token, product.id, v, [accountingProvider || SYNC_NONE]),
-      (p) => ({ ...p, stock: v }),
+      () =>
+        setProductStock(token, product.id, {
+          mode,
+          quantity: qty,
+          reason: entry.note || undefined,
+          syncTargets: [accountingProgram || SYNC_NONE],
+        }),
+      (p) => ({ ...p, stock: next }),
       mirrored.length > 0 ? "Stok güncellendi. Pazaryeri stokları değişmedi." : "Stok güncellendi"
     );
     if (out) setUnsent((u) => ({ ...u, stock: Array.from(new Set([...u.stock, ...mirrored])) }));
@@ -296,7 +328,7 @@ export default function ProductDetailScreen() {
 
   const editBasePrice = async () => {
     if (!token) return;
-    // Kapsam aynı sayfada seçilir (iOS'ta art arda iki sayfa açılamaz). Varsayılan: yalnızca ana fiyat.
+    // Kapsam aynı sayfada seçilir (iOS'ta art arda iki sayfa açılamaz). Varsayılan web ile aynı: bağlı tüm kanallar.
     const entry = await promptEntry({
       title: "Ana fiyat",
       message: product.name,
@@ -304,20 +336,20 @@ export default function ProductDetailScreen() {
       decimal: true,
       suffix: "₺",
       methods: [
-        { value: "base", label: "Yalnızca ana fiyat" },
-        { value: "all", label: "Bağlı tüm kanallara da gönder" },
+        { value: "all", label: "Bağlı tüm kanallara gönder" },
+        { value: "base", label: accountingProgram ? "Yalnız muhasebe programına" : "Yalnızca ana fiyat" },
       ],
     });
     if (!entry) return;
     const v = entry.amount;
-    const pushAll = entry.method === "all";
+    const pushAll = entry.method !== "base";
     if (v === product.price && !pushAll) return;
     if (!pushAll) {
       // Kanala özel fiyatı olmayan satırlar ana fiyatı yansıtır; bu değişiklik pazaryerine gitmediği için işaretlenir.
       const mirrored = product.channelPrices.filter((x) => samePrice(x.price, product.price)).map((x) => x.integration_id);
       const out = await run(
         "price",
-        () => setProductPrice(token, product.id, v, false),
+        () => setProductPrice(token, product.id, v, [accountingProgram || SYNC_NONE]),
         (p) => ({ ...p, price: v }),
         mirrored.length > 0 ? "Fiyat güncellendi. Pazaryeri fiyatları değişmedi." : "Fiyat güncellendi"
       );
@@ -325,25 +357,29 @@ export default function ProductDetailScreen() {
       return;
     }
     // Sunucu toplu gönderimde her kanala göndermez (ör. İdefix, Pazarama); yanıttaki `synced_providers` esas alınır.
+    // Kanala özel fiyatı olan kanala sunucu ana fiyatı değil o kanalın kendi fiyatını gönderir (web ile aynı).
     const sentTo = (res: SyncOutcome) => {
-      const synced = new Set((res.synced_providers || []).map((s) => String(s).toLowerCase()));
+      const synced = new Set((res.synced_providers || []).map((x) => String(x).toLowerCase()));
       return (ch: ChannelRef) => synced.has(ch.platform.toLowerCase());
     };
-    // Kanala özel fiyatı olmayan satırlar ana fiyatı yansıtır; gönderilmeyen kanalda satır yeni fiyatı gösterse de pazaryeri eski kalır.
     const mirroredIds = product.channelPrices.filter((x) => samePrice(x.price, product.price)).map((x) => x.integration_id);
+    const ownIds = product.channelPrices.filter((x) => !samePrice(x.price, product.price)).map((x) => x.integration_id);
     const missedOf = (res: SyncOutcome) => {
       const sent = sentTo(res);
       return channels.filter((ch) => mirroredIds.includes(ch.id) && !sent(ch));
     };
     const out = await run(
       "price",
-      () => setProductPrice(token, product.id, v, true),
+      () => setProductPrice(token, product.id, v, null),
       (p) => ({ ...p, price: v }),
       (res) => {
         const missed = missedOf(res);
         return missed.length > 0
           ? { message: `Fiyat güncellendi, ancak şu kanallara gönderilmedi: ${missed.map((ch) => ch.name).join(", ")}`, kind: "error" }
-          : { message: "Fiyat güncellendi ve kanallara gönderildi", kind: "success" };
+          : {
+              message: ownIds.length > 0 ? "Fiyat gönderildi. Kanala özel fiyatı olan kanallarda o fiyat korundu." : "Fiyat güncellendi ve kanallara gönderildi",
+              kind: "success",
+            };
       }
     );
     if (!out) return;
@@ -351,12 +387,7 @@ export default function ProductDetailScreen() {
     const sentIds = channels.filter(sent).map((ch) => ch.id);
     const missedIds = missedOf(out.res).map((ch) => ch.id);
     setUnsent((u) => ({ ...u, price: Array.from(new Set([...u.price.filter((cid) => !sentIds.includes(cid)), ...missedIds])) }));
-    // Sunucu toplu gönderimde kanala özel fiyat kaydını güncellemez. Kayıt burada yeniden gönderilmez (ikinci istek
-    // Trendyol liste fiyatını ezer); satırı eski kalan kanallar yalnızca ekranda işaretlenir.
-    const stale = (out.fresh?.channelPrices || product.channelPrices)
-      .filter((x) => sentIds.includes(x.integration_id) && !samePrice(x.price, v))
-      .map((x) => x.integration_id);
-    setBaseSent((prev) => Array.from(new Set([...prev.filter((cid) => !sentIds.includes(cid) && !missedIds.includes(cid)), ...stale])));
+    setKeptChannel(ownIds.filter((cid) => sentIds.includes(cid)));
   };
 
   const editChannelStock = async (ch: ChannelRef, current: number) => {
@@ -388,7 +419,7 @@ export default function ProductDetailScreen() {
     );
     if (out) {
       setUnsent((u) => ({ ...u, price: u.price.filter((cid) => cid !== ch.id) }));
-      setBaseSent((prev) => prev.filter((cid) => cid !== ch.id));
+      setKeptChannel((prev) => prev.filter((cid) => cid !== ch.id));
     }
   };
 
@@ -539,7 +570,7 @@ export default function ProductDetailScreen() {
                       divider={i > 0}
                       matched={Boolean(row)}
                       value={row ? formatTry(row.price) : "-"}
-                      note={!row ? undefined : unsent.price.includes(ch.id) ? UNSENT_NOTE : baseSent.includes(ch.id) && !samePrice(row.price, product.price) ? BASE_SENT_NOTE : undefined}
+                      note={!row ? undefined : unsent.price.includes(ch.id) ? UNSENT_NOTE : keptChannel.includes(ch.id) && !samePrice(row.price, product.price) ? CHANNEL_KEPT_NOTE : undefined}
                       busy={busyKey === `cp-${ch.id}`}
                       editable={canEdit && Boolean(row)}
                       onPress={canEdit && row && !busyKey ? () => editChannelPrice(ch, row.price) : undefined}

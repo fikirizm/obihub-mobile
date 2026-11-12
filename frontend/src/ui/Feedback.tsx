@@ -29,6 +29,9 @@ type NumberPromptOptions = {
   // Verilirse tutarın altında tek seçimli seçenekler gösterilir (ör. ödeme yöntemi).
   // Ayrı bir sayfa açılmaz: iOS'ta art arda iki sayfa sunulamaz.
   methods?: { value: string; label: string }[];
+  // İkinci tek seçimli grup (ör. tahsilatın yazılacağı kasa/banka hesabı); aynı sayfada gösterilir.
+  accounts?: { value: string; label: string }[];
+  accountsLabel?: string;
 };
 
 // Kullanıcının yazdığı sayıyı çözer. Virgül ondalık ayırıcıdır; virgül yoksa sondaki
@@ -59,7 +62,7 @@ type FeedbackValue = {
   // Sayı ister; vazgeçilirse null döner.
   promptNumber: (options: NumberPromptOptions) => Promise<number | null>;
   // Tutar ve açıklama ister; vazgeçilirse null döner.
-  promptEntry: (options: NumberPromptOptions) => Promise<{ amount: number; note: string; method: string } | null>;
+  promptEntry: (options: NumberPromptOptions) => Promise<{ amount: number; note: string; method: string; account: string } | null>;
   // Seçeneklerden birini seçtirir; vazgeçilirse null döner.
   choose: <T extends string>(options: ChooseOptions<T>) => Promise<T | null>;
 };
@@ -81,6 +84,8 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
   const [noteFocused, setNoteFocused] = useState(false);
   const [methodValue, setMethodValue] = useState("");
   const methodRef = useRef("");
+  const [accountValue, setAccountValue] = useState("");
+  const accountRef = useRef("");
   const [chooseState, setChooseState] = useState<ChooseOptions<string> | null>(null);
   const chooseResolver = useRef<((v: string | null) => void) | null>(null);
 
@@ -110,6 +115,9 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
       const firstMethod = options.methods?.[0]?.value || "";
       setMethodValue(firstMethod);
       methodRef.current = firstMethod;
+      const firstAccount = options.accounts?.[0]?.value || "";
+      setAccountValue(firstAccount);
+      accountRef.current = firstAccount;
       setNumberState(options);
     });
   }, []);
@@ -118,7 +126,7 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
     async (options: NumberPromptOptions) => {
       const amount = await promptNumber(options);
       if (amount === null) return null;
-      return { amount, note: noteRef.current.trim(), method: methodRef.current };
+      return { amount, note: noteRef.current.trim(), method: methodRef.current, account: accountRef.current };
     },
     [promptNumber]
   );
@@ -317,6 +325,38 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
                       </Pressable>
                     );
                   })}
+                </View>
+              ) : null}
+              {numberState.accounts && numberState.accounts.length > 0 ? (
+                <View>
+                  {numberState.accountsLabel ? (
+                    <Text style={[type.caption, { color: colors.textTertiary, marginTop: spacing.sm }]}>{numberState.accountsLabel}</Text>
+                  ) : null}
+                  <View style={styles.methodRow} accessibilityRole="radiogroup">
+                    {numberState.accounts.map((m) => {
+                      const active = accountValue === m.value;
+                      return (
+                        <Pressable
+                          key={m.value}
+                          testID={`account-${m.value}`}
+                          accessibilityRole="radio"
+                          accessibilityLabel={m.label}
+                          accessibilityState={{ selected: active }}
+                          hitSlop={4}
+                          onPress={() => {
+                            setAccountValue(m.value);
+                            accountRef.current = m.value;
+                          }}
+                          style={[
+                            styles.methodChip,
+                            { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primarySoft : colors.surface },
+                          ]}
+                        >
+                          <Text style={[type.callout, { color: active ? colors.primary : colors.textSecondary, fontWeight: "600" }]} numberOfLines={1}>{m.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
                 </View>
               ) : null}
               {numberState.noteLabel ? (

@@ -4,7 +4,8 @@ import { useLocalSearchParams } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { addLocalInvoicePayment, getLocalInvoice, officializeLocalInvoice } from "../../src/api";
+import { addLocalInvoicePayment, checkLocalInvoiceEdocStatus, getCashAccounts, getLocalInvoice, officializeLocalInvoice } from "../../src/api";
+import { isUncertainWrite } from "../../src/api-finans";
 import { invoiceStatus, isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
@@ -79,7 +80,7 @@ export default function LocalInvoiceDetailScreen() {
   const [inv, setInv] = useState<LocalInvoice | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [busy, setBusy] = useState<"official" | "payment" | null>(null);
+  const [busy, setBusy] = useState<"official" | "payment" | "edoc" | null>(null);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
@@ -154,6 +155,20 @@ export default function LocalInvoiceDetailScreen() {
 
   const onCollect = async () => {
     if (!token) return;
+    // Web gibi tahsilatın yazılacağı kasa/banka hesabı seçilir; yalnız fatura para birimindeki hesaplar listelenir.
+    let accounts: Awaited<ReturnType<typeof getCashAccounts>> = [];
+    try {
+      accounts = await getCashAccounts(token);
+    } catch (e: any) {
+      toast(e?.message || "Kasa/banka hesapları okunamadı.", "error");
+      return;
+    }
+    const invCur = String(cur || "TRY").toUpperCase();
+    const usable = accounts.filter((a) => String(a.currency || "TRY").toUpperCase() === invCur);
+    if (accounts.length > 0 && usable.length === 0) {
+      toast(`${invCur} para biriminde kasa/banka hesabı yok. Önce Kasa ve Bankalar'dan hesap ekleyin.`, "error");
+      return;
+    }
     const entry = await promptEntry({
       title: "Tahsilat ekle",
       message: `Kalan ${formatMoney(remaining, cur)}`,
@@ -161,6 +176,8 @@ export default function LocalInvoiceDetailScreen() {
       decimal: true,
       noteLabel: "Not (isteğe bağlı)",
       methods: [...PAYMENT_METHODS],
+      accounts: usable.map((a) => ({ value: a.id, label: a.name })),
+      accountsLabel: usable.length > 0 ? "Hesap" : undefined,
     });
     if (!entry || entry.amount <= 0) return;
     if (entry.amount > remaining + 0.004) {
@@ -170,11 +187,42 @@ export default function LocalInvoiceDetailScreen() {
     const method = entry.method || "nakit";
     setBusy("payment");
     try {
-      await addLocalInvoicePayment(token, inv.id, { amount: entry.amount, date: todayIso(), method, notes: entry.note || undefined });
+      await addLocalInvoicePayment(token, inv.id, {
+        amount: entry.amount,
+        date: todayIso(),
+        method,
+        notes: entry.note || undefined,
+        account_id: entry.account || null,
+      });
       toast("Tahsilat kaydedildi", "success");
       await load();
     } catch (e: any) {
-      toast(e?.message || "Tahsilat kaydedilemedi.", "error");
+      // Bağlantı koptuysa ya da sunucu hatasıysa tahsilat işlenmiş olabilir; yeniden göndermeden önce kontrol edilmeli.
+      toast(
+        isUncertainWrite(e)
+          ? "Tahsilatın kaydedilip kaydedilmediği bilinmiyor. Tekrar eklemeden önce faturayı yenileyip kontrol edin."
+          : e?.message || "Tahsilat kaydedilemedi.",
+        "error"
+      );
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onCheckEdoc = async () => {
+    if (!token) return;
+    setBusy("edoc");
+    try {
+      const r = await checkLocalInvoiceEdocStatus(token, inv.id);
+      const state = r?.edoc_state;
+      toast(
+        r?.message || (state === "done" ? "Fatura resmileşti" : state === "failed" ? "E-belge oluşturulamadı" : "E-belge sonucu henüz gelmedi"),
+        state === "failed" ? "error" : "success"
+      );
+      await load();
+    } catch (e: any) {
+      toast(e?.message || "Durum sorgulanamadı.", "error");
     } finally {
       setBusy(null);
     }
@@ -247,8 +295,11 @@ export default function LocalInvoiceDetailScreen() {
             <View testID="invoice-edoc-pending" style={[styles.alert, { backgroundColor: colors.infoBg }]}>
               <ClockIcon size={18} color={colors.info} />
               <Text style={[type.footnote, { color: colors.textSecondary, flex: 1 }]}>
-                E-belge sonucu bekleniyor. Fatura Paraşüt'e gönderildi; sonuç geldiğinde durum güncellenir.
+                E-belge sonucu bekleniyor. Fatura Paraşüt'e gönderildi; sonucu görmek için durumu sorgulayın.
               </Text>
+              {inv.parasut_invoice_id ? (
+                <Button testID="invoice-edoc-check" label="Durumu sorgula" size="sm" variant="secondary" busy={busy === "edoc"} disabled={Boolean(busy)} onPress={onCheckEdoc} />
+              ) : null}
             </View>
           </SafeAnimatedView>
         ) : null}

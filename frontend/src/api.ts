@@ -673,25 +673,30 @@ export function newIdempotencyKey(prefix: string) {
   return `mob-${prefix}-${Date.now().toString(36)}-${rand}`;
 }
 
-type SyncResult = { message?: string; synced_providers?: string[]; skipped_providers?: Record<string, string> };
+type SyncResult = { status?: string; message?: string; synced_providers?: string[]; skipped_providers?: Record<string, string> };
 
-// Ana stoğu mutlak değere ayarlar. Değer yalnızca `syncTargets` içindeki sağlayıcılara gönderilir; liste boş bırakılamaz.
-export async function setProductStock(token: string, productId: string, stock: number, syncTargets: string[]) {
-  if (syncTargets.length === 0) throw { message: "Stok hedefi belirlenemedi.", status: 0 };
+// Ana stok: "in"/"out" miktar kadar ekler/düşer, "adjustment" stoğu verilen değere ayarlar (web ürün detayıyla aynı).
+// Değer yalnızca `syncTargets` içindeki sağlayıcılara gönderilir; liste boş bırakılamaz.
+export async function setProductStock(
+  token: string,
+  productId: string,
+  opts: { mode: "in" | "out" | "adjustment"; quantity: number; reason?: string; syncTargets: string[]; idempotencyKey?: string }
+) {
+  if (opts.syncTargets.length === 0) throw { message: "Stok hedefi belirlenemedi.", status: 0 };
   return request<SyncResult & { new_stock?: number }>(
     "/stock/adjust",
     {
       method: "POST",
       // Sunucu aynı anahtarla gelen ikinci isteği yeniden uygulamaz (harf/rakam ve ._:- , 8–128 karakter).
-      headers: { "Idempotency-Key": newIdempotencyKey("stk") },
+      headers: { "Idempotency-Key": opts.idempotencyKey || newIdempotencyKey("stk") },
       body: JSON.stringify({
         product_id: productId,
-        quantity: Math.max(0, Math.round(stock)),
-        movement_type: "adjustment",
-        reason: "Mobil uygulamadan güncelleme",
+        quantity: Math.max(0, Math.round(opts.quantity)),
+        movement_type: opts.mode,
+        reason: (opts.reason || "").trim() || "Mobil uygulamadan güncelleme",
         sync_woocommerce: false,
         sync_all: false,
-        sync_targets: syncTargets,
+        sync_targets: opts.syncTargets,
       }),
     },
     token
@@ -706,13 +711,14 @@ export async function setChannelStock(token: string, productId: string, integrat
   );
 }
 
-// Ana fiyatı değiştirir. `pushToChannels` true ise fiyat ürünün bağlı olduğu tüm kanallara da gönderilir (web panelindeki davranış).
-export async function setProductPrice(token: string, productId: string, price: number, pushToChannels: boolean) {
+// Ana fiyatı değiştirir. `targets === null`: web fiyat listesi gibi bağlı tüm kanallara (muhasebe dahil) gönderir;
+// aksi hâlde yalnız verilen sağlayıcılara.
+export async function setProductPrice(token: string, productId: string, price: number, targets: string[] | null) {
   return request<SyncResult & { new_price?: number }>(
     "/price/adjust",
     {
       method: "POST",
-      body: JSON.stringify({ product_id: productId, price, currency: "TRY", sync_all: pushToChannels, sync_targets: pushToChannels ? [] : [SYNC_NONE] }),
+      body: JSON.stringify({ product_id: productId, price, currency: "TRY", sync_all: targets === null, sync_targets: targets === null ? [] : targets }),
     },
     token
   );
@@ -873,7 +879,21 @@ export async function officializeLocalInvoice(token: string, id: string) {
   );
 }
 
-export async function addLocalInvoicePayment(token: string, id: string, body: { amount: number; date: string; method: string; notes?: string }) {
+// Paraşüt'e gitmiş faturanın e-belge sonucunu yeniden okur (web: ObiHubInvoicesPage.js "Durumu sorgula").
+export async function checkLocalInvoiceEdocStatus(token: string, id: string) {
+  return request<{ ok?: boolean; edoc_state?: string; status?: string; message?: string }>(
+    `/local-invoices/${encodeURIComponent(id)}/edoc-status`,
+    { method: "POST" },
+    token
+  );
+}
+
+// `account_id` verilmezse sunucu para birimine bakmadan ilk hesabı seçer; web gibi hesap her zaman gönderilir.
+export async function addLocalInvoicePayment(
+  token: string,
+  id: string,
+  body: { amount: number; date: string; method: string; notes?: string; account_id?: string | null }
+) {
   return request<{ ok?: boolean; remaining_amount?: number; status?: string }>(
     `/local-invoices/${encodeURIComponent(id)}/payment`,
     { method: "POST", body: JSON.stringify(body) },

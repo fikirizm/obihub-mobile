@@ -26,6 +26,9 @@ type AuthContextValue = {
   parasutConnected: boolean | null;
   // Etkin muhasebe programı ("parasut", "bizimhesap" ...); bilinmiyorsa null.
   accountingProvider: string | null;
+  // Sunucunun çözdüğü etkin muhasebe programı (`settings/accounting.provider`; BenimPOS dahil). Web ürün detayı stok
+  // değişikliğini yalnız bu programa gönderir; mobil de aynısını yapar.
+  accountingProgram: string | null;
   // Muhasebe ayarı bu oturumda sunucudan okunabildi mi (false iken accountingProvider güvenilir değildir).
   accountingLoaded: boolean;
   reloadAccounting: () => Promise<void>;
@@ -206,6 +209,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [subscriptionLock, setSubscriptionLock] = useState<string | null>(null);
   const [parasutConnected, setParasutConnected] = useState<boolean | null>(null);
   const [accountingProvider, setAccountingProvider] = useState<string | null>(null);
+  const [accountingProgram, setAccountingProgram] = useState<string | null>(null);
   const [accountingLoaded, setAccountingLoaded] = useState(false);
   // Ön plandaki yoklama ile push işleyicisinin ortak kullandığı "bildirimi verilmiş sipariş" kümesi.
   const seenOrderIdsRef = useRef<Set<string>>(new Set());
@@ -278,6 +282,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSubscriptionLock(null);
     setParasutConnected(null);
     setAccountingProvider(null);
+    setAccountingProgram(null);
     setAccountingLoaded(false);
     // Önceki kullanıcının verisi sonraki girişte görünmesin.
     await clearAllCache().catch(() => {});
@@ -310,6 +315,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const connected = active === "parasut";
       setParasutConnected(connected);
       setAccountingProvider(active);
+      const program = String(settings?.provider || "").toLowerCase();
+      setAccountingProgram(["bizimhesap", "parasut", "benimpos"].includes(program) ? program : null);
       setAccountingLoaded(true);
       await Storage.setItemAsync(PARASUT_CONNECTED_KEY, connected ? "1" : "0");
     } catch {
@@ -526,6 +533,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       retrySubscription,
       parasutConnected,
       accountingProvider,
+      accountingProgram,
       accountingLoaded,
       reloadAccounting,
     }),
@@ -540,6 +548,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       retrySubscription,
       parasutConnected,
       accountingProvider,
+      accountingProgram,
       accountingLoaded,
       reloadAccounting,
     ]
