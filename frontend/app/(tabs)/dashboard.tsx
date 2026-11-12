@@ -6,7 +6,8 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { getDashboardStats, getFinanceOverview, getOrdersPage, getSalesChart, getSmartAlerts } from "../../src/api";
-import { canAccess } from "../../src/auth/permissions";
+import { canAccess, canManage } from "../../src/auth/permissions";
+import { QuickSaleCard } from "../../src/components/QuickSaleCard";
 import { formatCompact, formatTry } from "../../src/utils";
 import { AnimatedNumber, Sparkline } from "../../src/components/Charts";
 import { AlertIcon, ArrowRightIcon, BagIcon, ChartIcon, InboxIcon, PackageIcon, TruckIcon, UserIcon, WalletIcon } from "../../src/components/Icons";
@@ -164,6 +165,11 @@ export default function DashboardScreen() {
           contentContainerStyle={{ paddingBottom: spacing.xxl }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={colors.primary} />}
         >
+          {canManage(user, "billing") ? (
+            <SafeAnimatedView entering={FadeInDown.duration(380)}>
+              <QuickSaleCard />
+            </SafeAnimatedView>
+          ) : null}
           {/* Ciro kartı: bugün, dönem cirosu ve günlük grafik */}
           <SafeAnimatedView entering={FadeInDown.duration(420)}>
           <HeroCard tone="blue" style={{ marginTop: spacing.xs }}>

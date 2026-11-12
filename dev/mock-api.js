@@ -68,6 +68,7 @@ const expenseState = {
 };
 // Dalga 3 / C1: gelen fatura içeri alma durumları.
 const importState = { in2: "applied" };
+const posSales = [];
 const entries = [
   { id: "e1", account_id: "a1", entry_type: "income", amount: 1250, entry_date: "2026-11-10", description: "Nakit satış" },
   { id: "e2", account_id: "a1", entry_type: "expense", amount: 380.5, entry_date: "2026-11-09", description: "Kargo malzemesi" },
@@ -110,7 +111,7 @@ http
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -287,6 +288,28 @@ http
       return send(res, 200, { products: slice.map((p) => ({ id: p.id, price: p.price.toFixed(2), integration_prices: [{ integration_id: "i1", price: p.ch.i1.price.toFixed(2), active: true, ...(p.id === "p3" ? { pending: true, pending_price: (p.ch.i1.price + 10).toFixed(2), pending_at: new Date().toISOString() } : {}) }, { integration_id: "i2", price: p.ch.i2.price.toFixed(2), active: true }].filter((r) => r.integration_id !== "i2" || p.links.trendyol) })), integrations, total: rows.length, page, per_page: per });
     }
     // Ürün kimliği (ad / SKU / barkod) ve stok hareketleri — gerçek uçlar: GET|PATCH /products/{id}, GET /stock/movements.
+    // --- D1: POS. /__mode?posFail=1 → satış kaydedilir ama yanıt 500 (bir kez).
+    if (req.method === "POST" && path === "/pos/sales") {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        const key = req.headers["idempotency-key"];
+        console.log("WRITE", path, "key=" + key, raw);
+        const b = JSON.parse(raw || "{}");
+        const fp = JSON.stringify(b.items.map((i) => [i.product_id, i.quantity])) + b.discount_amount + b.payment_type;
+        const prev = posSales.find((x) => x.key === key);
+        if (prev) {
+          if (prev.fp !== fp) return send(res, 409, { detail: "Bu ödeme anahtarı farklı bir sepetle kullanılmış; yeni satış başlatın" });
+          return send(res, 200, prev.resp);
+        }
+        for (const it of b.items) { const p = products.find((x) => x.id === it.product_id); if (p) p.stock -= it.quantity; }
+        const resp = { id: "s" + (posSales.length + 1), sale_number: "POS-20261112-" + String(posSales.length + 1).padStart(4, "0"), created_at: new Date().toISOString(), total: b.total, payment_type: b.payment_type, customer_name: b.customer_name, item_count: b.items.length };
+        posSales.push({ key, fp, resp });
+        if (state.posFail === "1") { state.posFail = "0"; return send(res, 500, { detail: `Satış ${resp.sale_number} kaydedildi ancak stok düşülemedi (deneme). Aynı ödemeyi tekrar deneyin; stok yalnız bir kez düşülür.` }); }
+        send(res, 200, resp);
+      });
+      return;
+    }
     // --- B3: yeni ürün, görsel, satış durumu
     if (req.method === "POST" && path === "/products") {
       let raw = "";
@@ -605,7 +628,7 @@ http
     if (path === "/accounting/expense-categories") return send(res, 200, { items: [{ id: "c1", name: "Kargo giderleri" }, { id: "c2", name: "Ofis giderleri" }, { id: "c3", name: "Arşiv", active: false }] });
     if (req.method === "GET" && path === "/products" && url.searchParams.get("search")) {
       const q = url.searchParams.get("search").toLocaleLowerCase("tr-TR");
-      return send(res, 200, products.filter((p) => [p.name, p.sku, p.barcode].some((v) => v.toLocaleLowerCase("tr-TR").includes(q))).slice(0, Number(url.searchParams.get("limit") || 8)).map((p) => ({ id: p.id, name: p.name, sku: p.sku })));
+      return send(res, 200, products.filter((p) => [p.name, p.sku, p.barcode].some((v) => v.toLocaleLowerCase("tr-TR").includes(q))).slice(0, Number(url.searchParams.get("limit") || 8)).map((p) => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, price: p.price, vat_rate: 20, stock: p.stock, image_url: p.image_url || "" })));
     }
     if (req.method === "POST" && path === "/accounting/manual-purchases/preview") {
       let raw = "";

@@ -17,7 +17,7 @@ import { consumeCatalogDirty, recallProduct, rememberCatalog } from "../../src/c
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatTry } from "../../src/utils";
-import { PackageIcon, Path, SearchIcon, Svg, PlusIcon } from "../../src/components/Icons";
+import { PackageIcon, Path, SearchIcon, Svg, PlusIcon, WalletIcon } from "../../src/components/Icons";
 import { AccountingDifferences } from "../../src/components/AccountingDifferences";
 import { StockOverview } from "../../src/components/StockOverview";
 import { EmptyState } from "../../src/components/EmptyState";
@@ -96,6 +96,8 @@ export default function ProductsScreen() {
   const { token, user } = useAuth();
   // Ürün kartı oluşturmak katalog yönetme izni ister.
   const canCreate = canManage(user, "catalog");
+  // D1: hızlı satış girişi (PM kararı) fatura/kasa yönetme yetkisinde.
+  const canPos = canManage(user, "billing");
   const { colors, shadows } = useTheme();
   const [search, setSearch] = useState("");
   const debounced = useDebounce(search.trim(), 350);
@@ -271,18 +273,31 @@ export default function ProductsScreen() {
         onChangeText={setSearch}
         placeholder="Ürün adı, SKU veya barkod"
       />
-      {Platform.OS !== "web" ? (
-        <SafeAnimatedView
-          entering={FadeInDown.delay(60).duration(380)}
-          style={[styles.scanWrap, shadows.primary]}
-        >
-          <Button
-            testID="products-scan"
-            label="Barkod okut"
-            icon={<BarcodeIcon size={18} color="#FFFFFF" />}
-            onPress={() => router.push("/products/scan")}
-            style={styles.scanBtn}
-          />
+      {Platform.OS !== "web" || canPos ? (
+        <SafeAnimatedView entering={FadeInDown.delay(60).duration(380)} style={styles.actionRow}>
+          {Platform.OS !== "web" ? (
+            <View style={[{ flex: 1 }, shadows.primary]}>
+              <Button
+                testID="products-scan"
+                label="Barkod okut"
+                icon={<BarcodeIcon size={18} color="#FFFFFF" />}
+                onPress={() => router.push("/products/scan")}
+                style={styles.scanBtn}
+              />
+            </View>
+          ) : null}
+          {canPos ? (
+            <View style={{ flex: 1 }}>
+              <Button
+                testID="products-pos"
+                label="Satış yap"
+                variant="secondary"
+                icon={<WalletIcon size={18} color={colors.textPrimary} />}
+                onPress={() => router.push("/pos")}
+                style={styles.scanBtn}
+              />
+            </View>
+          ) : null}
         </SafeAnimatedView>
       ) : null}
       <ChipRow>
@@ -560,6 +575,7 @@ export default function ProductsScreen() {
 }
 
 const styles = StyleSheet.create({
+  actionRow: { flexDirection: "row", gap: spacing.sm, marginHorizontal: spacing.lg, marginTop: spacing.sm },
   addBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   wrap: { flex: 1 },
   scanWrap: {

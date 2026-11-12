@@ -130,6 +130,7 @@ function RootInner() {
         <Stack.Screen name="(tabs)" options={{ animation: "fade" }} />
         <Stack.Screen name="forgot-password" options={{ animation: "slide_from_bottom" }} />
         <Stack.Screen name="products/scan" options={{ animation: "slide_from_bottom" }} />
+        <Stack.Screen name="pos" options={{ animation: "slide_from_bottom", gestureEnabled: false }} />
         <Stack.Screen name="support/new" options={{ animation: "slide_from_bottom" }} />
       </Stack>
       <SubscriptionLockOverlay />

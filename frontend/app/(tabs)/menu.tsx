@@ -7,7 +7,7 @@ import { useNotifications } from "../../src/notifications/store";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing, type } from "../../src/theme/tokens";
 import { BellIcon, ChartIcon, LogoutIcon, MailIcon, PackageIcon, RefreshIcon, SettingsIcon, SparkleIcon, WalletIcon } from "../../src/components/Icons";
-import { canAccess } from "../../src/auth/permissions";
+import { canAccess, canManage } from "../../src/auth/permissions";
 import { TabHeader } from "../../src/ui/Header";
 import { useFeedback } from "../../src/ui/Feedback";
 import { Card, IconTile, ListRow, SectionTitle } from "../../src/ui/ListRow";
@@ -36,7 +36,8 @@ export default function MenuScreen() {
 
   const canProducts = canAccess(user, "catalog") || canAccess(user, "inventory");
   const canReports = canAccess(user, "reports");
-  const showOps = canProducts || canReports || canAccess(user, "catalog");
+  const canPos = canManage(user, "billing");
+  const showOps = canPos || canProducts || canReports || canAccess(user, "catalog");
 
   const onLogout = async () => {
     const ok = await confirm({
@@ -56,9 +57,20 @@ export default function MenuScreen() {
           <>
         <SectionTitle title="Operasyon" />
         <Card style={styles.block}>
+          {canPos ? (
+            <ListRow
+              testID="menu-pos"
+              leading={<IconTile tint={colors.successBg}><WalletIcon size={18} color={colors.success} /></IconTile>}
+              title="Hızlı satış"
+              subtitle="Barkod okut, sepete ekle, tahsil et"
+              chevron
+              onPress={() => router.push("/pos")}
+            />
+          ) : null}
           {canAccess(user, "catalog") || canAccess(user, "inventory") ? (
             <ListRow
               testID="menu-products"
+              divider={canPos}
               leading={<IconTile tint={colors.primarySoft}><PackageIcon size={18} color={colors.primary} /></IconTile>}
               title="Ürünler ve stok"
               subtitle="Arama, barkod, stok ve fiyat"
@@ -69,7 +81,7 @@ export default function MenuScreen() {
           {canAccess(user, "reports") ? (
             <ListRow
               testID="menu-reports"
-              divider={canProducts}
+              divider={canProducts || canPos}
               leading={<IconTile tint={colors.violetSoft}><ChartIcon size={18} color={colors.violet} /></IconTile>}
               title="Raporlar"
               subtitle="Satış, kanal ve ürün analizi"
@@ -80,7 +92,7 @@ export default function MenuScreen() {
           {canAccess(user, "catalog") ? (
             <ListRow
               testID="menu-jobs"
-              divider={canProducts || canReports}
+              divider={canProducts || canReports || canPos}
               leading={<IconTile tint={colors.infoBg}><RefreshIcon size={18} color={colors.info} /></IconTile>}
               title="Senkron işleri"
               subtitle="Ürün eşitleme sonuçları"
