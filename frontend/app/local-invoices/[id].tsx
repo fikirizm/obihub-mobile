@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
@@ -106,6 +106,9 @@ export default function LocalInvoiceDetailScreen() {
     }, [load])
   );
 
+  // Hesap okunurken / form açıkken ikinci dokunuş ikinci bir tahsilat akışı (ayrı anahtar) başlatmasın.
+  const collectingRef = useRef(false);
+
   if (loading) {
     return (
       <View style={[styles.wrap, { backgroundColor: colors.background }]}>
@@ -189,6 +192,16 @@ export default function LocalInvoiceDetailScreen() {
   };
 
   const onCollect = async () => {
+    if (!token || collectingRef.current) return;
+    collectingRef.current = true;
+    try {
+      await collectFlow();
+    } finally {
+      collectingRef.current = false;
+    }
+  };
+
+  const collectFlow = async () => {
     if (!token) return;
     // Web gibi tahsilatın yazılacağı kasa/banka hesabı seçilir; yalnız fatura para birimindeki hesaplar listelenir.
     let accounts: Awaited<ReturnType<typeof getCashAccounts>> = [];

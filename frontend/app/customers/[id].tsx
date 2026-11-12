@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { InlineEmpty } from "../../src/components/InlineEmpty";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { FadeInDown } from "react-native-reanimated";
@@ -158,8 +158,20 @@ export default function CustomerDetailScreen() {
     load();
   }, [load]);
 
+  // Hesap okunurken / form açıkken ikinci dokunuş ikinci bir tahsilat akışı (ayrı anahtar) başlatmasın.
+  const collectingRef = useRef(false);
   const onCollect = async () => {
-    if (!token || foreign || !cur) return;
+    if (!token || foreign || !cur || collectingRef.current) return;
+    collectingRef.current = true;
+    try {
+      await collectFlow();
+    } finally {
+      collectingRef.current = false;
+    }
+  };
+
+  const collectFlow = async () => {
+    if (!token || !cur) return;
     // Fatura tahsilatındaki gibi tahsilatın yazılacağı kasa/banka hesabı seçilir; yalnız carinin para birimindeki hesaplar.
     let accounts: Awaited<ReturnType<typeof getCashAccounts>> = [];
     try {
@@ -168,9 +180,14 @@ export default function CustomerDetailScreen() {
       toast(e?.message || "Kasa/banka hesapları okunamadı.", "error");
       return;
     }
-    const usable = accountsForCurrency(accounts, cur);
+    // Sunucu tahsilatı carinin KENDİ para birimiyle yazar; okuma modeli listesi bakiye birimini (TRY önce) taşıyabilir.
+    // Kayıtlı caride birim tahsilattan hemen önce /customers/{id}'den doğrulanır (okunamazsa eldeki değer).
+    const own = registered ? await getLegacyPartyCurrency(token, id) : null;
+    const payCur = (own || cur).replace("TRL", "TRY");
+    if (payCur !== cur) setCur(payCur);
+    const usable = accountsForCurrency(accounts, payCur);
     if (accounts.length > 0 && usable.length === 0) {
-      toast(`${cur} para biriminde kasa/banka hesabı yok. Önce Kasa ve Bankalar'dan hesap ekleyin.`, "error");
+      toast(`${payCur} para biriminde kasa/banka hesabı yok. Önce Kasa ve Bankalar'dan hesap ekleyin.`, "error");
       return;
     }
     const entry = await promptEntry({
@@ -195,7 +212,7 @@ export default function CustomerDetailScreen() {
         () =>
           confirm({
             title: "Sonuç alınamadı",
-            message: `${formatMoney(entry.amount, curLabel)} tahsilat kaydedilmiş olabilir. Aynı işlemi yeniden gönderebilirsiniz; ikinci kez kaydedilmez.`,
+            message: `${formatMoney(entry.amount, payCur)} tahsilat kaydedilmiş olabilir. Aynı işlemi yeniden gönderebilirsiniz; ikinci kez kaydedilmez.`,
             confirmLabel: "Yeniden gönder",
           })
       );
@@ -203,7 +220,7 @@ export default function CustomerDetailScreen() {
         const r = out.result;
         const allocated = Number(r?.allocated_amount || 0);
         const advance = Number(r?.advance_amount || 0);
-        const rc = r?.currency || curLabel;
+        const rc = r?.currency || payCur;
         if (r?.replayed) toast("Tahsilat zaten kaydedilmişti.", "success");
         else if (allocated > 0)
           toast(

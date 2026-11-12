@@ -2,19 +2,13 @@
 // İstek gövdeleri web panelindeki formlarla aynıdır (kaynak dosya ve satır her işlevin üstünde yazılıdır).
 import { request } from "./api";
 import type { CashAccount, LocalInvoice, Party } from "./types";
+import { isUncertainWrite, moneyRetryable, sendKeyedMoney, type KeyedMoneyOutcome } from "./money-retry";
+
+export { isUncertainWrite, moneyRetryable, sendKeyedMoney, type KeyedMoneyOutcome };
 
 // Sunucu arama metnini düzenli ifade olarak kullanır; özel karakterler kaçırılır.
 function escapeSearch(text: string) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-// Yazma isteğinin sonucu belirsiz mi? Bağlantı koptuğunda (status 0) ya da sunucu/ağ geçidi hatasında (5xx)
-// istek sunucuda işlenmiş olabilir; uçlarda tekilleştirme anahtarı olmadığından aynı formu yeniden göndermek
-// mükerrer kayıt üretir. Formlar bu durumda uyarı gösterir ve yeniden gönderim için ayrıca onay ister.
-// Kalıcı çözüm (ayrı iş): sunucu uçlarına tekilleştirme (idempotency) anahtarı eklenmesi.
-export function isUncertainWrite(e: unknown): boolean {
-  const status = Number((e as { status?: number } | null)?.status);
-  return status === 0 || status >= 500;
 }
 
 // ---------------------------------------------------------------------------
@@ -39,28 +33,6 @@ export async function createTransfer(token: string, body: TransferBody, idempote
   );
 }
 
-// Aşama 4 P1: belirsiz para sonucu. Ağ hatası / 5xx (MONEY_PARTIAL hariç) → aynı anahtarla güvenle yeniden gönderilebilir.
-// MONEY_PARTIAL: sunucu yarım kalan işlemi geri alamadı; yeniden göndermeden önce hareketler kontrol edilmeli.
-export function moneyRetryable(e: unknown): boolean {
-  const code = (e as { code?: string } | null)?.code;
-  return isUncertainWrite(e) && code !== "MONEY_PARTIAL";
-}
-
-// Aşama 4 P2: anahtarlı para yazımı. Sonuç belirsizse (ağ / 5xx, MONEY_INCOMPLETE dahil) kullanıcıya sorulur ve AYNI anahtar +
-// AYNI gövdeyle yeniden gönderilir; sunucu ikinci kayıt açmaz. Kesin hata (4xx, MONEY_PARTIAL, MONEY_PENDING) yeniden denenmez.
-export type KeyedMoneyOutcome<T> = { ok: true; result: T } | { ok: false; error: any; uncertain: boolean };
-
-export async function sendKeyedMoney<T>(send: () => Promise<T>, askRetry: () => Promise<boolean>): Promise<KeyedMoneyOutcome<T>> {
-  for (;;) {
-    try {
-      return { ok: true, result: await send() };
-    } catch (e: any) {
-      if (!moneyRetryable(e) || e?.code === "MONEY_PENDING") return { ok: false, error: e, uncertain: isUncertainWrite(e) };
-      if (!(await askRetry())) return { ok: false, error: e, uncertain: true };
-    }
-  }
-}
-
 // Tahsilat hatasının gösterilecek metni. Sunucunun Türkçe `detail` metni önceliklidir; kod yalnız metin yoksa ya da belirsiz sonuçta kullanılır.
 export function collectErrorText(e: any, uncertain: boolean): string {
   const code = String(e?.code || "");
@@ -81,7 +53,8 @@ export function accountsForCurrency(accounts: CashAccount[], currency: string) {
   };
   const cur = norm(currency);
   return accounts
-    .filter((a) => norm(a.currency) === cur && (a as { is_active?: boolean }).is_active !== false)
+    // Sunucu (resolve_account) pasif bayrağına bakmaz; aynı kural için süzülmez.
+    .filter((a) => norm(a.currency) === cur)
     .sort((a, b) => Number(Boolean(b.is_default)) - Number(Boolean(a.is_default)));
 }
 
