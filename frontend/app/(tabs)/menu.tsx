@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, type Href } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
+import { request } from "../../src/api";
 import { useNotifications } from "../../src/notifications/store";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing, type } from "../../src/theme/tokens";
@@ -12,7 +13,23 @@ import { useFeedback } from "../../src/ui/Feedback";
 import { Card, IconTile, ListRow, SectionTitle } from "../../src/ui/ListRow";
 
 export default function MenuScreen() {
-  const { user, logout } = useAuth();
+  const { user, logout, token } = useAuth();
+  // Web kenar menüsüyle aynı (useNavVisibility.js): destek modülü super admin tarafından kapatıldıysa menüde görünmez.
+  // Liste okunamazsa görünür kalır.
+  const [supportEnabled, setSupportEnabled] = useState(true);
+  useEffect(() => {
+    if (!token) return;
+    let alive = true;
+    request<any>("/integration-providers", { method: "GET" }, token)
+      .then((res) => {
+        const rows: any[] = Array.isArray(res?.items) ? res.items : [];
+        if (alive) setSupportEnabled(rows.some((x) => String(x?.key || "").toLowerCase() === "support_center"));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [token]);
   const { colors } = useTheme();
   const { unread } = useNotifications();
   const { confirm } = useFeedback();
@@ -85,15 +102,17 @@ export default function MenuScreen() {
             chevron
             onPress={() => router.push("/notifications")}
           />
-          <ListRow
-            testID="menu-support"
-            divider
-            leading={<IconTile tint={colors.emeraldSoft}><MailIcon size={18} color={colors.emerald} /></IconTile>}
-            title="Destek"
-            subtitle="Talepleriniz ve yanıtlar"
-            chevron
-            onPress={() => router.push("/support")}
-          />
+          {supportEnabled ? (
+            <ListRow
+              testID="menu-support"
+              divider
+              leading={<IconTile tint={colors.emeraldSoft}><MailIcon size={18} color={colors.emerald} /></IconTile>}
+              title="Destek"
+              subtitle="Talepleriniz ve yanıtlar"
+              chevron
+              onPress={() => router.push("/support")}
+            />
+          ) : null}
           <ListRow
             testID="menu-subscription"
             divider

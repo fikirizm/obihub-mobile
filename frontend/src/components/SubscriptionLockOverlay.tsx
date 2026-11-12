@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { router, usePathname } from "expo-router";
 import { useAuth } from "../auth/AuthProvider";
 import { useTheme } from "../theme/ThemeProvider";
 import { fontWeight, radius, spacing } from "../theme/tokens";
@@ -14,8 +15,11 @@ export function SubscriptionLockOverlay() {
   const { colors, shadows } = useTheme();
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
+  const pathname = usePathname() || "";
 
   if (!token || !subscriptionLock) return null;
+  // Web gibi: kilitte abonelik ve destek ekranları açık kalır (sunucu da bu uçlara izin verir).
+  if (/^\/(subscription|support)(\/|$)/.test(pathname)) return null;
   // Backend mesajı "Abonelik erişimi pasif." ile başlar; başlık bunu zaten söylüyor.
   const message = subscriptionLock.replace(/^Abonelik erişimi pasif\.\s*/, "") || subscriptionLock;
 
@@ -58,6 +62,22 @@ export function SubscriptionLockOverlay() {
         >
           {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryBtnText}>Tekrar dene</Text>}
         </PressableScale>
+        <View style={styles.linkRow}>
+          <PressableScale
+            testID="subscription-lock-status"
+            onPress={() => router.push("/subscription")}
+            style={[styles.secondaryBtn, styles.linkBtn, { borderColor: colors.border }]}
+          >
+            <Text style={[styles.secondaryBtnText, { color: colors.textPrimary }]}>Abonelik</Text>
+          </PressableScale>
+          <PressableScale
+            testID="subscription-lock-support"
+            onPress={() => router.push("/support")}
+            style={[styles.secondaryBtn, styles.linkBtn, { borderColor: colors.border }]}
+          >
+            <Text style={[styles.secondaryBtnText, { color: colors.textPrimary }]}>Destek</Text>
+          </PressableScale>
+        </View>
         <PressableScale
           testID="subscription-lock-logout"
           onPress={() => logout()}
@@ -72,6 +92,8 @@ export function SubscriptionLockOverlay() {
 
 const styles = StyleSheet.create({
   wrap: { alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.lg },
+  linkRow: { flexDirection: "row", gap: spacing.sm, alignSelf: "stretch" },
+  linkBtn: { flex: 1 },
   card: {
     width: "100%",
     maxWidth: 420,

@@ -77,6 +77,9 @@ function formatPct(pct: number) {
 type BucketKind = "day" | "week" | "month";
 const MONTHS_TR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
 
+// Web Raporlar ekranındaki hazır dönemler (frontend/src/pages/ReportsPage.js).
+const WEB_PRESET_KEYS = new Set(["7d", "30d", "90d"]);
+
 function bucketKindOf(key: string): BucketKind {
   if (/^\d{4}-W\d{1,2}$/.test(key)) return "week";
   if (/^\d{4}-\d{2}$/.test(key)) return "month";
@@ -239,7 +242,13 @@ function ReportsContent() {
       const isApiWindow = endsToday && range.key !== "today" && days > 1;
       const normalizedDays = periodDaysFromRangeKey(range.key, days);
       const apiResp = isApiWindow
-        ? await getSalesReportsOverview(token, normalizedDays, { startDate: range.start, endDate: range.end }).catch(() => {
+        ? await getSalesReportsOverview(
+            token,
+            normalizedDays,
+            // Web Raporlar ile aynı: hazır 7/30/90 gün dönemlerinde yalnız gün sayısı gönderilir (sunucu "şimdiden geriye"
+            // sayar); başlangıç tarihi yalnız diğer aralıklarda gönderilir.
+            WEB_PRESET_KEYS.has(range.key) ? undefined : { startDate: range.start, endDate: range.end }
+          ).catch(() => {
             apiFailed = true;
             return null;
           })

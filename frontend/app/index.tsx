@@ -59,7 +59,9 @@ export default function Index() {
       // Yönlendirmeyi yukarıdaki effect yapar; burada ikinci kez yapılmaz.
       await login(email.trim(), password);
     } catch (e: any) {
-      setError(e?.message || "Giriş başarısız oldu.");
+      const msg = e?.message || "Giriş başarısız oldu.";
+      // Süresi dolan/duraklatılan abonelik: web'de giriş yapılıp ödeme tamamlanabilir; mobilde satın alma yok.
+      setError(e?.status === 403 ? `${msg} Aboneliğinizi ObiHub web panelinden yenileyebilirsiniz.` : msg);
     } finally {
       setSubmitting(false);
     }

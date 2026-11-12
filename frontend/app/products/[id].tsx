@@ -292,8 +292,8 @@ export default function ProductDetailScreen() {
       noteLabel: "Sebep (isteğe bağlı)",
       methods: [
         { value: "in", label: "Ekle" },
-        { value: "out", label: "Çıkar" },
-        { value: "adjustment", label: "Sayım" },
+        { value: "out", label: "Çıkart" },
+        { value: "adjustment", label: "Eşitle" },
       ],
     });
     if (!entry) return;

@@ -17,12 +17,13 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
 
 export type Area = "catalog" | "inventory" | "billing" | "reports" | "customers" | "integrations";
 
-// Sunucunun gönderdiği açık izinler varsa onlar, yoksa rol tablosu kullanılır.
-// Bilinmeyen roller web'de olduğu gibi hesap sahibi sayılır.
+// Web ile aynı (authz.js permissionSet): rol izinleri ile sunucunun gönderdiği açık izinler birleştirilir.
+// Bilinmeyen roller ve super_admin web'de olduğu gibi hesap sahibi sayılır.
 function permissionsOf(user: User | null | undefined): string[] {
-  if (Array.isArray(user?.permissions) && user.permissions.length > 0) return user.permissions;
-  const role = String(user?.role || "owner").trim().toLowerCase();
-  return ROLE_PERMISSIONS[role] ?? ["*"];
+  let role = String(user?.role || "owner").trim().toLowerCase();
+  if (role === "super_admin" || role === "superadmin" || !ROLE_PERMISSIONS[role]) role = "owner";
+  const explicit = Array.isArray(user?.permissions) ? user.permissions.filter((x): x is string => typeof x === "string") : [];
+  return Array.from(new Set([...ROLE_PERMISSIONS[role], ...explicit]));
 }
 
 // Görüntüleme: alanın view veya manage izni yeterlidir.
@@ -45,7 +46,8 @@ const ROUTE_AREAS: Record<string, Area[]> = {
   "local-invoices": ["billing"],
   invoices: ["billing"],
   offers: ["billing"],
-  cash: ["billing"],
+  // Web: /panel/finans fatura izni ya da rapor görme izniyle açılır.
+  cash: ["billing", "reports"],
   expenses: ["billing"],
   incoming: ["billing"],
   customers: ["customers"],

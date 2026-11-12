@@ -261,7 +261,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const data = await apiLogin(email.trim(), password);
+    // Web giriş akışı gibi e-posta küçük harfe çevrilir (sunucu web ucunda da böyle yapıyor).
+    const data = await apiLogin(email.trim().toLowerCase(), password);
     setToken(data.access_token);
     setUser(data.user);
     await Storage.setItemAsync(TOKEN_KEY, data.access_token);
