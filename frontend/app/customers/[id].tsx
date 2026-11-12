@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { FadeInDown } from "react-native-reanimated";
-import { useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { getCashAccounts } from "../../src/api";
-import { collectPartyPaymentCompat, getLegacyPartyCurrency, getPartyLedgerCompat } from "../../src/api-gider";
-import { isUncertainWrite } from "../../src/api-finans";
+import { collectPartyPaymentCompat, getLegacyPartyCurrency, getPartyLedgerCompat, legacyIdOf } from "../../src/api-gider";
+import { deleteParty, getParty, getPartyOrders, isUncertainWrite, type PartyOrder } from "../../src/api-finans";
 import { PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
@@ -41,6 +41,9 @@ export default function CustomerDetailScreen() {
     origin?: string;
     source?: string;
     ledger?: string;
+    edit?: string;
+    del?: string;
+    orders?: string;
   }>();
   const id = String(params.id || "");
   // Liste okuma modelinden mi (/accounting/read-model/parties) yoksa eski /customers ucundan mı geldi; web CustomersPage.js ile aynı ayrım.
@@ -51,7 +54,28 @@ export default function CustomerDetailScreen() {
   const [cur, setCur] = useState<string | null>(params.currency ? String(params.currency).toUpperCase().replace("TRL", "TRY") : null);
   const { token, user } = useAuth();
   const { colors } = useTheme();
-  const { toast, promptEntry } = useFeedback();
+  const { toast, promptEntry, confirm } = useFeedback();
+  // C5: düzenle / sil / siparişler (liste satırının actions bayrakları; müşteri yönetme yetkisi).
+  const mayManage = canManage(user, "customers");
+  const canEditParty = mayManage && params.edit === "1";
+  const canDeleteParty = mayManage && params.del === "1";
+  const showOrders = params.orders === "1";
+  const [orders, setOrders] = useState<PartyOrder[] | null>(null);
+  const [ordersTotal, setOrdersTotal] = useState(0);
+  const [deleting, setDeleting] = useState(false);
+  // Düzenleme ekranından dönüşte güncel ad sunucudan okunur.
+  const [nameOverride, setNameOverride] = useState<string | null>(null);
+  const focusedOnce = React.useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (focusedOnce.current && canEditParty && token) {
+        getParty(token, legacyIdOf(id))
+          .then((c: any) => c?.name && setNameOverride(String(c.name)))
+          .catch(() => undefined);
+      }
+      focusedOnce.current = true;
+    }, [canEditParty, token, id])
+  );
   const [rows, setRows] = useState<PartyLedgerRow[]>([]);
   const [balance, setBalance] = useState(Number(params.balance || 0));
   const [loading, setLoading] = useState(true);
@@ -66,6 +90,43 @@ export default function CustomerDetailScreen() {
   // yalnız carinin para birimindeki hesaplar listelenir.
   const foreign = false;
   const curLabel = cur || "TRY";
+
+  useEffect(() => {
+    if (!token || !showOrders || !id) return;
+    let live = true;
+    getPartyOrders(token, legacyIdOf(id))
+      .then((r) => {
+        if (!live) return;
+        setOrders(r.items);
+        setOrdersTotal(r.total);
+      })
+      .catch(() => live && setOrders([]));
+    return () => {
+      live = false;
+    };
+  }, [token, id, showOrders]);
+
+  const onDelete = async () => {
+    if (!token || deleting) return;
+    const ok = await confirm({
+      title: `${nameOverride || String(params.name || "Cari")} silinsin mi?`,
+      message: "Cari listeden kaldırılır; geçmiş faturalar ve hareketler korunur.",
+      confirmLabel: "Sil",
+      destructive: true,
+    });
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      await deleteParty(token, legacyIdOf(id));
+      toast("Cari silindi", "success");
+      if (router.canGoBack()) router.back();
+      else router.replace("/customers");
+    } catch (e: any) {
+      toast(e?.message || "Cari silinemedi.", "error");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const load = useCallback(async () => {
     if (!token || !id) return;
@@ -148,7 +209,7 @@ export default function CustomerDetailScreen() {
     }
   };
 
-  const name = String(params.name || "Cari");
+  const name = nameOverride || String(params.name || "Cari");
   const balanceLabel = balance > 0 ? "Alacağınız" : balance < 0 ? "Borcunuz" : "Bakiye";
 
   return (
@@ -207,6 +268,39 @@ export default function CustomerDetailScreen() {
                 Bu cari siparişlerden oluşmuş. Tahsilat almak için web panelinde cari olarak kaydedin.
               </Text>
             </View>
+          </SafeAnimatedView>
+        ) : null}
+
+        {canEditParty || canDeleteParty ? (
+          <SafeAnimatedView entering={FadeInDown.delay(90).duration(380)} style={styles.manageRow}>
+            {canEditParty ? (
+              <Button testID="customer-edit" variant="secondary" label="Düzenle" onPress={() => router.push({ pathname: "/customers/new", params: { id } })} style={{ flex: 1 }} />
+            ) : null}
+            {canDeleteParty ? <Button testID="customer-delete" variant="secondary" label="Sil" busy={deleting} onPress={onDelete} style={{ flex: 1 }} /> : null}
+          </SafeAnimatedView>
+        ) : null}
+
+        {showOrders && orders && orders.length ? (
+          <SafeAnimatedView entering={FadeInDown.delay(120).duration(380)}>
+            <SectionTitle title="Siparişler" action={<Text style={[type.caption, tabular, { color: colors.textTertiary }]}>{`${ordersTotal} sipariş`}</Text>} />
+            <Card style={styles.block}>
+              {orders.slice(0, 10).map((o, i) => (
+                <ListRow
+                  key={o.id}
+                  testID={`customer-order-${o.id}`}
+                  divider={i > 0}
+                  leading={
+                    <IconTile tint={colors.primarySoft}>
+                      <InboxIcon size={18} color={colors.primary} />
+                    </IconTile>
+                  }
+                  title={`#${o.channel_order_id || o.id}`}
+                  subtitle={[o.channel, o.order_date ? formatDate(o.order_date) : null].filter(Boolean).join(" · ")}
+                  trailing={<Text style={[type.callout, tabular, { color: colors.textPrimary, fontWeight: "600" }]}>{formatMoney(o.total_amount, o.currency)}</Text>}
+                  onPress={() => router.push({ pathname: "/orders/[id]", params: { id: o.id } })}
+                />
+              ))}
+            </Card>
           </SafeAnimatedView>
         ) : null}
 
@@ -277,6 +371,7 @@ export default function CustomerDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  manageRow: { flexDirection: "row", gap: spacing.sm, marginHorizontal: spacing.lg, marginTop: spacing.md },
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },
   action: { marginHorizontal: spacing.lg, marginTop: spacing.md },

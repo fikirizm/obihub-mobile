@@ -374,9 +374,15 @@ export type LocalInvoice = {
   paid_amount?: number;
   remaining_amount?: number;
   notes?: string;
-  items?: { name?: string; description?: string; product_name?: string; quantity?: number; unit_price?: number; vat_rate?: number; total?: number; line_total?: number }[];
+  items?: { name?: string; description?: string; product_id?: string | null; product_name?: string; quantity?: number; unit_price?: number; vat_rate?: number; total?: number; line_total?: number }[];
   payments?: { id?: string; amount?: number; date?: string; method?: string }[];
   parasut_invoice_id?: string;
+  // Düzenleme formu için cari alanları ve resmileştirme kilidi.
+  customer_id?: string | null;
+  customer_tax_no?: string;
+  customer_tax_office?: string;
+  customer_address?: string;
+  officialize_lock?: unknown;
   edoc_state?: string;
   edoc_error?: string;
 };

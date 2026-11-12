@@ -814,11 +814,12 @@ export async function createCashEntry(
 
 export async function getParties(
   token: string,
-  options: { page?: number; search?: string; balanceStatus?: "receivable" | "payable" | "open" } = {}
+  options: { page?: number; search?: string; balanceStatus?: "receivable" | "payable" | "open"; role?: "customer" | "supplier" } = {}
 ) {
   const page = options.page ?? 1;
   const perPage = 30;
   const qs = new URLSearchParams({ page: String(page), per_page: String(perPage), sort: "balance_desc" });
+  if (options.role) qs.set("role", options.role);
   if (options.search) qs.set("search", escapeSearch(options.search));
   if (options.balanceStatus) qs.set("balance_status", options.balanceStatus);
   const d = await request<any>(`/customers?${qs.toString()}`, { method: "GET" }, token);

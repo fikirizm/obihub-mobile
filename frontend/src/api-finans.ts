@@ -201,7 +201,7 @@ export function invoiceTotals(lines: InvoiceLineInput[]) {
   return { lineTotals, subtotal, vat_amount, total: round2(subtotal + vat_amount) };
 }
 
-export async function createLocalInvoice(token: string, input: InvoiceCreateInput) {
+function invoiceBody(input: InvoiceCreateInput) {
   const totals = invoiceTotals(input.lines);
   const body = {
     customer_id: input.customer_id,
@@ -228,5 +228,73 @@ export async function createLocalInvoice(token: string, input: InvoiceCreateInpu
     vat_amount: totals.vat_amount,
     total: totals.total,
   };
-  return request<LocalInvoice>("/local-invoices", { method: "POST", body: JSON.stringify(body) }, token);
+  return body;
+}
+
+export async function createLocalInvoice(token: string, input: InvoiceCreateInput) {
+  return request<LocalInvoice>("/local-invoices", { method: "POST", body: JSON.stringify(invoiceBody(input)) }, token);
+}
+
+// C4 — web SalesInvoiceFormOS: düzenleme PUT /local-invoices/{id} (aynı gövde). Silme DELETE.
+export async function updateLocalInvoice(token: string, id: string, input: InvoiceCreateInput) {
+  return request<LocalInvoice>(`/local-invoices/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(invoiceBody(input)) }, token);
+}
+
+export async function deleteLocalInvoice(token: string, id: string) {
+  return request<{ message?: string }>(`/local-invoices/${encodeURIComponent(id)}`, { method: "DELETE" }, token);
+}
+
+// Web SalesInvoiceFormOS editable: taslak/gecikti, gönderilmemiş (parasut_invoice_id yok), ödeme yok, resmileştirme kilidi yok.
+export function isInvoiceEditable(inv: { status?: string; parasut_invoice_id?: string | null; paid_amount?: number | null; officialize_lock?: unknown } | null) {
+  if (!inv) return false;
+  return ["taslak", "gecikti"].includes(String(inv.status || "")) && !inv.parasut_invoice_id && Number(inv.paid_amount || 0) <= 0 && !inv.officialize_lock;
+}
+
+
+// ---- C5: cari düzenle / sil / siparişleri (web CustomerEditor, CustomersPage; sunucu routers/customers.py) ----
+
+export async function getParty(token: string, id: string) {
+  return request<any>(`/customers/${encodeURIComponent(id)}`, { method: "GET" }, token);
+}
+
+// PUT /customers/{id}: yalnız gönderilen alanlar güncellenir. Açılış bakiyesi mobilde düzenlenmez (cari bakiyesini değiştirir).
+export async function updateParty(token: string, id: string, input: Omit<PartyCreateInput, "opening_balance">) {
+  const t = (v?: string) => (v || "").trim();
+  const body = {
+    contact_role: input.contact_role,
+    customer_type: input.customer_type,
+    name: input.name.trim(),
+    tax_no: t(input.tax_no),
+    tax_office: t(input.tax_office),
+    email: t(input.email),
+    phone: t(input.phone),
+    address: t(input.address),
+    district: t(input.district),
+    city: t(input.city),
+    iban: t(input.iban),
+    notes: t(input.notes),
+  };
+  return request<Party>(`/customers/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }, token);
+}
+
+// Yumuşak silme: cari listeden kalkar, hareketleri korunur.
+export async function deleteParty(token: string, id: string) {
+  return request<{ ok?: boolean }>(`/customers/${encodeURIComponent(id)}`, { method: "DELETE" }, token);
+}
+
+export type PartyOrder = { id: string; channel_order_id: string; channel: string; status: string; total_amount: number; currency: string; order_date: string };
+
+// GET /customers/{id}/orders?limit → {items[], total}
+export async function getPartyOrders(token: string, id: string, limit = 20): Promise<{ items: PartyOrder[]; total: number }> {
+  const d = await request<any>(`/customers/${encodeURIComponent(id)}/orders?limit=${limit}`, { method: "GET" }, token);
+  const items: PartyOrder[] = (Array.isArray(d?.items) ? d.items : []).map((o: any) => ({
+    id: String(o?.id || ""),
+    channel_order_id: String(o?.channel_order_id || ""),
+    channel: String(o?.channel || o?.integration_name || ""),
+    status: String(o?.status || ""),
+    total_amount: Number(o?.total_amount) || 0,
+    currency: String(o?.currency || "TRY"),
+    order_date: String(o?.order_date || o?.created_at || ""),
+  }));
+  return { items, total: Number(d?.total ?? items.length) };
 }

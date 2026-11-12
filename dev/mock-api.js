@@ -533,7 +533,18 @@ http
         send(res, 200, { ...party, balance: 0, pos_sales_count: 0, pos_sales_total: 0 });
       });
     if (path === "/customers")
-      return send(res, 200, { items: parties.filter((p) => { const q = (url.searchParams.get("search") || "").toLowerCase(); const bs = url.searchParams.get("balance_status"); return (!q || p.name.toLowerCase().includes(q)) && (!bs || (bs === "receivable" ? p.balance > 0 : p.balance < 0)); }), total: parties.length, page: 1, per_page: 30, total_pages: 1, summary: { total_receivable: 19050.5, total_payable: 9400 } });
+      return send(res, 200, { items: parties.filter((p) => { const q = (url.searchParams.get("search") || "").toLowerCase(); const bs = url.searchParams.get("balance_status"); const rl = url.searchParams.get("role"); return (!q || p.name.toLowerCase().includes(q)) && (!bs || (bs === "receivable" ? p.balance > 0 : p.balance < 0)) && (!rl || (rl === "supplier" ? p.balance < 0 : p.balance >= 0)); }), total: parties.length, page: 1, per_page: 30, total_pages: 1, summary: { total_receivable: 19050.5, total_payable: 9400 } });
+    // C5: cari oku / düzenle / sil / siparişleri
+    let cm; // c5
+    if ((cm = path.match(/^\/customers\/([^/]+)$/))) {
+      const party = parties.find((p) => p.id === decodeURIComponent(cm[1]));
+      if (!party) return send(res, 404, { detail: "Müşteri bulunamadı" });
+      if (req.method === "GET") return send(res, 200, { contact_role: "customer", customer_type: "individual", ...party });
+      if (req.method === "DELETE") { parties.splice(parties.indexOf(party), 1); console.log("WRITE DELETE", path); return send(res, 200, { ok: true }); }
+      if (req.method === "PUT") return readBody((b) => { if ("opening_balance" in b) console.log("UYARI: opening_balance gönderildi"); Object.assign(party, b); send(res, 200, party); });
+    }
+    if ((cm = path.match(/^\/customers\/([^/]+)\/orders$/)))
+      return send(res, 200, { items: orders.slice(0, 3).map((o) => ({ id: o.id, channel_order_id: o.channel_order_id, channel: o.channel, status: o.status, total_amount: o.total_amount, currency: "TRY", order_date: o.order_date })), total: 3 });
     const partyMatch = path.match(/^\/customers\/([^/]+)\/(ledger|payments)$/);
     if (partyMatch) {
       const party = parties.find((p) => p.id === partyMatch[1]);
@@ -567,6 +578,19 @@ http
     if (invMatch) {
       const inv = localInvoices.find((i) => i.id === invMatch[1]);
       if (!inv) return send(res, 404, { detail: "Fatura bulunamadı" });
+      // C4: düzenle (PUT) ve sil (DELETE) — yalnız taslak/gecikti, gönderilmemiş ve ödemesiz.
+      if (!invMatch[2] && (req.method === "PUT" || req.method === "DELETE")) {
+        if (!["taslak", "gecikti"].includes(inv.status) || inv.parasut_invoice_id || inv.paid_amount > 0) return send(res, 400, { detail: "Bu fatura düzenlenemez" });
+        if (req.method === "DELETE") { localInvoices.splice(localInvoices.indexOf(inv), 1); console.log("WRITE DELETE", path); return send(res, 200, { message: "Silindi" }); }
+        return readBody((b) => {
+          const r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+          inv.items = b.items.map((it) => ({ ...it, line_total: r2(Number(it.quantity) * Number(it.unit_price)) }));
+          inv.subtotal = r2(inv.items.reduce((n, it) => n + it.line_total, 0));
+          inv.vat_amount = r2(inv.items.reduce((n, it) => n + (it.line_total * Number(it.vat_rate || 0)) / 100, 0));
+          inv.total = r2(inv.subtotal + inv.vat_amount); inv.remaining_amount = inv.total; inv.notes = b.notes; inv.due_date = b.due_date;
+          send(res, 200, inv);
+        });
+      }
       if (!invMatch[2]) return send(res, 200, inv);
       if (invMatch[2] === "resmilestir") { inv.status = inv.display_status = "resmilesti"; inv.parasut_invoice_id = "ps1"; return send(res, 200, { ok: true, message: "Fatura resmileşti", edoc_state: "done" }); }
       return readBody((b) => {

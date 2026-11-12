@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { addLocalInvoicePayment, checkLocalInvoiceEdocStatus, getCashAccounts, getLocalInvoice, officializeLocalInvoice } from "../../src/api";
-import { isUncertainWrite } from "../../src/api-finans";
+import { deleteLocalInvoice, isInvoiceEditable, isUncertainWrite } from "../../src/api-finans";
 import { invoiceStatus, isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
@@ -80,7 +80,7 @@ export default function LocalInvoiceDetailScreen() {
   const [inv, setInv] = useState<LocalInvoice | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [busy, setBusy] = useState<"official" | "payment" | "edoc" | null>(null);
+  const [busy, setBusy] = useState<"official" | "payment" | "edoc" | "delete" | null>(null);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
@@ -97,6 +97,14 @@ export default function LocalInvoiceDetailScreen() {
   useEffect(() => {
     load();
   }, [load]);
+  // Düzenleme ekranından dönüldüğünde fatura yeniden okunur.
+  const focusedOnce = React.useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (focusedOnce.current) load();
+      focusedOnce.current = true;
+    }, [load])
+  );
 
   if (loading) {
     return (
@@ -127,6 +135,30 @@ export default function LocalInvoiceDetailScreen() {
   // Resmileştirme Paraşüt üzerinden yapılır. Sunucu, Paraşüt'e gitmemiş her faturayı (taslak, gönderildi, gecikti,
   // tahsilatı tamamlanmış "ödendi") resmileştirir; düğme web paneliyle aynı koşulda görünür.
   const mayWrite = canManage(user, "billing");
+  // C4: web SalesInvoiceFormOS editable kuralı; silme de aynı koşulda sunulur (sunucu ayrıca doğrular).
+  const canEditInvoice = mayWrite && isInvoiceEditable(inv as any);
+  const onDelete = async () => {
+    if (!token || !inv || busy) return;
+    const ok = await confirm({
+      title: `${inv.invoice_number || "Fatura"} silinsin mi?`,
+      message: "Taslak fatura kalıcı olarak silinir. Geri alınamaz.",
+      confirmLabel: "Sil",
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusy("delete");
+    try {
+      await deleteLocalInvoice(token, inv.id);
+      toast("Fatura silindi.", "success");
+      if (router.canGoBack()) router.back();
+      else router.replace("/local-invoices");
+    } catch (e: any) {
+      toast(e?.message || "Fatura silinemedi.", "error");
+      load();
+    } finally {
+      setBusy(null);
+    }
+  };
   const canOfficialize =
     mayWrite && parasutConnected === true && !inv.parasut_invoice_id && inv.status !== "resmilesti" && !isCancelled;
   const canCollect = mayWrite && !isCancelled && remaining > 0.004;
@@ -310,6 +342,20 @@ export default function LocalInvoiceDetailScreen() {
             {canOfficialize ? (
               <Button testID="invoice-officialize" label="Resmileştir" variant="secondary" busy={busy === "official"} disabled={Boolean(busy)} onPress={onOfficialize} style={{ flex: 1 }} />
             ) : null}
+          </SafeAnimatedView>
+        ) : null}
+
+        {canEditInvoice ? (
+          <SafeAnimatedView entering={FadeInDown.delay(95).duration(380)} style={styles.actions}>
+            <Button
+              testID="invoice-edit"
+              label="Düzenle"
+              variant="secondary"
+              disabled={Boolean(busy)}
+              onPress={() => router.push({ pathname: "/local-invoices/new", params: { id: inv.id } })}
+              style={{ flex: 1 }}
+            />
+            <Button testID="invoice-delete" label="Sil" variant="secondary" busy={busy === "delete"} disabled={Boolean(busy)} onPress={onDelete} style={{ flex: 1 }} />
           </SafeAnimatedView>
         ) : null}
 

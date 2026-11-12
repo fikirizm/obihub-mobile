@@ -100,6 +100,8 @@ export default function CustomersScreen() {
   const [search, setSearch] = useState("");
   const debounced = useDebounce(search.trim(), 350);
   const [filter, setFilter] = useState<Filter>("");
+  // C5: rol süzgeci (web CustomersPage): müşteri / tedarikçi.
+  const [role, setRole] = useState<"" | "customer" | "supplier">("");
 
   const [summary, setSummary] = useState<Summary | null>(null);
 
@@ -110,11 +112,11 @@ export default function CustomersScreen() {
   const itemsUnfiltered = useRef(false);
   const fetchPage = useCallback(
     async (page: number) => {
-      const unfiltered = page === 1 && !debounced && !filter;
+      const unfiltered = page === 1 && !debounced && !filter && !role;
       const my = unfiltered ? ++summarySeq.current : 0;
       try {
         // Web CustomersPage.js gibi önce okuma modeli, 404'te eski /customers ucu (src/api-gider.ts).
-        const res = await getPartiesCompat(token as string, { page, search: debounced || undefined, balanceStatus: filter || undefined });
+        const res = await getPartiesCompat(token as string, { page, search: debounced || undefined, balanceStatus: filter || undefined, role: role || undefined });
         // Özet ilk sayfayla birlikte gelir; ek istek yapılmaz.
         if (unfiltered && my === summarySeq.current) setSummary(res.summary ?? null);
         if (page === 1) itemsUnfiltered.current = unfiltered;
@@ -125,7 +127,7 @@ export default function CustomersScreen() {
         throw e;
       }
     },
-    [token, debounced, filter]
+    [token, debounced, filter, role]
   );
   const list = usePagedList<PartyView>(token ? fetchPage : null);
 
@@ -178,6 +180,11 @@ export default function CustomersScreen() {
         <Chip label="Alacak" selected={filter === "receivable"} onPress={() => setFilter("receivable")} />
         <Chip label="Borç" selected={filter === "payable"} onPress={() => setFilter("payable")} />
       </ChipRow>
+      <ChipRow>
+        <Chip testID="customers-role-all" label="Tüm cariler" selected={role === ""} onPress={() => setRole("")} />
+        <Chip testID="customers-role-customer" label="Müşteriler" selected={role === "customer"} onPress={() => setRole("customer")} />
+        <Chip testID="customers-role-supplier" label="Tedarikçiler" selected={role === "supplier"} onPress={() => setRole("supplier")} />
+      </ChipRow>
       <ListBody
         state={list}
         icon={<UserIcon size={30} color={colors.emerald} />}
@@ -216,6 +223,10 @@ export default function CustomersScreen() {
                     origin: p.origin,
                     source: String(p.source || ""),
                     ledger: p.actions.view_ledger ? "1" : "0",
+                    // C5: web CustomersPage actions — düzenle / sil / siparişler (ObiHub defterindeki carilerde web'den).
+                    edit: p.actions.edit && p.source !== "obihub" ? "1" : "0",
+                    del: p.actions.delete && p.source !== "obihub" ? "1" : "0",
+                    orders: p.actions.view_orders ? "1" : "0",
                     // Okuma modelindeki eski carinin para birimi bilinmez; detay eski uçtan okur.
                     currency: p.origin === "read_model" && p.source === "legacy" ? "" : p.currency || "TRY",
                   },

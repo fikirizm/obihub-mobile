@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { getCatalog } from "../../src/api";
-import { createLocalInvoice, invoiceTotals, isUncertainWrite, searchInvoiceCustomers, type InvoiceCustomer, type InvoiceLineInput } from "../../src/api-finans";
+import { createLocalInvoice, invoiceTotals, isInvoiceEditable, isUncertainWrite, searchInvoiceCustomers, updateLocalInvoice, type InvoiceCustomer, type InvoiceLineInput } from "../../src/api-finans";
+import { getLocalInvoice } from "../../src/api";
 import { todayIso } from "../../src/finance";
 import { useDebounce } from "../../src/hooks/useDebounce";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -85,6 +86,9 @@ function parseLine(l: Line): InvoiceLineInput | null {
 }
 
 export default function NewLocalInvoiceScreen() {
+  // C4: ?id= verilirse aynı form düzenleme kipinde açılır (web SalesInvoiceFormOS, PUT /local-invoices/{id}).
+  const params = useLocalSearchParams<{ id?: string }>();
+  const editId = params.id ? String(params.id) : "";
   const { token, user } = useAuth();
   const { colors } = useTheme();
   const { toast, confirm } = useFeedback();
@@ -109,6 +113,43 @@ export default function NewLocalInvoiceScreen() {
   const sending = useRef(false);
   // Önceki gönderimin sonucu belirsiz kaldıysa (yanıt alınamadı) doğrudur; yeniden gönderim ayrıca onaylatılır.
   const [uncertain, setUncertain] = useState(false);
+  // Düzenleme: fatura yüklenir, form doldurulur; düzenlenemez durumdaysa form kapalı kalır.
+  const [editState, setEditState] = useState<"none" | "loading" | "ready" | "locked" | "error">(editId ? "loading" : "none");
+  const [editIssue, setEditIssue] = useState<string | null>(null);
+  const [editNumber, setEditNumber] = useState("");
+  useEffect(() => {
+    if (!token || !editId) return;
+    let live = true;
+    getLocalInvoice(token, editId)
+      .then((inv: any) => {
+        if (!live) return;
+        if (!isInvoiceEditable(inv)) return setEditState("locked");
+        setEditNumber(String(inv.invoice_number || ""));
+        setCustomer({ id: inv.customer_id ?? null, name: String(inv.customer_name || ""), tax_no: String(inv.customer_tax_no || ""), tax_office: String(inv.customer_tax_office || ""), address: String(inv.customer_address || "") });
+        setLines(
+          (inv.items || []).map((it: any) => ({
+            key: newKey(),
+            product_id: it.product_id ?? null,
+            product_name: String(it.product_name || it.name || it.description || ""),
+            qtyText: formatQty(Number(it.quantity || 1)),
+            priceText: toText(Number(it.unit_price || 0)),
+            vat_rate: Number(it.vat_rate ?? 20),
+          }))
+        );
+        setNotes(String(inv.notes || ""));
+        const issue = String(inv.issue_date || "").slice(0, 10);
+        setEditIssue(/^\d{4}-\d{2}-\d{2}$/.test(issue) ? issue : null);
+        const due = String(inv.due_date || "").slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(issue) && /^\d{4}-\d{2}-\d{2}$/.test(due)) {
+          setDueDays(Math.max(0, Math.round((Date.parse(due) - Date.parse(issue)) / 86400000)));
+        }
+        setEditState("ready");
+      })
+      .catch(() => live && setEditState("error"));
+    return () => {
+      live = false;
+    };
+  }, [token, editId]);
 
   // Cari arama (web: /customers?search=&per_page=8). Geç gelen eski yanıt, sıra sayacıyla elenir.
   const customerSeq = useRef(0);
@@ -162,7 +203,7 @@ export default function NewLocalInvoiceScreen() {
   const validLines = parsed.filter((l): l is InvoiceLineInput => l !== null);
   const totals = invoiceTotals(validLines);
   const allValid = lines.length > 0 && validLines.length === lines.length;
-  const issueDate = todayIso();
+  const issueDate = editIssue || todayIso();
   const dueDate = addDays(issueDate, dueDays);
 
   const submit = async () => {
@@ -172,21 +213,21 @@ export default function NewLocalInvoiceScreen() {
     if (lines.length === 0) return toast("Faturaya en az bir kalem ekleyin.", "error");
     if (!allValid) return toast("Kalemlerdeki miktar ve fiyatları kontrol edin.", "error");
     const ok = await confirm({
-      title: uncertain ? "Taslak yeniden gönderilsin mi?" : "Fatura taslağı kaydedilsin mi?",
+      title: uncertain ? "Taslak yeniden gönderilsin mi?" : editId ? "Değişiklikler kaydedilsin mi?" : "Fatura taslağı kaydedilsin mi?",
       message:
         (uncertain ? "Önceki gönderimin sonucu alınamadı; taslak kaydedilmiş olabilir. Fatura listesinde görünüyorsa yeniden göndermeyin, aksi halde aynı taslak iki kez oluşur.\n" : "") +
         `${customer.name} · ${validLines.length} kalem\n` +
         `Ara toplam ${formatTry(totals.subtotal)} + KDV ${formatTry(totals.vat_amount)}\n` +
         `Genel toplam: ${formatTry(totals.total)}\n` +
         `Vade: ${formatDate(dueDate)}. Fatura taslak olarak kaydedilir; resmileştirme ayrıca yapılır.`,
-      confirmLabel: uncertain ? "Yine de gönder" : "Taslak olarak kaydet",
+      confirmLabel: uncertain ? "Yine de gönder" : editId ? "Kaydet" : "Taslak olarak kaydet",
       destructive: uncertain,
     });
     if (!ok || sending.current) return;
     sending.current = true;
     setBusy(true);
     try {
-      const inv = await createLocalInvoice(token, {
+      const input = {
         customer_id: customer.id,
         customer_name: customer.name,
         customer_tax_no: customer.tax_no,
@@ -196,7 +237,15 @@ export default function NewLocalInvoiceScreen() {
         due_date: dueDate,
         notes,
         lines: validLines,
-      });
+      };
+      if (editId) {
+        // Düzenleme aynı kaydı günceller (idempotent); belirsiz sonuçta yeniden gönderim güvenlidir.
+        await updateLocalInvoice(token, editId, input);
+        toast("Fatura güncellendi.", "success");
+        router.back();
+        return;
+      }
+      const inv = await createLocalInvoice(token, input);
       toast(inv?.invoice_number ? `Taslak kaydedildi: ${inv.invoice_number}` : "Taslak kaydedildi", "success");
       if (inv?.id) router.replace({ pathname: "/local-invoices/[id]", params: { id: inv.id } });
       else router.back();
@@ -222,12 +271,33 @@ export default function NewLocalInvoiceScreen() {
     );
   }
 
+  if (editState === "loading" || editState === "locked" || editState === "error") {
+    return (
+      <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="local-invoice-edit-state">
+        <StackHeader title="Faturayı düzenle" />
+        {editState === "loading" ? (
+          <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.xxl }} />
+        ) : (
+          <EmptyState
+            icon={<ReceiptIcon size={30} color={colors.textTertiary} />}
+            title={editState === "locked" ? "Bu fatura düzenlenemez" : "Fatura açılamadı"}
+            description={
+              editState === "locked"
+                ? "Yalnız gönderilmemiş, tahsilatı olmayan taslak ya da gecikmiş faturalar düzenlenebilir."
+                : "Fatura şu an okunamadı. Biraz sonra yeniden deneyin."
+            }
+          />
+        )}
+      </View>
+    );
+  }
+
   const freeCustomer = customerQuery.trim();
   const freeProduct = productQuery.trim();
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="local-invoice-new-screen">
-      <StackHeader title="Yeni satış faturası" subtitle="Taslak" />
+      <StackHeader title={editId ? "Faturayı düzenle" : "Yeni satış faturası"} subtitle={editId ? editNumber || "Taslak" : "Taslak"} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
           <HeroCard tone="blue">

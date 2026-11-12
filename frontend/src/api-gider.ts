@@ -172,12 +172,13 @@ export type PartiesPage = Paged<PartyView> & {
 
 export async function getPartiesCompat(
   token: string,
-  options: { page?: number; search?: string; balanceStatus?: "receivable" | "payable" } = {}
+  options: { page?: number; search?: string; balanceStatus?: "receivable" | "payable"; role?: "customer" | "supplier" } = {}
 ): Promise<PartiesPage> {
   const page = options.page ?? 1;
   const perPage = 30;
   // Web ile aynı: role=all, bakiyeye göre sıralamada ve bakiye süzgecinde TL.
-  const rm = new URLSearchParams({ per_page: String(perPage), page: String(page), role: "all", sort: "balance_desc", currency: "TRY" });
+  // C5: web CustomersPage rol süzgeci (müşteri / tedarikçi); yoksa role=all.
+  const rm = new URLSearchParams({ per_page: String(perPage), page: String(page), role: options.role || "all", sort: "balance_desc", currency: "TRY" });
   if (options.search) rm.set("q", options.search.slice(0, 100));
   if (options.balanceStatus) rm.set("balance", options.balanceStatus);
   try {
@@ -189,7 +190,7 @@ export async function getPartiesCompat(
   } catch (e) {
     if (statusOf(e) !== 404) throw e;
   }
-  const res = await getParties(token, { page, search: options.search, balanceStatus: options.balanceStatus });
+  const res = await getParties(token, { page, search: options.search, balanceStatus: options.balanceStatus, role: options.role });
   const items: PartyView[] = res.items.map((p) => {
     const raw = p as typeof p & { actions?: Partial<PartyActions>; balance_available?: boolean };
     const actions = raw.actions
