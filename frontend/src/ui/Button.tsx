@@ -54,7 +54,8 @@ export function Button({
       hitSlop={size === "sm" ? 4 : undefined}
       style={[
         styles.base,
-        { backgroundColor: bg, height: size === "sm" ? 40 : 50 },
+        // Büyük yazı (Dinamik Yazı) metni kesmesin: yükseklik alt sınırdır, metin büyüdükçe düğme uzar.
+        { backgroundColor: bg, minHeight: size === "sm" ? 40 : 50, paddingVertical: size === "sm" ? 6 : 10 },
         variant === "secondary" && { borderWidth: 1, borderColor: colors.border },
         style,
       ]}

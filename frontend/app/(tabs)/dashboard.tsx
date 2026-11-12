@@ -187,7 +187,8 @@ export default function DashboardScreen() {
                     accessibilityRole="tab"
                     accessibilityLabel={`Son ${r} gün`}
                     accessibilityState={{ selected: range === r }}
-                    hitSlop={6}
+                    // 30 pt yüksek düğme: 8 pt pay ile dokunma alanı 46 pt.
+                    hitSlop={8}
                     style={[styles.rangeBtn, range === r && styles.rangeBtnActive]}
                   >
                     <Text style={[styles.rangeText, range === r && styles.rangeTextActive]}>{r} gün</Text>

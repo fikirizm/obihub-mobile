@@ -351,13 +351,13 @@ export default function PosScreen() {
                   <View style={styles.lineTop}>
                     <Text style={[type.caption, tabular, { color: colors.textTertiary, flex: 1 }]}>{`${formatTry(l.product.price)} · KDV %${l.product.vatRate}`}</Text>
                     <View style={[styles.stepper, { borderColor: colors.border }]}>
-                      <PressableScale testID={`pos-minus-${l.product.id}`} disabled={locked || stage !== "cart"} onPress={() => setQty(l.product.id, l.quantity - 1)} style={styles.stepBtn} accessibilityLabel="Azalt">
+                      <PressableScale testID={`pos-minus-${l.product.id}`} disabled={locked || stage !== "cart"} onPress={() => setQty(l.product.id, l.quantity - 1)} style={styles.stepBtn} hitSlop={4} accessibilityRole="button" accessibilityLabel={l.quantity === 1 ? `${l.product.name} sepetten çıkar` : `${l.product.name} adedini azalt`}>
                         {l.quantity === 1 ? <TrashIcon size={16} color={colors.error} /> : <Text style={[styles.stepTxt, { color: colors.textPrimary }]}>−</Text>}
                       </PressableScale>
-                      <Text style={[type.bodyStrong, tabular, { color: colors.textPrimary, minWidth: 26, textAlign: "center" }]} testID={`pos-qty-${l.product.id}`}>
+                      <Text style={[type.bodyStrong, tabular, { color: colors.textPrimary, minWidth: 26, textAlign: "center" }]} testID={`pos-qty-${l.product.id}`} accessibilityLabel={`${l.quantity} adet`} accessibilityLiveRegion="polite">
                         {l.quantity}
                       </Text>
-                      <PressableScale testID={`pos-plus-${l.product.id}`} disabled={locked || stage !== "cart"} onPress={() => setQty(l.product.id, l.quantity + 1)} style={styles.stepBtn} accessibilityLabel="Artır">
+                      <PressableScale testID={`pos-plus-${l.product.id}`} disabled={locked || stage !== "cart"} onPress={() => setQty(l.product.id, l.quantity + 1)} style={styles.stepBtn} hitSlop={4} accessibilityRole="button" accessibilityLabel={`${l.product.name} adedini artır`}>
                         <Text style={[styles.stepTxt, { color: colors.textPrimary }]}>+</Text>
                       </PressableScale>
                     </View>
@@ -449,7 +449,7 @@ const styles = StyleSheet.create({
   line: { padding: spacing.md, gap: spacing.xs },
   lineTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   stepper: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderRadius: radius.pill },
-  stepBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
+  stepBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   stepTxt: { fontSize: 20, fontWeight: "700" },
   lineTotal: { fontWeight: "700", minWidth: 76, textAlign: "right" },
   notice: { flexDirection: "row", gap: spacing.xs, alignItems: "flex-start", marginHorizontal: spacing.lg, padding: spacing.sm, borderRadius: radius.md },

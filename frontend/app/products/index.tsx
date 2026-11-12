@@ -583,7 +583,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     borderRadius: radius.pill,
   },
-  scanBtn: { height: 48, borderRadius: radius.pill },
+  scanBtn: { minHeight: 48, borderRadius: radius.pill },
   resultHead: {
     flexDirection: "row",
     alignItems: "center",

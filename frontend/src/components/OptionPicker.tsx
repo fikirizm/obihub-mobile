@@ -72,7 +72,7 @@ export function OptionPicker({
         <View style={[styles.sheet, shadows.md, { backgroundColor: colors.background, paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
           <View style={styles.sheetHead}>
             <Text style={[type.headline, { color: colors.textPrimary, flex: 1 }]}>{label}</Text>
-            <PressableScale onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel="Kapat" style={styles.close}>
+            <PressableScale onPress={() => setOpen(false)} accessibilityRole="button" accessibilityLabel="Kapat" hitSlop={6} style={styles.close}>
               <CloseIcon size={18} color={colors.textSecondary} />
             </PressableScale>
           </View>
