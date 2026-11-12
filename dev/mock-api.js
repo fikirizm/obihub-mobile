@@ -48,6 +48,8 @@ const products = Array.from({ length: 48 }, (_, i) => ({
   links: i === 5 ? { woocommerce: `wc-${i + 1}` } : { woocommerce: `wc-${i + 1}`, trendyol: `ty-${i + 1}` },
   details: i === 5 ? { woocommerce: { integration_id: "i1" } } : { woocommerce: { integration_id: "i1" }, trendyol: { integration_id: "i2", barcode: `86900000${String(i + 1).padStart(5, "0")}` } },
 }));
+products[0].images = ["https://picsum.photos/seed/obi1/300", "https://picsum.photos/seed/obi2/300"];
+products[0].image_url = products[0].images[0];
 // Trendyol mağaza ürünleri (source-products): p6 için barkodu aynı olan aday ve barkodu farklı bir aday.
 const tySource = [
   { id: "ty-6", name: "Deneme Ürün 6 (Trendyol)", sku: "SKU-6", barcode: "8690000000006" },
@@ -285,6 +287,47 @@ http
       return send(res, 200, { products: slice.map((p) => ({ id: p.id, price: p.price.toFixed(2), integration_prices: [{ integration_id: "i1", price: p.ch.i1.price.toFixed(2), active: true, ...(p.id === "p3" ? { pending: true, pending_price: (p.ch.i1.price + 10).toFixed(2), pending_at: new Date().toISOString() } : {}) }, { integration_id: "i2", price: p.ch.i2.price.toFixed(2), active: true }].filter((r) => r.integration_id !== "i2" || p.links.trendyol) })), integrations, total: rows.length, page, per_page: per });
     }
     // Ürün kimliği (ad / SKU / barkod) ve stok hareketleri — gerçek uçlar: GET|PATCH /products/{id}, GET /stock/movements.
+    // --- B3: yeni ürün, görsel, satış durumu
+    if (req.method === "POST" && path === "/products") {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        console.log("WRITE", path, raw);
+        const b = JSON.parse(raw || "{}");
+        const id = "p" + (products.length + 1);
+        products.unshift({ id, name: b.name, sku: b.sku, barcode: b.barcode || "", stock: b.stock || 0, price: b.price || 0, ch: { i1: { stock: 0, price: b.price || 0 }, i2: { stock: 0, price: b.price || 0 } }, links: {}, details: {} });
+        send(res, 200, { id, name: b.name, sku: b.sku, barcode: b.barcode, stock: b.stock, price: b.price });
+      });
+      return;
+    }
+    let im; // b3
+    if (req.method === "POST" && (im = path.match(/^\/products\/([^/]+)\/images$/))) {
+      const p = products.find((x) => x.id === im[1]);
+      let size = 0;
+      req.on("data", (c) => (size += c.length));
+      req.on("end", () => {
+        console.log("WRITE", path, "multipart bytes=" + size);
+        const n = Date.now();
+        const url = `https://cdn.example.test/tenants/t1/${p.id}/${n}.jpg`;
+        p.images = [...(p.images || []), url];
+        if (!p.image_url) p.image_url = url;
+        send(res, 201, { product_id: p.id, images: [{ id: "img" + n, url, filename: "x.jpg", content_type: "image/jpeg", size }], image_url: p.image_url });
+      });
+      return;
+    }
+    if (req.method === "POST" && (im = path.match(/^\/products\/([^/]+)\/bulk-sales-status$/))) {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        console.log("WRITE", path, raw);
+        const p = products.find((x) => x.id === im[1]);
+        const action = JSON.parse(raw || "{}").action;
+        const provs = Object.keys(p.links || {});
+        p.sales = Object.fromEntries(provs.map((k) => [k, action === "open" ? "active" : "inactive"]));
+        send(res, 200, { success: true, action, affected_count: provs.length, providers: provs, status: action === "open" ? "active" : "inactive" });
+      });
+      return;
+    }
     // --- Dalga 2 / B1 eşleştirme
     let lm; // b1
     if (req.method === "GET" && (lm = path.match(/^\/integrations\/([^/]+)\/source-products$/))) {
@@ -323,13 +366,15 @@ http
           : x.id === "p3"
           ? { i2: { provider: "trendyol", ok: null, state: "pending", at: new Date().toISOString(), code: null, detail: null } }
           : {};
-      const view = () => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, price: p.price, channel_push: pushFor(p), channel_links: p.links, channel_details: p.details });
+      const view = () => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, price: p.price, channel_push: pushFor(p), channel_links: p.links, channel_details: p.details, images: p.images || [], image_url: p.image_url || null, channel_sales_status: p.sales || {} });
       if (req.method === "GET") return send(res, 200, view());
       let raw = "";
       req.on("data", (c) => (raw += c));
       req.on("end", () => {
         const b = JSON.parse(raw || "{}");
         for (const k of ["name", "sku", "barcode"]) if (typeof b[k] === "string") p[k] = b[k];
+        if (Array.isArray(b.images)) p.images = b.images;
+        if ("image_url" in b) p.image_url = b.image_url;
         console.log("WRITE", path, raw);
         send(res, 200, view());
       });

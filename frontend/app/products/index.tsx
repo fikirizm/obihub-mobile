@@ -11,12 +11,13 @@ import {
 import { Image as ExpoImage } from "expo-image";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
+import { canManage } from "../../src/auth/permissions";
 import { getCatalog } from "../../src/api";
-import { recallProduct, rememberCatalog } from "../../src/catalogCache";
+import { consumeCatalogDirty, recallProduct, rememberCatalog } from "../../src/catalogCache";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatTry } from "../../src/utils";
-import { PackageIcon, Path, SearchIcon, Svg } from "../../src/components/Icons";
+import { PackageIcon, Path, SearchIcon, Svg, PlusIcon } from "../../src/components/Icons";
 import { AccountingDifferences } from "../../src/components/AccountingDifferences";
 import { StockOverview } from "../../src/components/StockOverview";
 import { EmptyState } from "../../src/components/EmptyState";
@@ -92,7 +93,9 @@ export default function ProductsScreen() {
     t?: string;
     filter?: string;
   }>();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  // Ürün kartı oluşturmak katalog yönetme izni ister.
+  const canCreate = canManage(user, "catalog");
   const { colors, shadows } = useTheme();
   const [search, setSearch] = useState("");
   const debounced = useDebounce(search.trim(), 350);
@@ -199,6 +202,8 @@ export default function ProductsScreen() {
   useEffect(() => {
     fetchPage(1, "reset");
   }, [fetchPage]);
+  const fetchPageRef = useRef(fetchPage);
+  fetchPageRef.current = fetchPage;
 
   // Ürün detayından ya da bilgi düzenleme ekranından dönüldüğünde satırlar önbellekteki güncel hâliyle gösterilir.
   // Düşük stok görünümünde stoğu yükselen ürün listeden ve sayıdan düşer.
@@ -208,6 +213,11 @@ export default function ProductsScreen() {
   lowOnlyRef.current = lowOnly;
   useFocusEffect(
     useCallback(() => {
+      // Yeni ürün eklendiyse liste baştan okunur.
+      if (consumeCatalogDirty()) {
+        fetchPageRef.current?.(1, "refresh");
+        return;
+      }
       const prev = productsRef.current;
       let changed = false;
       const merged = prev.map((p) => {
@@ -240,6 +250,19 @@ export default function ProductsScreen() {
             : lowOnly
               ? `${total} düşük stoklu ürün`
               : `${total} ürün`
+        }
+        right={
+          canCreate ? (
+            <PressableScale
+              testID="products-new"
+              onPress={() => router.push("/products/new")}
+              accessibilityRole="button"
+              accessibilityLabel="Yeni ürün"
+              style={[styles.addBtn, shadows.sm, { backgroundColor: colors.primary }]}
+            >
+              <PlusIcon size={20} color="#FFFFFF" />
+            </PressableScale>
+          ) : undefined
         }
       />
       <SearchField
@@ -537,6 +560,7 @@ export default function ProductsScreen() {
 }
 
 const styles = StyleSheet.create({
+  addBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   wrap: { flex: 1 },
   scanWrap: {
     marginHorizontal: spacing.lg,

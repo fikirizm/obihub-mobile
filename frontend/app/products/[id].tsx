@@ -18,6 +18,7 @@ import { PressableScale } from "../../src/components/KPICard";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
 import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { StockMovements } from "../../src/components/StockMovements";
+import { ProductMedia, ProductSalesStatus } from "../../src/components/ProductMedia";
 import { DetailHero } from "../../src/ui/DetailHero";
 import { useFeedback } from "../../src/ui/Feedback";
 import { StackHeader } from "../../src/ui/Header";
@@ -629,6 +630,26 @@ export default function ProductDetailScreen() {
           ) : null}
         </DetailHero>
 
+        {token ? (
+          <SafeAnimatedView entering={FadeInDown.delay(60).duration(380)}>
+            <ProductMedia
+              token={token}
+              productId={product.id}
+              links={links}
+              canEdit={canEditInfo}
+              onChanged={(imageUrl) => {
+                setPushKey((k) => k + 1);
+                setProduct((prev) => {
+                  if (!prev) return prev;
+                  const next = { ...prev, image_url: imageUrl || undefined };
+                  rememberCatalog([next], []);
+                  return next;
+                });
+              }}
+            />
+          </SafeAnimatedView>
+        ) : null}
+
         {channels.length > 0 ? (
           <>
             <SafeAnimatedView entering={FadeInDown.delay(80).duration(380)}>
@@ -734,6 +755,12 @@ export default function ProductDetailScreen() {
                 ))}
               </Card>
             </SafeAnimatedView>
+
+            {token ? (
+              <SafeAnimatedView entering={FadeInDown.delay(205).duration(380)}>
+                <ProductSalesStatus token={token} productId={product.id} links={links} canEdit={canEditInfo} onChanged={() => setPushKey((k) => k + 1)} />
+              </SafeAnimatedView>
+            ) : null}
 
             <SafeAnimatedView entering={FadeInDown.delay(220).duration(380)} style={styles.note}>
               <IconTile tint={colors.primarySoft}>

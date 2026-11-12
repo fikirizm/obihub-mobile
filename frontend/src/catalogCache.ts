@@ -22,3 +22,14 @@ export function clearCatalogCache() {
   items.clear();
   channels = [];
 }
+
+// Ürün eklendi / silindi gibi listeyi etkileyen değişiklik: liste ekranı odakta bir kez yeniden okur.
+let dirty = false;
+export function markCatalogDirty() {
+  dirty = true;
+}
+export function consumeCatalogDirty() {
+  const d = dirty;
+  dirty = false;
+  return d;
+}

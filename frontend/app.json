@@ -75,6 +75,13 @@
         {
           "faceIDPermission": "Uygulama kilidini Face ID ile açmak için izin gerekir."
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Ürün görseli eklemek için fotoğraflarınıza erişim gerekir.",
+          "cameraPermission": "Ürün fotoğrafı çekmek ve barkod okutmak için kameraya erişim gerekir."
+        }
       ]
     ],
     "experiments": {

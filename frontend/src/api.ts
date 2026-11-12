@@ -56,7 +56,8 @@ export async function request<T>(path: string, options: RequestInit = {}, token?
     res = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
       headers: {
-        "Content-Type": "application/json",
+        // FormData gövdesinde Content-Type ve sınır (boundary) fetch tarafından konur.
+        ...(typeof FormData !== "undefined" && options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options.headers || {}),
       },

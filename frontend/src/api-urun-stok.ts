@@ -178,6 +178,10 @@ export async function dismissReconciliation(token: string, itemIds: string[]) {
 
 export type ProductLinks = {
   name: string;
+  // Görseller (adresler) ve birincil görsel; kanal satış durumu (sağlayıcı → active | inactive).
+  images: string[];
+  imageUrl: string;
+  salesStatus: Record<string, string>;
   barcode: string;
   sku: string;
   // channel_links.<sağlayıcı> = mağazadaki ürün kimliği; channel_details.<sağlayıcı>.integration_id = bağlı mağaza.
@@ -195,6 +199,9 @@ export async function getProductLinks(token: string, productId: string): Promise
   for (const [k, v] of Object.entries(obj(p?.channel_links))) if (v != null && String(v).trim()) links[k.toLowerCase()] = String(v);
   return {
     name: String(p?.name || ""),
+    images: (Array.isArray(p?.images) ? p.images : []).map((x: any) => (typeof x === "string" ? x : String(x?.url || x?.src || ""))).filter((u: string) => /^https?:\/\//i.test(u)),
+    imageUrl: String(p?.image_url || ""),
+    salesStatus: obj(p?.channel_sales_status) as Record<string, string>,
     barcode: String(p?.barcode || ""),
     sku: String(p?.sku || ""),
     channelLinks: links,
@@ -308,4 +315,60 @@ export async function getStockSummary(token: string): Promise<StockTotals | null
   if (!t || typeof t !== "object") return null;
   const n = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
   return { products: n(t.products), sellable: n(t.sellable), reserved: n(t.reserved), onHand: n(t.on_hand) };
+}
+
+
+// ---- B3: yeni ürün, görseller, satışa aç/kapa (web: ProductsPage.js, ProductDetailPage.js; sunucu c0652d26f) ----
+
+// POST /products (web "Boş ürün"): ilk stok `opening` hareketi olarak yazılır.
+export async function createProduct(
+  token: string,
+  input: { name: string; sku: string; barcode: string; price: number; stock: number }
+): Promise<{ id: string }> {
+  const p = await request<any>(
+    "/products",
+    {
+      method: "POST",
+      body: JSON.stringify({ name: input.name.trim(), sku: input.sku.trim(), barcode: input.barcode.trim(), description: "", price: input.price, stock: input.stock, category: "", image_url: null }),
+    },
+    token
+  );
+  return { id: String(p?.id || "") };
+}
+
+export type UploadFile = { uri: string; name: string; type: string };
+
+// POST /products/{id}/images (multipart, alan `files`): jpeg/png/webp, dosya ≤10 MB, istekte ≤10 dosya.
+// 201 → {images:[{id,url,...}], image_url}. Hatalar: 400, 404, 413 (büyük), 415 (tür), 503 (depolama yok).
+export async function uploadProductImages(token: string, productId: string, files: UploadFile[]) {
+  const form = new FormData();
+  for (const f of files) form.append("files", { uri: f.uri, name: f.name, type: f.type } as any);
+  const d = await request<any>(`/products/${encodeURIComponent(productId)}/images`, { method: "POST", body: form }, token);
+  return {
+    images: (Array.isArray(d?.images) ? d.images : []).map((x: any) => ({ id: String(x?.id || ""), url: String(x?.url || "") })),
+    imageUrl: String(d?.image_url || ""),
+  };
+}
+
+// Yalnız ObiHub'a yüklenmiş görsel (yükleme yanıtındaki id) R2'den silinir.
+export async function deleteProductImage(token: string, productId: string, imageId: string) {
+  return request<{ deleted?: boolean; image_url?: string | null }>(
+    `/products/${encodeURIComponent(productId)}/images/${encodeURIComponent(imageId)}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+// Görsel listesi / birincil görsel (web: PATCH /products/{id} {image_url, images}).
+export async function patchProductImages(token: string, productId: string, images: string[], imageUrl: string | null) {
+  return request<any>(`/products/${encodeURIComponent(productId)}`, { method: "PATCH", body: JSON.stringify({ images, image_url: imageUrl }) }, token);
+}
+
+// POST /products/{id}/bulk-sales-status {action: open|close}: eşleşik tüm sağlayıcılarda satış durumu.
+export async function setProductSalesStatus(token: string, productId: string, action: "open" | "close") {
+  return request<{ success?: boolean; affected_count?: number; providers?: string[]; status?: string }>(
+    `/products/${encodeURIComponent(productId)}/bulk-sales-status`,
+    { method: "POST", body: JSON.stringify({ action }) },
+    token
+  );
 }
