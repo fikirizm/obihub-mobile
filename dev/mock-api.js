@@ -221,7 +221,15 @@ http
     if (prodMatch && (req.method === "GET" || req.method === "PATCH")) {
       const p = products.find((x) => x.id === decodeURIComponent(prodMatch[1]));
       if (!p) return send(res, 404, { detail: "Ürün bulunamadı" });
-      const view = () => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, price: p.price });
+      // channel_push: p2'de Trendyol barkodu bilinmiyor (red), Woo kabul; p3'te Trendyol sonucu bekleniyor.
+      const pushFor = (x) =>
+        x.id === "p2"
+          ? { i1: { provider: "woocommerce", ok: true, state: "ok", at: new Date().toISOString(), code: null, detail: null },
+              i2: { provider: "trendyol", ok: false, state: "failed", at: new Date().toISOString(), code: "CHANNEL_BARCODE_UNKNOWN", detail: "Barkod Trendyol'da yok" } }
+          : x.id === "p3"
+          ? { i2: { provider: "trendyol", ok: null, state: "pending", at: new Date().toISOString(), code: null, detail: null } }
+          : {};
+      const view = () => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, price: p.price, channel_push: pushFor(p) });
       if (req.method === "GET") return send(res, 200, view());
       let raw = "";
       req.on("data", (c) => (raw += c));

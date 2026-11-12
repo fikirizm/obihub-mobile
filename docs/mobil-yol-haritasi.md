@@ -203,11 +203,14 @@ Doğrulama:
 - Cihazda denenmedi.
 
 1.1.04 gönderim koşulları (sunucu deploy'ları bekleniyor):
-1. Kanal gönderimi dilimi canlıda olmalı (pending yanıtı, kanal fiyatının korunması mesajı buna göre).
+1. ~~Kanal gönderimi dilimi canlıda olmalı~~ — canlıda (`12532a3d2`, 12 Kas 08:26 UTC).
 2. `/customers/{id}/payments` `account_id` kabul etmeli; etmiyorsa seçilen hesap yok sayılır.
    Gönderimden önce canlıda doğrula.
 3. Ciro tanımı (Europe/Istanbul, order_date) canlıya çıkınca Panel "bugün" sunucu rakamına geçirilecek.
-4. `channel_push` rozeti (kabul/bekliyor/red) eklenecek.
+4. ~~`channel_push` rozeti~~ — eklendi: ürün detayında kanal stok ve fiyat satırlarında "Pazaryeri kabul etti" /
+   "onayı bekleniyor" / "Reddedildi: …" (kodlar: BARCODE_UNKNOWN, REJECTED, STORE_DELETED, CATALOG_UNAVAILABLE,
+   RATE_LIMITED, RESULT_UNKNOWN; bilinmeyen kod genel hata). Değer `GET /products/{id}`den okunur; her yazımdan ve
+   aşağı çekip yenilemeden sonra tazelenir. Sahte API ile denendi.
 
 Sonraki tura kalanlar: fatura kesme ve mağazaya iletme, işleme al, toplu silme, HepsiJet il/ilçe listeleri, gider
 detayı, elle gider girişi, borç ödeme, Woo/kargo siparişlerinde orijinal HepsiJet etiketi varsayılanı.

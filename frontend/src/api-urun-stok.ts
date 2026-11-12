@@ -71,3 +71,47 @@ export async function getStockMovements(
   }));
   return { items: list.slice(0, limit), hasMore: list.length > limit };
 }
+
+// Kanal gönderim sonucu (GET /products/{id} → channel_push). Anahtar entegrasyon kimliği, yoksa sağlayıcı adı.
+// state: ok / failed / pending (Trendyol sonucu bekleniyor) / unknown (24 saatte sonuç alınamadı, değer kaydedilmedi).
+export type ChannelPush = {
+  provider?: string;
+  ok?: boolean | null;
+  state?: string;
+  at?: string;
+  code?: string | null;
+  detail?: string | null;
+};
+
+export async function getProductChannelPush(token: string, productId: string): Promise<Record<string, ChannelPush>> {
+  const p = await request<any>(`/products/${encodeURIComponent(productId)}`, {}, token);
+  const raw = p?.channel_push;
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, ChannelPush>) : {};
+}
+
+export type PushBadge = { label: string; tone: "good" | "bad" | "wait" };
+
+// Rozet metni. Bilinmeyen kod genel hata olarak gösterilir.
+export function channelPushBadge(push: ChannelPush | undefined): PushBadge | null {
+  if (!push) return null;
+  const state = String(push.state || (push.ok === true ? "ok" : push.ok === false ? "failed" : "pending")).toLowerCase();
+  if (state === "ok") return { label: "Pazaryeri kabul etti", tone: "good" };
+  if (state === "pending") return { label: "Pazaryeri onayı bekleniyor", tone: "wait" };
+  const code = String(push.code || "").toUpperCase();
+  const detail = String(push.detail || "").trim();
+  if (state === "unknown" || code === "CHANNEL_RESULT_UNKNOWN") return { label: "Sonuç alınamadı; değer kaydedilmedi", tone: "bad" };
+  switch (code) {
+    case "CHANNEL_BARCODE_UNKNOWN":
+      return { label: "Reddedildi: barkod yok, yeniden eşleştirin", tone: "bad" };
+    case "CHANNEL_REJECTED":
+      return { label: detail ? `Reddedildi: ${detail}` : "Pazaryeri reddetti", tone: "bad" };
+    case "CHANNEL_STORE_DELETED":
+      return { label: "Mağaza silinmiş; yeniden eşleştirin", tone: "bad" };
+    case "CHANNEL_CATALOG_UNAVAILABLE":
+      return { label: "Pazaryeri listesi alınamadı; yeniden denenecek", tone: "wait" };
+    case "CHANNEL_RATE_LIMITED":
+      return { label: "Pazaryeri yoğun; yeniden denenecek", tone: "wait" };
+    default:
+      return { label: detail ? `Gönderilemedi: ${detail}` : "Gönderilemedi", tone: "bad" };
+  }
+}

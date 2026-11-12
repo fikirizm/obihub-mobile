@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -6,6 +6,7 @@ import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { isUncertainWrite } from "../../src/api-finans";
+import { channelPushBadge, getProductChannelPush, type ChannelPush, type PushBadge } from "../../src/api-urun-stok";
 import { getCatalog, setChannelPrice, setChannelStock, setProductPrice, setProductStock, SYNC_NONE } from "../../src/api";
 import { recallChannels, recallProduct, rememberCatalog } from "../../src/catalogCache";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -31,7 +32,8 @@ const HERO_BAD = palette.dark.error;
 const RELOAD_MAX_PAGES = 5;
 type StockMode = "in" | "out" | "adjustment";
 const UNSENT_NOTE = "Pazaryerine gönderilmedi";
-const ASYNC_STOCK_CHANNELS = new Set(["trendyol", "hepsiburada", "n11"]);
+// Trendyol sonucu sunucuda bekleniyor (yanıt "pending" ya da kesin); Hepsiburada ve n11 isteği kuyruğa alır.
+const ASYNC_STOCK_CHANNELS = new Set(["hepsiburada", "n11"]);
 const CHANNEL_KEPT_NOTE = "Kanala özel fiyat korundu";
 
 // `status: "pending"`: pazaryeri (Trendyol) isteği kuyruğa aldı, sonuç kesinleşmedi; sunucu değeri henüz kaydetmedi.
@@ -102,6 +104,7 @@ function ChannelRow({
   value,
   matched,
   note,
+  push,
   divider,
   busy,
   editable,
@@ -112,6 +115,8 @@ function ChannelRow({
   value: string;
   matched: boolean;
   note?: string;
+  // Son kanal gönderiminin sonucu (channel_push).
+  push?: PushBadge | null;
   divider: boolean;
   busy: boolean;
   editable: boolean;
@@ -140,6 +145,28 @@ function ChannelRow({
             </Text>
           </View>
         ) : null}
+        {matched && push ? (
+          <View
+            testID={`${testID}-push`}
+            style={[
+              styles.notePill,
+              { backgroundColor: push.tone === "good" ? colors.successBg : push.tone === "bad" ? colors.errorBg : colors.backgroundElevated },
+            ]}
+          >
+            <View
+              style={[
+                styles.noteDot,
+                { backgroundColor: push.tone === "good" ? colors.success : push.tone === "bad" ? colors.error : colors.textTertiary },
+              ]}
+            />
+            <Text
+              style={[type.caption, { color: push.tone === "good" ? colors.success : push.tone === "bad" ? colors.error : colors.textSecondary, flexShrink: 1 }]}
+              numberOfLines={3}
+            >
+              {push.label}
+            </Text>
+          </View>
+        ) : null}
       </View>
       <Text style={[type.bodyStrong, tabular, styles.rowValue, { color: matched ? colors.textPrimary : colors.textTertiary }]} numberOfLines={1}>
         {value}
@@ -157,7 +184,7 @@ function ChannelRow({
       testID={testID}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={[channel.name, value, note, "Düzenle"].filter(Boolean).join(", ")}
+      accessibilityLabel={[channel.name, value, note, push?.label, "Düzenle"].filter(Boolean).join(", ")}
     >
       {content}
     </PressableScale>
@@ -173,6 +200,20 @@ export default function ProductDetailScreen() {
   const [product, setProduct] = useState<CatalogProduct | null>(() => recallProduct(id));
   const [channels, setChannels] = useState<ChannelRef[]>(() => recallChannels());
   const [refreshing, setRefreshing] = useState(false);
+  // Kanal başına son gönderim sonucu; liste uçları taşımadığı için ürün ucundan ayrıca okunur.
+  const [pushMap, setPushMap] = useState<Record<string, ChannelPush>>({});
+  const [pushKey, setPushKey] = useState(0);
+  useEffect(() => {
+    if (!token || !id) return;
+    let alive = true;
+    getProductChannelPush(token, id)
+      .then((m) => alive && setPushMap(m))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [token, id, pushKey]);
+  const pushOf = (ch: ChannelRef) => channelPushBadge(pushMap[ch.id] || pushMap[ch.platform.toLowerCase()]);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   // Bu ekranda ana değer değiştiği hâlde pazaryerine gönderilmemiş kanal satırları (kanal kimlikleri).
   const [unsent, setUnsent] = useState<{ stock: string[]; price: string[] }>({ stock: [], price: [] });
@@ -270,6 +311,7 @@ export default function ProductDetailScreen() {
     } finally {
       setBusyKey(null);
       setMovementsKey((k) => k + 1);
+      setPushKey((k) => k + 1);
     }
   };
 
@@ -405,8 +447,8 @@ export default function ProductDetailScreen() {
       `cs-${ch.id}`,
       () => setChannelStock(token, product.id, ch.id, v),
       (p) => ({ ...p, channelStocks: p.channelStocks.map((x) => (x.integration_id === ch.id ? { ...x, stock: v } : x)) }),
-      // Trendyol, Hepsiburada ve n11 stok isteğini kuyruğa alır; sunucunun "başarılı" yanıtı pazaryerinin
-      // değeri işlediği anlamına gelmez. Kullanıcıya "güncellendi" yerine "iletildi" denir.
+      // Hepsiburada ve n11 stok isteğini kuyruğa alır; sunucunun "başarılı" yanıtı pazaryerinin değeri işlediği
+      // anlamına gelmez. Kullanıcıya "güncellendi" yerine "iletildi" denir.
       ASYNC_STOCK_CHANNELS.has(ch.platform.toLowerCase())
         ? `${ch.name} stoğu iletildi. Pazaryerinde görünmesi birkaç dakika sürebilir.`
         : `${ch.name} stoğu güncellendi`
@@ -446,7 +488,7 @@ export default function ProductDetailScreen() {
       <StackHeader title="Ürün" />
       <ScrollView
         contentContainerStyle={{ paddingTop: spacing.xs, paddingBottom: spacing.huge }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); setMovementsKey((k) => k + 1); reload(true); }} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); setMovementsKey((k) => k + 1); setPushKey((k) => k + 1); reload(true); }} tintColor={colors.primary} />}
       >
         <DetailHero
           tone="blue"
@@ -548,6 +590,7 @@ export default function ProductDetailScreen() {
                       matched={Boolean(row)}
                       value={row ? `${row.stock} adet` : "-"}
                       note={!row ? undefined : unsent.stock.includes(ch.id) ? UNSENT_NOTE : row.stock !== product.stock ? "Ana stoktan farklı" : undefined}
+                      push={row ? pushOf(ch) : null}
                       busy={busyKey === `cs-${ch.id}`}
                       editable={canEdit && Boolean(row)}
                       onPress={canEdit && row && !busyKey ? () => editChannelStock(ch, row.stock) : undefined}
@@ -578,6 +621,7 @@ export default function ProductDetailScreen() {
                       matched={Boolean(row)}
                       value={row ? formatTry(row.price) : "-"}
                       note={!row ? undefined : unsent.price.includes(ch.id) ? UNSENT_NOTE : keptChannel.includes(ch.id) && !samePrice(row.price, product.price) ? CHANNEL_KEPT_NOTE : undefined}
+                      push={row ? pushOf(ch) : null}
                       busy={busyKey === `cp-${ch.id}`}
                       editable={canEdit && Boolean(row)}
                       onPress={canEdit && row && !busyKey ? () => editChannelPrice(ch, row.price) : undefined}
