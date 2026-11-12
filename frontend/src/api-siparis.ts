@@ -366,3 +366,15 @@ export async function syncOrderByNumber(token: string, integration: Pick<Integra
   if (!result?.success) throw { message: result?.message || "Sipariş getirilemedi.", status: 200 };
   return { ...result, channel: key };
 }
+
+// A6 — sipariş için HepsiJet gönderisi açılabilir mi (web canTriggerCargoCreation; sipariş detayıyla aynı kural):
+// pazaryerinin kendi kargosu olan kanallarda ve barkodu olan siparişte açılmaz; iptal/silinmiş siparişte açılmaz.
+export function canCreateHepsiJetShipment(order: Order & { n11_cargo_tracking?: string }, providerHint?: string) {
+  const status = String(order.status || "").toLowerCase();
+  if (status === "cancelled" || status === "deleted") return false;
+  const channel = String(order.channel || providerHint || order.integration_provider || "").toLowerCase();
+  if (["trendyol", "hepsiburada", "idefix", "pazarama"].some((c) => channel.includes(c))) return false;
+  if (channel.includes("n11")) return !order.n11_cargo_tracking;
+  const hasBarcode = (order.cargo_barcodes || []).some((b) => b?.barcode) || Boolean(order.cargo_tracking);
+  return !hasBarcode;
+}

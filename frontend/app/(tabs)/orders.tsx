@@ -7,7 +7,8 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, type } from "../../src/theme/tokens";
 import { getIntegrations, getOrdersPage } from "../../src/api";
-import { bulkDeleteOrders } from "../../src/api-siparis";
+import { bulkDeleteOrders, canCreateHepsiJetShipment } from "../../src/api-siparis";
+import { createHepsiJetShipment } from "../../src/api";
 import { canManage } from "../../src/auth/permissions";
 import { Button } from "../../src/ui/Button";
 import { isStoreIntegration, providerLabel } from "../../src/utils";
@@ -132,6 +133,11 @@ export default function OrdersScreen() {
   const { toast, confirm } = useFeedback();
   const [printingId, setPrintingId] = useState<string | null>(null);
   const [purging, setPurging] = useState(false);
+  // A6: toplu HepsiJet gönderisi — seçim kipi (yalnız gönderisi açılabilen siparişler seçilebilir).
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState("");
 
   const printLabel = useCallback(
     async (order: Order) => {
@@ -261,10 +267,63 @@ export default function OrdersScreen() {
     }
   };
 
+  const canBulk = canManage(user, "orders");
+  const eligibleCount = orders.filter((o) => canCreateHepsiJetShipment(o as any, orderProvider(o))).length;
+  const runBulk = async () => {
+    if (!token || bulkBusy || selected.size === 0) return;
+    const ids = orders.filter((o) => selected.has(o.id)).map((o) => o.id);
+    const ok = await confirm({
+      title: `${ids.length} siparişe HepsiJet gönderisi açılsın mı?`,
+      message: "Her sipariş için HepsiJet'te gönderi açılır ve barkod üretilir. İşlem sırayla yapılır.",
+      confirmLabel: "Gönderileri oluştur",
+    });
+    if (!ok) return;
+    setBulkBusy(true);
+    let done = 0;
+    let inProgress = 0;
+    const failed: string[] = [];
+    for (const id of ids) {
+      setBulkProgress(`${done + inProgress + failed.length + 1}/${ids.length}`);
+      try {
+        const r: any = await createHepsiJetShipment(token, id);
+        if (r?.success) done += 1;
+        else if (r?.in_progress) inProgress += 1;
+        else failed.push(r?.message || "Gönderi oluşturulamadı");
+      } catch (e: any) {
+        failed.push(e?.message || "Gönderi oluşturulamadı");
+      }
+    }
+    setBulkBusy(false);
+    setBulkProgress("");
+    setSelected(new Set());
+    setSelectMode(false);
+    const parts = [`${done} gönderi oluşturuldu`, inProgress ? `${inProgress} zaten sürüyor` : null, failed.length ? `${failed.length} başarısız (${failed[0]})` : null].filter(Boolean);
+    toast(parts.join(" · ") + ".", failed.length ? "error" : "success");
+    fetchPage(1, "refresh");
+  };
+
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="orders-screen">
       <TabHeader title="Siparişler" subtitle={loading ? undefined : `${total}${staleOnly && hasMore ? "+" : ""} sipariş`} />
       <SearchField testID="orders-search" value={search} onChangeText={setSearch} placeholder="Müşteri veya sipariş no ara" />
+      {canBulk && (selectMode || eligibleCount > 0) ? (
+        <View style={styles.bulkToggle}>
+          <Text style={[type.caption, { color: colors.textSecondary, flex: 1 }]} numberOfLines={1}>
+            {selectMode ? "Gönderi açılacak siparişleri seçin" : `${eligibleCount} siparişe toplu HepsiJet gönderisi açılabilir`}
+          </Text>
+          <Button
+            testID="orders-bulk-toggle"
+            size="sm"
+            variant={selectMode ? "secondary" : "ghost"}
+            label={selectMode ? "Vazgeç" : "Toplu gönderi"}
+            disabled={bulkBusy}
+            onPress={() => {
+              setSelectMode((v) => !v);
+              setSelected(new Set());
+            }}
+          />
+        </View>
+      ) : null}
       <ChipRow>
         {staleOnly ? (
           <Chip testID="orders-filter-stale" label="3 günden eski bekleyenler" selected onPress={() => setStaleOnly(false)} />
@@ -341,7 +400,39 @@ export default function OrdersScreen() {
                 index === orders.length - 1 && { borderBottomWidth: 1 },
               ]}
             >
-              <SwipeableOrder order={item} divider={index > 0} onPrint={printLabel} busy={printingId === item.id} />
+              {selectMode ? (
+                (() => {
+                  const ok = canCreateHepsiJetShipment(item as any, orderProvider(item));
+                  const sel = selected.has(item.id);
+                  return (
+                    <PressableScale
+                      testID={`order-select-${item.id}`}
+                      disabled={!ok || bulkBusy}
+                      onPress={() => {
+                        Haptics.selectionAsync().catch(() => {});
+                        setSelected((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(item.id)) next.delete(item.id);
+                          else next.add(item.id);
+                          return next;
+                        });
+                      }}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: sel, disabled: !ok }}
+                      style={[styles.selectRow, { opacity: ok ? 1 : 0.4 }]}
+                    >
+                      <View style={[styles.check, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary : "transparent" }]}>
+                        {sel ? <Text style={styles.checkMark}>✓</Text> : null}
+                      </View>
+                      <View style={{ flex: 1 }} pointerEvents="none">
+                        <OrderRow order={item} divider={false} />
+                      </View>
+                    </PressableScale>
+                  );
+                })()
+              ) : (
+                <SwipeableOrder order={item} divider={index > 0} onPrint={printLabel} busy={printingId === item.id} />
+              )}
             </View>
           )}
           ListEmptyComponent={
@@ -364,11 +455,27 @@ export default function OrdersScreen() {
           }
         />
       )}
+      {selectMode && selected.size > 0 ? (
+        <View style={[styles.bulkBar, { backgroundColor: colors.surface, borderTopColor: colors.borderSubtle }]}>
+          <Button
+            testID="orders-bulk-run"
+            label={bulkBusy ? `Oluşturuluyor ${bulkProgress}` : `${selected.size} siparişe gönderi oluştur`}
+            busy={false}
+            disabled={bulkBusy}
+            onPress={runBulk}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  bulkToggle: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginHorizontal: spacing.lg, marginBottom: spacing.xs },
+  bulkBar: { padding: spacing.md, borderTopWidth: StyleSheet.hairlineWidth },
+  selectRow: { flexDirection: "row", alignItems: "center", paddingLeft: spacing.md },
+  check: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, alignItems: "center", justifyContent: "center" },
+  checkMark: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" },
   wrap: { flex: 1 },
   purgeCard: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1, marginBottom: spacing.sm },
   list: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing.xxl },
