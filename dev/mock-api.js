@@ -254,7 +254,14 @@ http
         const b = JSON.parse(raw || "{}");
         const p = products.find((x) => x.id === b.product_id);
         if (!p) return send(res, 404, { detail: "Ürün bulunamadı" });
-        if (path === "/stock/adjust") p.stock = b.quantity;
+        if (path === "/stock/adjust") {
+          // Sunucu gibi: in/out miktar kadar ekler/düşer, adjustment mutlak değer yazar.
+          const q = Number(b.quantity) || 0;
+          if ((b.movement_type === "in" || b.movement_type === "out") && q <= 0) return send(res, 400, { detail: "Miktar sıfırdan büyük olmalı" });
+          if (b.movement_type === "out" && p.stock - q < 0) return send(res, 400, { detail: "Stok yetersiz" });
+          p.stock = b.movement_type === "in" ? p.stock + q : b.movement_type === "out" ? p.stock - q : q;
+          console.log("IDEMPOTENCY", req.headers["idempotency-key"] || "-");
+        }
         if (path === "/price/adjust") p.price = b.price;
         if (path === "/stock/channel-set") p.ch[b.integration_id].stock = b.stock;
         if (path === "/price/channel-set") p.ch[b.integration_id].price = b.price;

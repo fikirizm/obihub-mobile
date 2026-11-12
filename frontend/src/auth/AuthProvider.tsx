@@ -278,12 +278,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, []);
 
-  const logout = useCallback(async () => {
-    // Cihaz önceki kullanıcının bildirimlerini almaya devam etmesin.
+  const logout = useCallback(async (opts?: { sessionExpired?: boolean }) => {
+    // Cihaz önceki kullanıcının bildirimlerini almaya devam etmesin. Oturum zaten düşmüşse (401) istek de 401 alır;
+    // beklemeden geçilir (sunucu aynı cihaz başka kullanıcıyla kaydolunca eski kaydı siler).
     const authToken = tokenRef.current;
     const pushToken = pushTokenRef.current;
     pushTokenRef.current = null;
-    if (authToken && pushToken) await unregisterPushToken(authToken, pushToken);
+    if (authToken && pushToken && !opts?.sessionExpired) await unregisterPushToken(authToken, pushToken);
     await Storage.deleteItemAsync(TOKEN_KEY);
     await Storage.deleteItemAsync(USER_KEY);
     await Storage.deleteItemAsync(PARASUT_CONNECTED_KEY);
@@ -306,7 +307,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setSessionHandlers({
       onUnauthorized: () => {
-        logout().catch(() => {});
+        logout({ sessionExpired: true }).catch(() => {});
       },
       onSubscriptionLocked: (message) => setSubscriptionLock(message),
     });

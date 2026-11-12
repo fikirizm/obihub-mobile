@@ -223,7 +223,9 @@ export default function OrderDetail() {
         // Sunucu otomatik yazdırma kapalıyken HTTP 200 + success:false döner.
         const r = await enqueueCloudPrint(token, order.id, bc || undefined);
         if (!r?.success) {
-          toast(r?.message || "Uzaktan yazdırma kuyruğa eklenemedi.", "error");
+          const base = r?.message || "Uzaktan yazdırma kuyruğa eklenemedi.";
+          // Önceki barkodlar kuyruğa eklenmiş olabilir; tekrar denemede çift basılmasın diye söylenir.
+          toast(ok > 0 ? `${base} (${ok} etiket zaten kuyruğa eklendi; tekrar denemeden önce yazıcıyı kontrol edin.)` : base, "error");
           return;
         }
         ok += 1;
@@ -231,6 +233,7 @@ export default function OrderDetail() {
       toast(ok > 1 ? `${ok} etiket uzaktan yazdırma kuyruğuna eklendi.` : "Uzaktan yazdırma kuyruğa eklendi.", "success");
     } catch (e: any) {
       toast(e?.message || "Uzaktan yazdırma başarısız.", "error");
+      // (Döngü içinde kalan barkod sayısı bilinmez; kullanıcı yazıcıyı kontrol etmeli.)
     } finally {
       setCloudBusy(false);
     }

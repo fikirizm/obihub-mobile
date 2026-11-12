@@ -5,6 +5,7 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
+import { isUncertainWrite } from "../../src/api-finans";
 import { getCatalog, setChannelPrice, setChannelStock, setProductPrice, setProductStock, SYNC_NONE } from "../../src/api";
 import { recallChannels, recallProduct, rememberCatalog } from "../../src/catalogCache";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -256,7 +257,13 @@ export default function ProductDetailScreen() {
       const fresh = await reload(skipped.length === 0);
       return { res, fresh };
     } catch (e: any) {
-      toast(e?.message || "Güncellenemedi.", "error");
+      // Bağlantı koptuysa ya da sunucu hatasıysa istek işlenmiş olabilir (Ekle/Çıkart tekrarı stoğu iki kez değiştirir).
+      toast(
+        isUncertainWrite(e)
+          ? "İşlemin uygulanıp uygulanmadığı bilinmiyor. Güncel değer yeniden okundu; tekrar etmeden önce kontrol edin."
+          : e?.message || "Güncellenemedi.",
+        "error"
+      );
       // Sunucu yerel değeri yazıp kanal hatası döndürmüş olabilir; güncel durumu oku (hata iletisinin üstüne yazmadan).
       await reload(false);
       return null;

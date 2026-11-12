@@ -60,7 +60,8 @@ export default function CustomerDetailScreen() {
   const [busy, setBusy] = useState(false);
   // Tahsilat yalnızca kayıtlı carilerde yapılabilir; siparişlerden türetilen carilerde uç 404 döner.
   const registered = params.registered === "1";
-  const mayCollect = canManage(user, "customers") || canManage(user, "billing");
+  // Web (CustomersPage.js): kaynağı ObiHub defteri olan caride tahsilat bu ekrandan alınmaz.
+  const mayCollect = (canManage(user, "customers") || canManage(user, "billing")) && source !== "obihub";
   // Sunucu tahsilatı para birimine bakmadan ilk kasa hesabına gelir yazar; dövizli caride tutar TL kasaya
   // döviz tutarıyla işlenirdi. Sunucu hesap seçimi sunana kadar dövizli caride mobilden tahsilat alınmaz.
   const foreign = cur !== "TRY";

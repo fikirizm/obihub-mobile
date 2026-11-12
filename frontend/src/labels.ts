@@ -9,6 +9,7 @@ import { printOrShare } from "./pdf";
 import { getHepsiJetLabelWithProducts, getShippingLabel } from "./api";
 import {
   channelKeyOf,
+  fileLooksLikePdf,
   getHepsiburadaMarketplaceLabel,
   orderProductLabelPdf,
   writePdfBase64,
@@ -99,8 +100,8 @@ async function hepsiburadaLabel(token: string, order: Partial<OrderFull>, orderI
     if (url && /^https:\/\//i.test(url)) {
       const path = `${FileSystem.cacheDirectory}hb-${orderId}.pdf`;
       const dl = await FileSystem.downloadAsync(url, path);
-      if (dl.status >= 200 && dl.status < 300) return { path };
-      apiError = `Etiket bağlantısı açılamadı (${dl.status})`;
+      if (dl.status >= 200 && dl.status < 300 && (await fileLooksLikePdf(path))) return { path };
+      apiError = dl.status >= 200 && dl.status < 300 ? "Etiket bağlantısı PDF döndürmedi" : `Etiket bağlantısı açılamadı (${dl.status})`;
     } else {
       const data = r?.data_base64 || r?.data || "";
       if (data) {

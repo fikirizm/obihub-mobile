@@ -44,7 +44,7 @@ export function looksLikePdfBase64(data: unknown): boolean {
   return payload.replace(/\s+/g, "").startsWith("JVBERi");
 }
 
-async function fileLooksLikePdf(path: string): Promise<boolean> {
+export async function fileLooksLikePdf(path: string): Promise<boolean> {
   try {
     const head = await FileSystem.readAsStringAsync(path, { encoding: FileSystem.EncodingType.Base64, position: 0, length: 8 });
     return looksLikePdfBase64(head);

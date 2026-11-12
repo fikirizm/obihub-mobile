@@ -81,10 +81,17 @@ export default function ExpensesScreen() {
   useEffect(() => {
     if (!token || metaLoaded.current || ledger.loading || ledger.error) return;
     metaLoaded.current = true;
-    Promise.all([getUiCapabilities(token), getExpenseModuleEnabled(token)]).then(([c, m]) => {
-      setCaps(c);
-      setModuleOn(m);
-    });
+    Promise.all([getUiCapabilities(token), getExpenseModuleEnabled(token)])
+      .then(([c, m]) => {
+        // Okuma başarısızsa (NO_CAPS) bir sonraki yüklemede yeniden denenir.
+        if (c === NO_CAPS) metaLoaded.current = false;
+        setCaps(c);
+        setModuleOn(m);
+      })
+      .catch(() => {
+        // Geçici hatada bir sonraki yüklemede yeniden okunur.
+        metaLoaded.current = false;
+      });
   }, [token, ledger.loading, ledger.error]);
 
   const parasutOn = caps.parasutView === true;
