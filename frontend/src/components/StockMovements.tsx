@@ -68,7 +68,7 @@ export function StockMovements({ token, productId, refreshKey }: { token: string
   };
 
   // "sale" (POS satışı) sunucuda eksi miktarla yazılır; çıkış olarak gösterilir. "opening" yeni ürünün ilk stoğudur.
-  // "accounting_sync" (BizimHesap/BenimPOS senkronu) miktarı işaretsiz değişimdir; yön yalnız `delta` gelirse bilinir,
+  // "accounting_sync" (muhasebe senkronu) ve "reconcile" (Muhasebe farkları'nda "Farkı al") miktarı işaretsiz değişimdir; yön yalnız `delta` gelirse bilinir,
   // gelmezse "±" ile yönsüz gösterilir. Bilinmeyen türlerde yön `delta`dan, yoksa miktarın işaretinden okunur.
   // Yalnızca "adjustment" mutlak sayımdır ("=").
   const look = (t: string, q: number, delta?: number | null) => {
@@ -79,8 +79,8 @@ export function StockMovements({ token, productId, refreshKey }: { token: string
     if (t === "out" || t === "sale") return outgoing;
     if (t === "adjustment") return { fg: colors.amber, bg: colors.amberSoft, sign: "=", label: "Sayım" };
     if (t === "opening") return { ...incoming, label: "Açılış stoğu" };
-    if (t === "accounting_sync") {
-      const label = "Muhasebe senkronu";
+    if (t === "accounting_sync" || t === "reconcile") {
+      const label = t === "reconcile" ? "Fark alındı" : "Muhasebe senkronu";
       if (dir === null) return { fg: colors.violet, bg: colors.violetSoft, sign: "±", label };
       return dir < 0 ? { ...outgoing, label } : { ...incoming, label };
     }

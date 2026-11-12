@@ -10,7 +10,7 @@ export type ProductIdentity = {
   barcode?: string | null;
 };
 
-export type StockMovementType = "in" | "out" | "adjustment" | "sale" | "opening" | "accounting_sync";
+export type StockMovementType = "in" | "out" | "adjustment" | "sale" | "opening" | "accounting_sync" | "reconcile";
 
 // GET /stock/movements satırı. "adjustment" türünde quantity yeni stok değeridir; diğerlerinde değişim miktarıdır
 // ("sale" türünde, POS satışında, eksi işaretli gelir). "accounting_sync" miktarı işaretsizdir; yön `delta`dadır

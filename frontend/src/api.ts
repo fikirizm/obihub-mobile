@@ -76,7 +76,15 @@ export async function request<T>(path: string, options: RequestInit = {}, token?
   }
   if (!res.ok) {
     const detail = data?.detail;
-    const serverMessage = typeof detail === "string" ? detail : typeof data?.message === "string" ? data.message : "";
+    // detail bazen nesnedir: {code, message, ...} (ör. stok mutabakatı 409'u).
+    const serverMessage =
+      typeof detail === "string"
+        ? detail
+        : typeof detail?.message === "string"
+          ? detail.message
+          : typeof data?.message === "string"
+            ? data.message
+            : "";
     const friendlyMessage = STATUS_MESSAGES[res.status];
     const err: ApiError = {
       message: serverMessage || friendlyMessage || `Sunucu hatası (${res.status})`,
