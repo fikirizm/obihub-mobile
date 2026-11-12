@@ -428,3 +428,47 @@ export type UsageSummary = {
   limits?: Record<string, number>;
   usage?: Record<string, number>;
 };
+
+// ---------------------------------------------------------------------------
+// Web eşitleme (gider, cari, gelen kutusu) — src/api-gider.ts
+// ---------------------------------------------------------------------------
+
+// GET /ui-capabilities → capabilities (backend/routers/ui_capabilities.py). Alan yoksa ya da bool değilse KAPALI.
+export type UiCapabilities = {
+  inboxRead: boolean;
+  expenseLedger: boolean;
+  manualEntry: boolean;
+  manualEntryReason: string | null;
+  parasutView: boolean;
+  parasutConnected: boolean;
+  payablePayment: boolean;
+};
+
+// GET /accounting/expense-invoices satırı (backend domain/accounting/read_model.py PurchaseInvoiceItem.to_dict).
+// Tutarlar sunucuda Decimal dizedir; burada sayıya çevrilmiş hâlidir. `total` KDV dışı vergileri (other_levies) içerir.
+export type ExpenseLedgerRow = {
+  id: string;
+  supplier_name?: string | null;
+  document_number?: string | null;
+  issue_date?: string | null;
+  due_date?: string | null;
+  total: number | null;
+  remaining: number | null;
+  currency?: string | null;
+  payment_status?: string;
+  reversed?: boolean;
+  source_kind?: string;
+};
+
+export type ExpenseSummaryRow = { currency: string; payable: number; overdue: number };
+
+export type PartyActions = { view_ledger: boolean; view_orders: boolean; edit: boolean; delete: boolean; collect: boolean };
+
+// Cari listesi satırı: okuma modeli (/accounting/read-model/parties) ya da eski uç (/customers) aynı biçime çevrilir.
+export type PartyView = Party & {
+  // "read_model": yeni okuma modeli; "customers": eski uç (okuma modeli 404 döndü).
+  origin: "read_model" | "customers";
+  // `source`: okuma modelinde "obihub" | "legacy"; eski uçta "registered" | "orders".
+  actions: PartyActions;
+  balanceAvailable: boolean;
+};

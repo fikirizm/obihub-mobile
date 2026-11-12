@@ -4,7 +4,9 @@ import { FadeInDown } from "react-native-reanimated";
 import { useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { collectPartyPayment, getPartyLedger } from "../../src/api";
+import { getCashAccounts } from "../../src/api";
+import { collectPartyPaymentCompat, getLegacyPartyCurrency, getPartyLedgerCompat } from "../../src/api-gider";
+import { isUncertainWrite } from "../../src/api-finans";
 import { PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
@@ -30,10 +32,23 @@ function initialsOf(name: string): string {
 }
 
 export default function CustomerDetailScreen() {
-  const params = useLocalSearchParams<{ id: string; name?: string; balance?: string; registered?: string; currency?: string }>();
+  const params = useLocalSearchParams<{
+    id: string;
+    name?: string;
+    balance?: string;
+    registered?: string;
+    currency?: string;
+    origin?: string;
+    source?: string;
+    ledger?: string;
+  }>();
   const id = String(params.id || "");
-  // Bakiye ve ekstre carinin kendi para biriminde tutulur.
-  const cur = String(params.currency || "TRY").toUpperCase().replace("TRL", "TRY");
+  // Liste okuma modelinden mi (/accounting/read-model/parties) yoksa eski /customers ucundan mı geldi; web CustomersPage.js ile aynı ayrım.
+  const origin = params.origin === "read_model" ? "read_model" : "customers";
+  const source = String(params.source || "");
+  const viewLedger = params.ledger !== "0";
+  // Okuma modelindeki eski cari para birimi taşımaz; eski uçtan okunur. Okunamazsa bilinmez sayılır (tahsilat kapalı).
+  const [cur, setCur] = useState<string | null>(params.currency ? String(params.currency).toUpperCase().replace("TRL", "TRY") : null);
   const { token, user } = useAuth();
   const { colors } = useTheme();
   const { toast, promptEntry } = useFeedback();
@@ -49,13 +64,24 @@ export default function CustomerDetailScreen() {
   // Sunucu tahsilatı para birimine bakmadan ilk kasa hesabına gelir yazar; dövizli caride tutar TL kasaya
   // döviz tutarıyla işlenirdi. Sunucu hesap seçimi sunana kadar dövizli caride mobilden tahsilat alınmaz.
   const foreign = cur !== "TRY";
+  const curLabel = cur || "TRY";
 
   const load = useCallback(async () => {
     if (!token || !id) return;
     try {
-      const res = await getPartyLedger(token, id);
+      if (origin === "read_model" && source === "legacy" && !params.currency) {
+        const c = await getLegacyPartyCurrency(token, id);
+        setCur(c ? c.replace("TRL", "TRY") : null);
+      }
+      if (!viewLedger) {
+        setRows([]);
+        setError(null);
+        return;
+      }
+      const res = await getPartyLedgerCompat(token, { id, origin, source });
       setRows(res.rows);
-      setBalance(res.balance);
+      if (res.balance !== null) setBalance(res.balance);
+      if (res.currency && origin === "read_model" && source === "obihub") setCur(res.currency.toUpperCase());
       setError(null);
     } catch (e: any) {
       setError(e?.message || "Ekstre yüklenemedi.");
@@ -63,14 +89,27 @@ export default function CustomerDetailScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [token, id]);
+  }, [token, id, origin, source, viewLedger, params.currency]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const onCollect = async () => {
-    if (!token || foreign) return;
+    if (!token || foreign || !cur) return;
+    // Fatura tahsilatındaki gibi tahsilatın yazılacağı kasa/banka hesabı seçilir; yalnız carinin para birimindeki hesaplar.
+    let accounts: Awaited<ReturnType<typeof getCashAccounts>> = [];
+    try {
+      accounts = await getCashAccounts(token);
+    } catch (e: any) {
+      toast(e?.message || "Kasa/banka hesapları okunamadı.", "error");
+      return;
+    }
+    const usable = accounts.filter((a) => String(a.currency || "TRY").toUpperCase().replace("TRL", "TRY") === cur);
+    if (accounts.length > 0 && usable.length === 0) {
+      toast(`${cur} para biriminde kasa/banka hesabı yok. Önce Kasa ve Bankalar'dan hesap ekleyin.`, "error");
+      return;
+    }
     const entry = await promptEntry({
       title: "Tahsilat al",
       message: String(params.name || ""),
@@ -78,16 +117,31 @@ export default function CustomerDetailScreen() {
       decimal: true,
       noteLabel: "Not (isteğe bağlı)",
       methods: [...PAYMENT_METHODS],
+      accounts: usable.map((a) => ({ value: a.id, label: a.name })),
+      accountsLabel: usable.length > 0 ? "Hesap" : undefined,
     });
     if (!entry || entry.amount <= 0) return;
     const method = entry.method || "nakit";
     setBusy(true);
     try {
-      await collectPartyPayment(token, id, { amount: entry.amount, payment_method: method, note: entry.note || undefined, payment_date: todayIso() });
+      await collectPartyPaymentCompat(token, id, {
+        amount: entry.amount,
+        payment_method: method,
+        note: entry.note || undefined,
+        payment_date: todayIso(),
+        account_id: entry.account || null,
+      });
       toast("Tahsilat kaydedildi", "success");
       await load();
     } catch (e: any) {
-      toast(e?.message || "Tahsilat kaydedilemedi.", "error");
+      // Bağlantı koptuysa ya da sunucu hatasıysa tahsilat işlenmiş olabilir; tekrar eklemeden önce ekstre kontrol edilmeli.
+      toast(
+        isUncertainWrite(e)
+          ? "Tahsilat işlenmiş olabilir. Tekrar eklemeden önce ekstreyi yenileyip kontrol edin."
+          : e?.message || "Tahsilat kaydedilemedi.",
+        "error"
+      );
+      if (isUncertainWrite(e)) await load();
     } finally {
       setBusy(false);
     }
@@ -118,12 +172,12 @@ export default function CustomerDetailScreen() {
           <View style={styles.valueBlock}>
             <Text style={styles.valueLabel}>{balanceLabel}</Text>
             <Text testID="customer-balance" style={[styles.value, tabular]} numberOfLines={1} adjustsFontSizeToFit>
-              {formatMoney(Math.abs(balance), cur)}
+              {formatMoney(Math.abs(balance), curLabel)}
             </Text>
           </View>
         </DetailHero>
 
-        {registered && mayCollect && !foreign ? (
+        {registered && mayCollect && cur && !foreign ? (
           <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)} style={styles.action}>
             <Button
               testID="customer-collect"
@@ -134,7 +188,7 @@ export default function CustomerDetailScreen() {
             />
           </SafeAnimatedView>
         ) : null}
-        {registered && mayCollect && foreign ? (
+        {registered && mayCollect && cur && foreign ? (
           <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)}>
             <View testID="customer-collect-foreign-notice" style={[styles.notice, { backgroundColor: colors.infoBg }]}>
               <AlertIcon size={18} color={colors.info} />
@@ -144,7 +198,7 @@ export default function CustomerDetailScreen() {
             </View>
           </SafeAnimatedView>
         ) : null}
-        {!registered && mayCollect ? (
+        {!registered && mayCollect && source === "orders" ? (
           <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)}>
             <View style={[styles.notice, { backgroundColor: colors.infoBg }]}>
               <AlertIcon size={18} color={colors.info} />
@@ -204,10 +258,10 @@ export default function CustomerDetailScreen() {
                     }
                     title={r.description || r.reference || "Hareket"}
                     subtitle={formatDate(r.date)}
-                    meta={r.balance != null ? `Bakiye ${formatMoney(r.balance, cur)}` : undefined}
+                    meta={r.balance != null ? `Bakiye ${formatMoney(r.balance, curLabel)}` : undefined}
                     trailing={
                       <Text style={[type.bodyStrong, tabular, { color: isCredit ? colors.success : colors.textPrimary }]}>
-                        {isCredit ? `-${formatMoney(credit, cur)}` : `+${formatMoney(debit, cur)}`}
+                        {isCredit ? `-${formatMoney(credit, curLabel)}` : `+${formatMoney(debit, curLabel)}`}
                       </Text>
                     }
                   />

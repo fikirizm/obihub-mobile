@@ -4,6 +4,7 @@ import { router } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canAccess } from "../../src/auth/permissions";
 import { getFinanceOverview } from "../../src/api";
+import { getExpenseModuleEnabled, hasNonBizimhesapIncomingSource } from "../../src/api-gider";
 import { todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing, tabular, type } from "../../src/theme/tokens";
@@ -25,9 +26,21 @@ export default function FinanceScreen() {
   const [failed, setFailed] = useState(false);
   const billing = canAccess(user, "billing");
   const customers = canAccess(user, "customers");
+  // Web authz.js: /panel/finans fatura izni YA DA rapor görme izniyle açılır. Rapor izni yalnız okuma ekranlarını
+  // (özet, kasa ve bankalar) açar; fatura/gider ekranları web'deki gibi fatura izni ister, yazma düğmeleri manage ister.
+  const financeRead = billing || canAccess(user, "reports");
+  // Web Sidebar.js: expense_module_enabled === false ise Gider Faturaları gizli (ayar okunamazsa görünür).
+  const [expenseModuleOn, setExpenseModuleOn] = useState(true);
+  // Web Sidebar.js: BizimHesap firmasında gelen faturalar yalnız BenimPOS/Turkcell bağlıysa görünür (bilinene dek gizli).
+  const [altIncomingSource, setAltIncomingSource] = useState(false);
+  const bizimhesap = accountingProvider === "bizimhesap";
 
   const load = useCallback(async () => {
-    if (!token || !billing) return;
+    if (!token || !financeRead) return;
+    if (billing) {
+      getExpenseModuleEnabled(token).then(setExpenseModuleOn);
+      if (bizimhesap) hasNonBizimhesapIncomingSource(token).then(setAltIncomingSource).catch(() => setAltIncomingSource(false));
+    }
     try {
       setData(await getFinanceOverview(token));
       setFailed(false);
@@ -37,11 +50,11 @@ export default function FinanceScreen() {
     } finally {
       setRefreshing(false);
     }
-  }, [token, billing]);
+  }, [token, financeRead, billing, bizimhesap]);
 
   useFocusLoad(load, { hasData: Boolean(data), staleMs: 60 * 1000 });
 
-  if (!billing && !customers) {
+  if (!financeRead && !customers) {
     return (
       <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="finance-screen">
         <TabHeader title="Finans" eyebrow="Nakit, alacak ve borç" />
@@ -54,6 +67,7 @@ export default function FinanceScreen() {
     );
   }
 
+  const incomingVisible = !bizimhesap || altIncomingSource;
   const invoiceSource = parasutConnected ? "Paraşüt" : accountingProvider === "bizimhesap" ? "BizimHesap" : null;
   const upcoming = (data?.upcoming || []).slice(0, 5);
   // Sunucunun "bugün"ü UTC'dir; gece yarısından sonra geride kalabildiği için cihazın günü ilerideyse o kullanılır.
@@ -67,7 +81,7 @@ export default function FinanceScreen() {
         contentContainerStyle={{ paddingBottom: spacing.xxl }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
       >
-        {billing && !data ? (
+        {financeRead && !data ? (
           failed ? (
             <Card padded style={[styles.block, { marginTop: spacing.xs }]}>
               <Text style={[type.bodyStrong, { color: colors.textPrimary }]}>Finans özeti yüklenemedi</Text>
@@ -80,7 +94,7 @@ export default function FinanceScreen() {
             />
           )
         ) : null}
-        {billing && data ? (
+        {financeRead && data ? (
           <>
             <HeroCard tone="emerald" style={{ marginTop: spacing.xs }}>
               <Text style={{ color: ON_HERO.soft, fontSize: 13, fontWeight: "600" }}>Kasa ve banka toplamı</Text>
@@ -189,10 +203,10 @@ export default function FinanceScreen() {
               onPress={() => router.push("/customers")}
             />
           ) : null}
-          {billing ? (
+          {financeRead ? (
             <ListRow
               testID="finance-cash"
-              divider
+              divider={billing || customers}
               leading={<IconTile tint={colors.infoBg}><WalletIcon size={18} color={colors.info} /></IconTile>}
               title="Kasa ve bankalar"
               subtitle="Hesap bakiyeleri ve hareketler"
@@ -202,25 +216,27 @@ export default function FinanceScreen() {
           ) : null}
         </Card>
 
-        {billing ? (
+        {billing && (incomingVisible || expenseModuleOn) ? (
           <>
             <SectionTitle title="Giderler" />
             <Card style={styles.block}>
-              <ListRow
-                testID="finance-incoming"
-                leading={<IconTile tint={colors.amberSoft}><InboxIcon size={18} color={colors.amber} /></IconTile>}
-                title="Gelen e-faturalar"
-                subtitle="Tedarikçilerden gelen faturalar"
-                chevron
-                onPress={() => router.push("/incoming")}
-              />
-              {parasutConnected ? (
+              {incomingVisible ? (
+                <ListRow
+                  testID="finance-incoming"
+                  leading={<IconTile tint={colors.amberSoft}><InboxIcon size={18} color={colors.amber} /></IconTile>}
+                  title="Gelen e-faturalar"
+                  subtitle="Tedarikçilerden gelen faturalar"
+                  chevron
+                  onPress={() => router.push("/incoming")}
+                />
+              ) : null}
+              {expenseModuleOn ? (
                 <ListRow
                   testID="finance-expenses"
-                  divider
+                  divider={incomingVisible}
                   leading={<IconTile tint={colors.errorBg}><DownloadIcon size={18} color={colors.error} /></IconTile>}
                   title="Gider faturaları"
-                  subtitle="Paraşüt'e işlenmiş giderler"
+                  subtitle="Alış ve gider kayıtları, açık borçlar"
                   chevron
                   onPress={() => router.push("/expenses")}
                 />

@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { getIncomingInvoicePdf, getIncomingInvoices, resolveIncomingSource } from "../../src/api";
+import { getIncomingInbox, getUiCapabilities, InboxUnavailable } from "../../src/api-gider";
 import { usePagedList } from "../../src/hooks/usePagedList";
 import { openBase64Pdf } from "../../src/pdf";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -39,18 +40,37 @@ export default function IncomingInvoicesScreen() {
   const [connected, setConnected] = useState<IncomingSource[]>([]);
   const [source, setSource] = useState<IncomingSource | null>(null);
   const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
+  // Web IncomingEInvoicesPage.js: ui-capabilities.inbox_read açıksa kalıcı gelen kutusu (/incoming-inbox) okunur;
+  // uç bu sağlayıcı için 404 dönerse eski sağlayıcı listesine düşülür ve oturum boyunca gelen kutusu denenmez.
+  const inboxOn = useRef(false);
 
   useEffect(() => {
     if (!token) return;
-    resolveIncomingSource(token)
-      .then((r) => {
+    Promise.all([resolveIncomingSource(token), getUiCapabilities(token)])
+      .then(([r, caps]) => {
+        inboxOn.current = caps.inboxRead === true;
         setConnected(r.connected);
         setSource(r.source);
       })
+      .catch(() => undefined)
       .finally(() => setResolving(false));
   }, [token]);
 
-  const fetchPage = useCallback((page: number) => getIncomingInvoices(token as string, source as IncomingSource, page), [token, source]);
+  const fetchPage = useCallback(
+    async (page: number) => {
+      const src = source as IncomingSource;
+      if (inboxOn.current) {
+        try {
+          return await getIncomingInbox(token as string, src, page);
+        } catch (e) {
+          if (!(e instanceof InboxUnavailable)) throw e;
+          inboxOn.current = false;
+        }
+      }
+      return getIncomingInvoices(token as string, src, page);
+    },
+    [token, source]
+  );
   const list = usePagedList<IncomingInvoice>(token && source ? fetchPage : null);
   const hasPdf = source === "parasut" || source === "turkcell-efatura";
 

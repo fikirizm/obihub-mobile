@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { getParties } from "../../src/api";
+import { getPartiesCompat } from "../../src/api-gider";
 import { useDebounce } from "../../src/hooks/useDebounce";
 import { usePagedList } from "../../src/hooks/usePagedList";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -18,7 +18,7 @@ import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
 import { ListBody } from "../../src/ui/ListBody";
 import { RowCard } from "../../src/ui/RowCard";
 import { SearchField } from "../../src/ui/SearchField";
-import type { Party } from "../../src/types";
+import type { Party, PartyView } from "../../src/types";
 
 type Filter = "" | "receivable" | "payable";
 
@@ -113,7 +113,8 @@ export default function CustomersScreen() {
       const unfiltered = page === 1 && !debounced && !filter;
       const my = unfiltered ? ++summarySeq.current : 0;
       try {
-        const res = await getParties(token as string, { page, search: debounced || undefined, balanceStatus: filter || undefined });
+        // Web CustomersPage.js gibi önce okuma modeli, 404'te eski /customers ucu (src/api-gider.ts).
+        const res = await getPartiesCompat(token as string, { page, search: debounced || undefined, balanceStatus: filter || undefined });
         // Özet ilk sayfayla birlikte gelir; ek istek yapılmaz.
         if (unfiltered && my === summarySeq.current) setSummary(res.summary ?? null);
         if (page === 1) itemsUnfiltered.current = unfiltered;
@@ -126,7 +127,7 @@ export default function CustomersScreen() {
     },
     [token, debounced, filter]
   );
-  const list = usePagedList<Party>(token ? fetchPage : null);
+  const list = usePagedList<PartyView>(token ? fetchPage : null);
 
   // Detayda tahsilat alınıp geri dönüldüğünde bakiyeler ve toplamlar tazelenir (ilk açılışı liste kendisi yükler).
   // Yüklenmiş sayfalar yerinde yenilenir; liste ilk sayfaya düşmez, kaydırma konumu korunur.
@@ -146,7 +147,7 @@ export default function CustomersScreen() {
   const { items, hasMore, loading } = list;
   useEffect(() => {
     if (loading) return;
-    const seen = items.some((p) => isForeign(p.currency) && Number(p.balance || 0) !== 0);
+    const seen = items.some((p) => p.balanceAvailable && isForeign(p.currency) && Number(p.balance || 0) !== 0);
     if (itemsUnfiltered.current) setForeign(seen ? "yes" : hasMore ? "unknown" : "no");
     else if (seen) setForeign("yes");
   }, [items, hasMore, loading]);
@@ -183,8 +184,10 @@ export default function CustomersScreen() {
         emptyTitle="Cari yok"
         emptyDescription="Bu süzgece uyan cari hesap bulunmuyor."
         renderItem={(p) => {
-          const bal = Number(p.balance || 0);
+          const bal = p.balanceAvailable ? Number(p.balance || 0) : 0;
           const name = partyName(p);
+          // Okuma modelindeki eski cari satırı bakiyesiz gelir; bakiye detayda eski ekstreden okunur (web ile aynı).
+          const balanceText = !p.balanceAvailable ? "Bakiye detayda" : bal === 0 ? "Bakiye yok" : formatMoney(Math.abs(bal), p.currency);
           return (
             <RowCard
               testID={`party-${p.id}`}
@@ -197,12 +200,26 @@ export default function CustomersScreen() {
                 />
               }
               title={name}
-              subtitle={p.phone || p.email || (p.source === "orders" ? "Siparişlerden" : undefined)}
-              amount={bal === 0 ? "Bakiye yok" : formatMoney(Math.abs(bal), p.currency)}
+              subtitle={p.phone || p.email || (p.source === "orders" ? "Siparişlerden" : p.source === "obihub" ? "ObiHub defteri" : undefined)}
+              amount={balanceText}
               amountColor={bal > 0 ? colors.success : bal < 0 ? colors.error : colors.textTertiary}
               meta={bal > 0 ? "Alacağınız var" : bal < 0 ? "Borcunuz var" : undefined}
               onPress={() =>
-                router.push({ pathname: "/customers/[id]", params: { id: p.id, name, balance: String(bal), registered: p.source === "registered" ? "1" : "0", currency: p.currency || "TRY" } })
+                router.push({
+                  pathname: "/customers/[id]",
+                  params: {
+                    id: p.id,
+                    name,
+                    balance: String(bal),
+                    // Eski uçta tahsilat yalnız kayıtlı caride; okuma modelinde satırın actions.collect alanı belirler.
+                    registered: p.actions.collect && (p.origin === "read_model" || p.source === "registered") ? "1" : "0",
+                    origin: p.origin,
+                    source: String(p.source || ""),
+                    ledger: p.actions.view_ledger ? "1" : "0",
+                    // Okuma modelindeki eski carinin para birimi bilinmez; detay eski uçtan okur.
+                    currency: p.origin === "read_model" && p.source === "legacy" ? "" : p.currency || "TRY",
+                  },
+                })
               }
             />
           );
