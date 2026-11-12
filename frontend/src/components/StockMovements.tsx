@@ -67,17 +67,26 @@ export function StockMovements({ token, productId, refreshKey }: { token: string
     }
   };
 
-  // "sale" (POS satışı) sunucuda eksi miktarla yazılır; çıkış olarak gösterilir. Bilinmeyen türlerde yön miktarın
-  // işaretinden okunur. Yalnızca "adjustment" mutlak sayımdır ("=").
-  const look = (t: string, q: number) => {
+  // "sale" (POS satışı) sunucuda eksi miktarla yazılır; çıkış olarak gösterilir. "opening" yeni ürünün ilk stoğudur.
+  // "accounting_sync" (BizimHesap/BenimPOS senkronu) miktarı işaretsiz değişimdir; yön yalnız `delta` gelirse bilinir,
+  // gelmezse "±" ile yönsüz gösterilir. Bilinmeyen türlerde yön `delta`dan, yoksa miktarın işaretinden okunur.
+  // Yalnızca "adjustment" mutlak sayımdır ("=").
+  const look = (t: string, q: number, delta?: number | null) => {
+    const dir = typeof delta === "number" && delta !== 0 ? delta : null;
     const incoming = { fg: colors.info, bg: colors.infoBg, sign: "+", label: "Giriş" };
     const outgoing = { fg: colors.error, bg: colors.errorBg, sign: "−", label: t === "sale" ? "Satış" : "Çıkış" };
     if (t === "in") return incoming;
     if (t === "out" || t === "sale") return outgoing;
     if (t === "adjustment") return { fg: colors.amber, bg: colors.amberSoft, sign: "=", label: "Sayım" };
+    if (t === "opening") return { ...incoming, label: "Açılış stoğu" };
+    if (t === "accounting_sync") {
+      const label = "Muhasebe senkronu";
+      if (dir === null) return { fg: colors.violet, bg: colors.violetSoft, sign: "±", label };
+      return dir < 0 ? { ...outgoing, label } : { ...incoming, label };
+    }
+    if (dir !== null) return dir < 0 ? outgoing : incoming;
     return q < 0 ? outgoing : incoming;
   };
-  // Giriş/çıkışta miktar işaretsiz gösterilir (işareti simge taşır); sayımda değer olduğu gibi.
   const shown = (m: StockMovement) => (m.movement_type === "adjustment" ? m.quantity : Math.abs(m.quantity));
 
   return (
@@ -116,7 +125,7 @@ export function StockMovements({ token, productId, refreshKey }: { token: string
         ) : (
           <>
             {items.map((m, i) => {
-              const k = look(m.movement_type, m.quantity);
+              const k = look(m.movement_type, m.quantity, m.delta);
               return (
                 <View
                   key={m.id}

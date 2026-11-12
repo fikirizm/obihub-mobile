@@ -10,10 +10,11 @@ export type ProductIdentity = {
   barcode?: string | null;
 };
 
-export type StockMovementType = "in" | "out" | "adjustment";
+export type StockMovementType = "in" | "out" | "adjustment" | "sale" | "opening" | "accounting_sync";
 
 // GET /stock/movements satırı. "adjustment" türünde quantity yeni stok değeridir; diğerlerinde değişim miktarıdır
-// ("sale" türünde, POS satışında, eksi işaretli gelir).
+// ("sale" türünde, POS satışında, eksi işaretli gelir). "accounting_sync" miktarı işaretsizdir; yön `delta`dadır
+// (sunucu yanıtında henüz yok; gelirse kullanılır).
 export type StockMovement = {
   id: string;
   product_id: string;
@@ -21,6 +22,7 @@ export type StockMovement = {
   quantity: number;
   reason: string;
   reference_id?: string | null;
+  delta?: number | null;
   created_at: string;
 };
 
@@ -64,6 +66,7 @@ export async function getStockMovements(
     quantity: Number(m?.quantity) || 0,
     reason: String(m?.reason || ""),
     reference_id: m?.reference_id ?? null,
+    delta: typeof m?.delta === "number" ? m.delta : null,
     created_at: String(m?.created_at || ""),
   }));
   return { items: list.slice(0, limit), hasMore: list.length > limit };

@@ -136,6 +136,39 @@ Sunucu oturumuna iletilecek yeni ihtiyaçlar:
 
 Cihazda denenmedi; yalnızca sahte API ile tarayıcıda ve tip denetimiyle doğrulandı. Para yazan yeni ekranlar önce küçük tutarla denenmeli.
 
+### Trendyol stok incelemesi ve sunucu uyumu (12 Kasım 2026, sürüm 1.1.03 / build 54, `surum-1.1.03` dalı)
+
+Kullanıcı bildirimi: mobilde stok değiştirilince WooCommerce güncelleniyor, Trendyol güncellenmiyor.
+
+Bulgu (canlıda salt okuma ile doğrulandı): sorun mobilde değil, sunucuda. Mobil ve web kanal stoğunu aynı uçla
+(`POST /stock/channel-set`) gönderiyor. Canlı veride mobilin ana stok ucunu hiç çağırmadığı, yapılan değişikliklerin
+kanal satırından gittiği görüldü.
+
+1. **Trendyol'a yanlış barkod gidiyor.** `TrendyolService.update_product_stock` barkod olarak önce ürünün yerel
+   barkodunu kullanıyor; `channel_links.trendyol` ise Trendyol ürün kimliği (32 karakter), barkod değil. Yerel barkod
+   (Paraşüt/Woo'dan gelen) Trendyol'dakinden farklıysa Trendyol isteği kuyrukta reddediyor; ObiHub yanıtı başarılı
+   sayıp kanal değerini kaydediyor. Trendyol bağlı 13 üründen 3'ünde barkod farklı; bildirilen ürün bunlardan biri
+   (ObiHub'da 500, Trendyol'da 494). Web'de de aynı ürün için aynı sonuç olur; barkodu eşit ürünlerde iki taraf da çalışır.
+2. **Trendyol toplu istek sonucu hiç sorgulanmıyor** (`batchRequestId`); reddedilen istek sessiz kalıyor.
+3. **Periyodik stok/fiyat turu kanal değerini eziyor.** `_sync_single_product_stock_price` ana stoğu bütün kanallara
+   gönderiyor, `channel_stock_overrides` değerine bakmıyor: kanal satırında 500 yazılan ürün Trendyol'da 416 (ana stok).
+4. **`GET /stock/movements` yanıtı `delta`, `stock_before` ve `stock_after` alanlarını döndürmüyor** (`StockMovement`
+   yanıt modeli bu alanları atıyor). Sunucu notundaki "yön `delta` alanında" bilgisi uçtan görünmüyor; `accounting_sync`
+   satırının yönü istemcide bilinemiyor.
+
+Mobilde yapılanlar (1.1.03):
+
+- Stok hareketlerinde `opening` ("Açılış stoğu") ve `accounting_sync` ("Muhasebe senkronu") etiketleri. Yön `delta`
+  gelirse ondan okunur; gelmezse senkron satırı "±" ile yönsüz gösterilir.
+- `POST /stock/adjust` isteğine `Idempotency-Key` başlığı.
+- Trendyol, Hepsiburada ve n11 kanal stoğu kaydedilince "güncellendi" yerine "iletildi; pazaryerinde görünmesi birkaç
+  dakika sürebilir" yazıyor (bu pazaryerleri isteği kuyruğa alıyor).
+- 409 (stok sahibi BizimHesap) yanıtındaki Türkçe `detail` zaten olduğu gibi gösteriliyordu; değişiklik gerekmedi.
+
+Doğrulama: tip denetimi geçti. Cihazda ve sahte API ile denenmedi.
+
+Sunucu oturumuna iletilenler: yukarıdaki 1–4.
+
 ## 4. Web'de olup mobilde olmayanlar
 
 Öncelik, özelliğin telefonda ne kadar işe yaradığına göre verildi.

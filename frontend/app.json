@@ -2,7 +2,7 @@
   "expo": {
     "name": "obihub",
     "slug": "frontend",
-    "version": "1.1.02",
+    "version": "1.1.03",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "frontend",
@@ -19,7 +19,7 @@
           "remote-notification"
         ]
       },
-      "runtimeVersion": "1.1.02"
+      "runtimeVersion": "1.1.03"
     },
     "androidStatusBar": {
       "backgroundColor": "#000000",

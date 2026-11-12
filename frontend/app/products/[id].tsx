@@ -29,6 +29,7 @@ const HERO_BAD = palette.dark.error;
 // Yenilemede ürün aranırken okunacak en çok sayfa (sayfa başına 100 ürün).
 const RELOAD_MAX_PAGES = 5;
 const UNSENT_NOTE = "Pazaryerine gönderilmedi";
+const ASYNC_STOCK_CHANNELS = new Set(["trendyol", "hepsiburada", "n11"]);
 const BASE_SENT_NOTE = "Pazaryerine ana fiyat gönderildi";
 
 type SyncOutcome = { message?: string; synced_providers?: string[]; skipped_providers?: Record<string, string> };
@@ -366,7 +367,11 @@ export default function ProductDetailScreen() {
       `cs-${ch.id}`,
       () => setChannelStock(token, product.id, ch.id, v),
       (p) => ({ ...p, channelStocks: p.channelStocks.map((x) => (x.integration_id === ch.id ? { ...x, stock: v } : x)) }),
-      `${ch.name} stoğu güncellendi`
+      // Trendyol, Hepsiburada ve n11 stok isteğini kuyruğa alır; sunucunun "başarılı" yanıtı pazaryerinin
+      // değeri işlediği anlamına gelmez. Kullanıcıya "güncellendi" yerine "iletildi" denir.
+      ASYNC_STOCK_CHANNELS.has(ch.platform.toLowerCase())
+        ? `${ch.name} stoğu iletildi. Pazaryerinde görünmesi birkaç dakika sürebilir.`
+        : `${ch.name} stoğu güncellendi`
     );
     if (out) setUnsent((u) => ({ ...u, stock: u.stock.filter((cid) => cid !== ch.id) }));
   };

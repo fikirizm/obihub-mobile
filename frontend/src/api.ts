@@ -667,6 +667,12 @@ export async function getCatalog(
 // isteniyorsa hiçbir sağlayıcıyla eşleşmeyen bu işaretçi gönderilir.
 export const SYNC_NONE = "none";
 
+// İşlem anahtarı: her kullanıcı eylemi için bir kez üretilir.
+export function newIdempotencyKey(prefix: string) {
+  const rand = Math.random().toString(36).slice(2, 12).padEnd(10, "0");
+  return `mob-${prefix}-${Date.now().toString(36)}-${rand}`;
+}
+
 type SyncResult = { message?: string; synced_providers?: string[]; skipped_providers?: Record<string, string> };
 
 // Ana stoğu mutlak değere ayarlar. Değer yalnızca `syncTargets` içindeki sağlayıcılara gönderilir; liste boş bırakılamaz.
@@ -676,6 +682,8 @@ export async function setProductStock(token: string, productId: string, stock: n
     "/stock/adjust",
     {
       method: "POST",
+      // Sunucu aynı anahtarla gelen ikinci isteği yeniden uygulamaz (harf/rakam ve ._:- , 8–128 karakter).
+      headers: { "Idempotency-Key": newIdempotencyKey("stk") },
       body: JSON.stringify({
         product_id: productId,
         quantity: Math.max(0, Math.round(stock)),
