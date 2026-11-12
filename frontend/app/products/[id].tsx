@@ -335,7 +335,7 @@ export default function ProductDetailScreen() {
     // Web ürün detayıyla aynı: Ekle / Çıkar / Sayım ve isteğe bağlı sebep (frontend/src/pages/ProductDetailPage.js).
     const entry = await promptEntry({
       title: "Stok güncelle",
-      message: `${product.name}\nMevcut stok: ${product.stock} adet${accountingProgram ? "\nMuhasebe programına da yansıtılır; pazaryeri stokları ayrı güncellenir." : ""}`,
+      message: `${product.name}\nSatılabilir stok: ${product.stock} adet${accountingProgram ? "\nMuhasebe programına da yansıtılır; pazaryeri stokları ayrı güncellenir." : ""}`,
       initial: 0,
       suffix: "adet",
       noteLabel: "Sebep (isteğe bağlı)",
@@ -474,6 +474,8 @@ export default function ProductDetailScreen() {
 
   const hasImage = Boolean(product.image_url && /^https?:\/\//i.test(product.image_url));
   const lowStock = product.stock <= 5;
+  const reserved = Number(product.reserved || 0);
+  const onHand = typeof product.onHand === "number" ? product.onHand : product.stock + reserved;
   // Özet kartının başlığı iki satırla sınırlıdır; uzun adlar ve kodlar kesilmeden, seçilebilir biçimde altında gösterilir.
   const longName = product.name.length > 40;
   const codes = [
@@ -524,7 +526,7 @@ export default function ProductDetailScreen() {
           ) : null}
           <View style={styles.stats}>
             <HeroStat
-              label="Ana stok"
+              label="Satılabilir stok"
               value={String(product.stock)}
               bad={lowStock}
               busy={busyKey === "stock"}
@@ -542,6 +544,19 @@ export default function ProductDetailScreen() {
               valueTestID="product-price"
             />
           </View>
+          <View style={styles.figures} testID="product-stock-figures" accessible accessibilityLabel={`Elde ${onHand}, ayrılmış ${reserved}, satılabilir ${product.stock}`}>
+            {[
+              { k: "on-hand", label: "Elde", v: onHand },
+              { k: "reserved", label: "Ayrılmış", v: reserved },
+              { k: "sellable", label: "Satılabilir", v: product.stock },
+            ].map((f) => (
+              <View key={f.k} style={styles.figure} testID={`product-stock-figures-${f.k}`}>
+                <Text style={styles.figureLabel}>{f.label}</Text>
+                <Text style={[styles.figureValue, tabular, f.v < 0 && { color: HERO_BAD }]}>{f.v.toLocaleString("tr-TR")}</Text>
+              </View>
+            ))}
+          </View>
+          <Text style={styles.figureHint}>Ayrılmış: stoğu düşülmüş, henüz kargoya verilmemiş siparişler.</Text>
           {lowStock ? (
             <View style={styles.lowRow}>
               <View style={[styles.lowDot, { backgroundColor: HERO_BAD }]} />
@@ -687,6 +702,11 @@ const styles = StyleSheet.create({
   rowBody: { flex: 1, minWidth: 0, alignItems: "flex-start" },
   rowValue: { flexShrink: 0, maxWidth: "45%", textAlign: "right" },
   dim: { opacity: 0.45 },
+  figures: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
+  figure: { flex: 1, alignItems: "center", paddingVertical: 6, borderRadius: radius.md, backgroundColor: "rgba(255,255,255,0.08)" },
+  figureLabel: { color: ON_HERO.soft, fontSize: 12 },
+  figureValue: { color: "#FFFFFF", fontSize: 16, fontWeight: "700", marginTop: 2 },
+  figureHint: { color: ON_HERO.soft, fontSize: 12, marginTop: spacing.xs },
   notePill: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4, paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, maxWidth: "100%" },
   noteDot: { width: 6, height: 6, borderRadius: 3 },
   note: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginHorizontal: spacing.lg, marginTop: spacing.md },

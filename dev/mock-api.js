@@ -213,7 +213,7 @@ http
       const slice = rows.slice((page - 1) * per, page * per);
       const integrations = [{ id: "i1", name: "Deneme Mağaza", platform: "woocommerce" }, { id: "i2", name: "Trendyol", platform: "trendyol" }];
       if (path.endsWith("stock"))
-        return send(res, 200, { products: slice.map((p) => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, image_url: "", integration_stocks: [{ integration_id: "i1", stock: p.ch.i1.stock, active: true }, { integration_id: "i2", stock: p.ch.i2.stock, active: true }] })), integrations, total: rows.length, page, per_page: per });
+        return send(res, 200, { products: slice.map((p) => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, reserved: p.id === "p2" ? 2 : 0, on_hand: p.stock + (p.id === "p2" ? 2 : 0), image_url: "", integration_stocks: [{ integration_id: "i1", stock: p.ch.i1.stock, active: true }, { integration_id: "i2", stock: p.ch.i2.stock, active: true }] })), integrations, total: rows.length, page, per_page: per });
       return send(res, 200, { products: slice.map((p) => ({ id: p.id, price: p.price.toFixed(2), integration_prices: [{ integration_id: "i1", price: p.ch.i1.price.toFixed(2), active: true }, { integration_id: "i2", price: p.ch.i2.price.toFixed(2), active: true }] })), integrations, total: rows.length, page, per_page: per });
     }
     // Ürün kimliği (ad / SKU / barkod) ve stok hareketleri — gerçek uçlar: GET|PATCH /products/{id}, GET /stock/movements.

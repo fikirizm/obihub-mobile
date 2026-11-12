@@ -279,7 +279,11 @@ export type CatalogProduct = {
   sku?: string;
   barcode?: string;
   image_url?: string;
+  // Satılabilir stok (kanala giden sayı). Aşama 3 P2: ayrılmış = stoğu düşülmüş, kargoya verilmemiş siparişler;
+  // elde = satılabilir + ayrılmış. Sunucu göndermezse ayrılmış 0, elde = stok sayılır.
   stock: number;
+  reserved?: number;
+  onHand?: number;
   price: number;
   channelStocks: { integration_id: string; stock: number; active?: boolean }[];
   channelPrices: { integration_id: string; price: number; active?: boolean }[];

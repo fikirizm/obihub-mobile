@@ -216,6 +216,13 @@ Doğrulama:
 Sonraki tura kalanlar: fatura kesme ve mağazaya iletme, işleme al, toplu silme, HepsiJet il/ilçe listeleri, gider
 detayı, elle gider girişi, borç ödeme, Woo/kargo siparişlerinde orijinal HepsiJet etiketi varsayılanı.
 
+### Aşama 3 P2 uyumu (12 Kasım 2026, 1.1.05 adayı)
+
+Sunucu `e31ddef7b`: ürün yanıtlarında `reserved` (ayrılmış) ve `on_hand` (elde); `stock` = satılabilir. Ürün detayında web
+gibi Elde / Ayrılmış / Satılabilir kutuları ve açıklama; ana stok etiketi "Satılabilir stok". Alan gelmezse ayrılmış 0,
+elde = stok. Canlı siparişlerde `stock_lines` henüz yok, ayrılmış bir süre 0 görünür. Sahte API ile denendi
+(9 / 2 / 7). `/stock/summary` mobilde henüz kullanılmıyor (stok toplamı ekranı yok).
+
 ## 4. Web'de olup mobilde olmayanlar
 
 Öncelik, özelliğin telefonda ne kadar işe yaradığına göre verildi.

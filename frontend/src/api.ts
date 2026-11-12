@@ -610,6 +610,8 @@ export async function getCatalog(
       barcode: p.barcode || undefined,
       image_url: p.image_url || undefined,
       stock: Number(p.stock || 0),
+      reserved: Number.isFinite(Number(p.reserved)) ? Math.trunc(Number(p.reserved)) : 0,
+      onHand: p.on_hand == null ? Number(p.stock || 0) + (Number.isFinite(Number(p.reserved)) ? Math.trunc(Number(p.reserved)) : 0) : Math.trunc(Number(p.on_hand) || 0),
       price: Number(pr?.price || 0),
       channelStocks: (Array.isArray(p.integration_stocks) ? p.integration_stocks : []).map((x: any) => ({
         integration_id: String(x.integration_id),
