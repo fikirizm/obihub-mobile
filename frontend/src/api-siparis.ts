@@ -12,6 +12,13 @@ export type OrderFull = Order & {
   pazarama_order_number?: string;
   n11_status?: string;
   hb_order_number?: string;
+  // Fatura (web hasRealInvoice / canOpenInvoice ile aynı alanlar)
+  invoice_number?: string;
+  parasut_invoice_id?: string;
+  parasut_invoice_url?: string;
+  bizimhesap_invoice_guid?: string;
+  hb_invoice_missing?: boolean;
+  trendyol_invoice_shared?: boolean;
 };
 
 export type ChannelKey = "trendyol" | "hepsiburada" | "n11" | "idefix" | "pazarama" | "amazon" | "woocommerce" | "other";
@@ -267,4 +274,95 @@ export async function getOrderDetailFull(token: string, orderId: string, fresh =
   const detail = await request<Order>(`/orders/${encodeURIComponent(orderId)}`, { method: "GET" }, token);
   const row = await findOrderRow(token, detail, fresh);
   return mergeOrderDetail(detail, row);
+}
+
+
+// ---- Dalga 1: sipariş işlemleri (web: IntegrationOrdersPage.js, CargoLabelSidebar.js) ----
+
+// Web hasRealInvoice: fatura numarası, Paraşüt faturası ya da BizimHesap belgesi varsa sipariş faturalıdır.
+// Hepsiburada'da ayrıca pazaryerinin "fatura eksik" bayrağı kapalıysa faturalı sayılır.
+export function orderInvoiceState(o: OrderFull, channel: ChannelKey) {
+  const real = Boolean(o.invoice_number || o.parasut_invoice_id || o.bizimhesap_invoice_guid);
+  const closed = ["cancelled", "deleted"].includes(String(o.status || "").toLowerCase());
+  const invoiced = real || (channel === "hepsiburada" && o.hb_invoice_missing !== true);
+  return {
+    hasInvoice: real,
+    invoiced,
+    // Web "Fatura Oluştur": gerçek fatura yoksa ve sipariş iptal/silinmiş değilse.
+    canCreate: !real && !closed,
+    canOpen: Boolean(o.parasut_invoice_id || o.parasut_invoice_url),
+    // Web "Faturayı Mağazaya İlet": yalnız bu pazaryerleri ve Paraşüt faturası varken.
+    canShare: ["trendyol", "hepsiburada", "pazarama", "idefix"].includes(channel) && Boolean(o.parasut_invoice_id),
+    sharedToTrendyol: channel === "trendyol" && Boolean(o.trendyol_invoice_shared),
+  };
+}
+
+// HTTP 200 + success:false olabilir; eşzamanlı ikinci istekte {success:false, in_progress:true}.
+export async function createOrderInvoice(token: string, orderId: string) {
+  return request<{ success?: boolean; in_progress?: boolean; message?: string }>(
+    `/orders/${encodeURIComponent(orderId)}/create-invoice`,
+    { method: "POST" },
+    token
+  );
+}
+
+export async function shareOrderInvoiceToStore(token: string, orderId: string) {
+  return request<{ success?: boolean; message?: string }>(
+    `/orders/${encodeURIComponent(orderId)}/share-invoice-to-store`,
+    { method: "POST" },
+    token
+  );
+}
+
+// Web: Trendyol'da trendyol_status "created", Idefix'te idefix_status "shipment_ready" | "created" iken "İşleme Al".
+export function needsTakeInProcessing(o: OrderFull, channel: ChannelKey) {
+  if (channel === "trendyol") return String(o.trendyol_status || "").toLowerCase() === "created";
+  if (channel === "idefix") return ["shipment_ready", "created"].includes(String(o.idefix_status || "").toLowerCase());
+  return false;
+}
+
+export async function takeOrderInProcessing(token: string, orderId: string, channel: ChannelKey) {
+  const base = channel === "idefix" ? "idefix" : "trendyol";
+  return request<{ success?: boolean; message?: string }>(
+    `/${base}/orders/${encodeURIComponent(orderId)}/take-in-processing`,
+    { method: "POST" },
+    token
+  );
+}
+
+// HepsiJet barkodunu iptal eder. Başarıda gövde {status:"OK"}; aksi {status, message}.
+export async function deleteHepsiJetBarcode(token: string, barcode: string) {
+  return request<{ status?: string; message?: string }>(
+    `/hepsijet/shipment/${encodeURIComponent(barcode)}`,
+    { method: "DELETE" },
+    token
+  );
+}
+
+// Yalnız "deleted" durumundaki siparişler kalıcı silinir (web "Silinmişleri sil").
+export async function bulkDeleteOrders(token: string, orderIds: string[]) {
+  return request<{ deleted_count?: number; message?: string }>(
+    "/orders/bulk-delete",
+    { method: "POST", body: JSON.stringify({ order_ids: orderIds }) },
+    token
+  );
+}
+
+// Web "Sipariş no ile getir": Hepsiburada'da ayrı uç, diğer kanallarda senkron ucuna order_number.
+export async function syncOrderByNumber(token: string, integration: Pick<Integration, "id" | "provider" | "name">, orderNumber: string) {
+  const id = encodeURIComponent(integration.id);
+  const key = channelKeyOf(integration.provider || integration.name);
+  const qs = new URLSearchParams({ order_number: orderNumber.trim() });
+  const base =
+    key === "trendyol" ? `/trendyol/${id}/sync-orders`
+    : key === "hepsiburada" ? `/hepsiburada/${id}/sync-order-by-number`
+    : key === "n11" ? `/n11/${id}/sync-orders`
+    : key === "pazarama" ? `/pazarama/${id}/sync-orders`
+    : key === "idefix" ? `/idefix/${id}/sync-orders`
+    : key === "amazon" ? `/amazon/${id}/sync-orders`
+    : `/woocommerce/${id}/sync-orders`;
+  const body = key === "amazon" ? JSON.stringify({ days_back: 30 }) : undefined;
+  const result = await request<StoreSyncResult>(`${base}?${qs.toString()}`, { method: "POST", body }, token);
+  if (!result?.success) throw { message: result?.message || "Sipariş getirilemedi.", status: 200 };
+  return { ...result, channel: key };
 }

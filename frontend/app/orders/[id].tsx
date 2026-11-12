@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Linking, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import { printOrShare } from "../../src/pdf";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "../../src/auth/AuthProvider";
@@ -13,7 +13,13 @@ import {
   STOCK_RESTORE_STATUSES,
   MARKETPLACE_LABEL_CHANNELS,
   channelKeyOf,
+  createOrderInvoice,
+  deleteHepsiJetBarcode,
   enqueueCloudPrint,
+  needsTakeInProcessing,
+  orderInvoiceState,
+  shareOrderInvoiceToStore,
+  takeOrderInProcessing,
   getOrderDetailFull,
   mergeOrderDetail,
   rememberOrderRow,
@@ -36,7 +42,7 @@ import {
 import { EmptyState } from "../../src/components/EmptyState";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
-import { AlertIcon, ClockIcon, CloudIcon, PackageIcon, PrinterIcon, TruckIcon } from "../../src/components/Icons";
+import { AlertIcon, CheckIcon, ClockIcon, CloudIcon, FileTextIcon, PackageIcon, PrinterIcon, TruckIcon } from "../../src/components/Icons";
 import { FadeInDown, SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { Button } from "../../src/ui/Button";
 import { useFeedback } from "../../src/ui/Feedback";
@@ -104,6 +110,11 @@ export default function OrderDetail() {
   const [cloudBusy, setCloudBusy] = useState(false);
   const [printStatus, setPrintStatus] = useState<string | null>(null);
   const [shipBusy, setShipBusy] = useState(false);
+  // Dalga 1: fatura, mağazaya iletme, işleme alma, barkod iptali.
+  const [invoiceBusy, setInvoiceBusy] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [takeBusy, setTakeBusy] = useState(false);
+  const [barcodeBusy, setBarcodeBusy] = useState<string | null>(null);
   const { toast, confirm } = useFeedback();
 
   const load = async (silent = false) => {
@@ -285,6 +296,105 @@ export default function OrderDetail() {
     }
   };
 
+  const canWriteOrder = canManage(user, "orders");
+
+  // Web handleInvoice: faturası olan siparişte fatura açılır, yoksa kesilir.
+  const handleCreateInvoice = async () => {
+    if (!token || !order || invoiceBusy) return;
+    const ok = await confirm({
+      title: "Fatura kesilsin mi?",
+      message: "Sipariş için muhasebe programınızda satış faturası oluşturulur.",
+      confirmLabel: "Fatura kes",
+    });
+    if (!ok) return;
+    setInvoiceBusy(true);
+    try {
+      const r = await createOrderInvoice(token, order.id);
+      if (r?.success) {
+        toast(r.message || "Fatura oluşturuldu.", "success");
+      } else if (r?.in_progress) {
+        // Aynı sipariş için başka bir istek (web ya da ikinci dokunuş) faturayı zaten kesiyor.
+        toast(r.message || "Bu sipariş için fatura kesimi sürüyor.", "info");
+      } else {
+        toast(r?.message || "Fatura oluşturulamadı.", "error");
+      }
+      await load(true);
+    } catch (e: any) {
+      toast(e?.message || "Fatura oluşturulamadı.", "error");
+      await load(true);
+    } finally {
+      setInvoiceBusy(false);
+    }
+  };
+
+  // Web handleOpenInvoice: Paraşüt faturası uygulama içinde, diğerleri bağlantıyla açılır.
+  const handleOpenInvoice = () => {
+    if (!order) return;
+    if (order.parasut_invoice_id) {
+      router.push({ pathname: "/invoices/[id]", params: { id: String(order.parasut_invoice_id) } });
+      return;
+    }
+    if (order.parasut_invoice_url) {
+      Linking.openURL(String(order.parasut_invoice_url)).catch(() => toast("Fatura bağlantısı açılamadı.", "error"));
+    }
+  };
+
+  const handleShareInvoice = async () => {
+    if (!token || !order || shareBusy) return;
+    setShareBusy(true);
+    try {
+      const r = await shareOrderInvoiceToStore(token, order.id);
+      if (r?.success) toast(r.message || "Fatura mağazaya iletildi.", "success");
+      else toast(r?.message || "Fatura mağazaya iletilemedi.", "error");
+      await load(true);
+    } catch (e: any) {
+      toast(e?.message || "Fatura mağazaya iletilemedi.", "error");
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const handleTakeInProcessing = async () => {
+    if (!token || !order || takeBusy) return;
+    setTakeBusy(true);
+    try {
+      const r = await takeOrderInProcessing(token, order.id, channel);
+      if (r?.success) {
+        toast(r.message || "Sipariş işleme alındı.", "success");
+        await load(true);
+      } else {
+        toast(r?.message || "Sipariş işleme alınamadı.", "error");
+      }
+    } catch (e: any) {
+      toast(e?.message || "Sipariş işleme alınamadı.", "error");
+    } finally {
+      setTakeBusy(false);
+    }
+  };
+
+  // Web CargoLabelSidebar handleDeleteBarcode: HepsiJet'te gönderi iptal edilir, barkod siparişten düşer.
+  const handleDeleteBarcode = async (barcode: string) => {
+    if (!token || !order || barcodeBusy) return;
+    const ok = await confirm({
+      title: "Barkod iptal edilsin mi?",
+      message: `${barcode} numaralı HepsiJet gönderisi iptal edilir. Gerekirse sonra yeni gönderi oluşturabilirsiniz.`,
+      confirmLabel: "Barkodu iptal et",
+      destructive: true,
+    });
+    if (!ok) return;
+    setBarcodeBusy(barcode);
+    try {
+      const r = await deleteHepsiJetBarcode(token, barcode);
+      if (String(r?.status || "").toUpperCase() === "OK") toast(`${barcode} iptal edildi.`, "success");
+      else toast(r?.message || "Barkod iptal edilemedi.", "error");
+      await load(true);
+    } catch (e: any) {
+      toast(e?.message || "Barkod iptal edilemedi.", "error");
+    } finally {
+      setBarcodeBusy(null);
+    }
+  };
+
   if (loading) {
     return (
       <View style={[styles.wrap, { backgroundColor: colors.background }]}>
@@ -320,6 +430,13 @@ export default function OrderDetail() {
   const orderTs = orderTimestamp(order);
   const shortOrderDate = orderTs ? new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "short" }).format(new Date(orderTs)) : "-";
   const cargoError = Boolean(order.cargo_error_message) && String(order.cargo_status || "") === "error";
+  const inv = orderInvoiceState(order, channel);
+  const closedOrder = ["cancelled", "deleted"].includes(String(order.status || "").toLowerCase());
+  const takeNeeded = canWriteOrder && needsTakeInProcessing(order, channel);
+  // HepsiJet barkodları yalnız kendi kargosu olmayan kanallarda açılır (pazaryeri etiketleri iptal edilemez).
+  const hjBarcodes: string[] = ["trendyol", "hepsiburada", "idefix", "pazarama"].includes(channel)
+    ? []
+    : Array.from(new Set((order.cargo_barcodes || []).map((b) => String(b?.barcode || "").trim()).filter(Boolean)));
 
   const shareTracking = async () => {
     try {
@@ -393,11 +510,30 @@ export default function OrderDetail() {
           </View>
         ) : null}
 
+        {takeNeeded ? (
+          <SafeAnimatedView entering={FadeInDown.delay(50).duration(380)}>
+            <View style={[styles.takeCard, { backgroundColor: colors.amberSoft, borderColor: colors.borderSubtle }]} testID="take-card">
+              <View style={styles.takeHead}>
+                <ClockIcon size={18} color={colors.amber} />
+                <View style={styles.flexText}>
+                  <Text style={[type.bodyStrong, { color: colors.textPrimary }]}>Sipariş onay bekliyor</Text>
+                  <Text style={[type.caption, { color: colors.textSecondary, marginTop: 2 }]}>
+                    {providerLabel(provider)} siparişi işleme alınınca hazırlanmaya başlar ve etiketi oluşur.
+                  </Text>
+                </View>
+              </View>
+              <Button testID="take-btn" label="İşleme al" busy={takeBusy} onPress={handleTakeInProcessing} style={styles.takeBtn} />
+            </View>
+          </SafeAnimatedView>
+        ) : null}
+
         <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)}>
           <Button
             testID="print-btn"
             label={labelOptions.length > 1 ? `Yazdır · ${labelOptions[0].label}` : "Yazdır"}
-            icon={<PrinterIcon size={18} color="#FFFFFF" />}
+            // İşleme alınmamış siparişte birincil eylem "İşleme al"dır; yazdırma ikincil görünür.
+            variant={takeNeeded ? "secondary" : "primary"}
+            icon={<PrinterIcon size={18} color={takeNeeded ? colors.textPrimary : "#FFFFFF"} />}
             busy={printBusy === labelOptions[0].template}
             disabled={Boolean(printBusy)}
             onPress={() => handlePrint(labelOptions[0].template)}
@@ -464,6 +600,62 @@ export default function OrderDetail() {
           ) : null}
         </SafeAnimatedView>
 
+        <SafeAnimatedView entering={FadeInDown.delay(90).duration(380)}>
+          <SectionTitle title="Fatura" />
+          <Card style={styles.block}>
+            <ListRow
+              testID="invoice-row"
+              leading={
+                <IconTile tint={inv.invoiced ? colors.successBg : colors.warningBg}>
+                  {inv.invoiced ? <CheckIcon size={18} color={colors.success} /> : <FileTextIcon size={18} color={colors.amber} />}
+                </IconTile>
+              }
+              title={inv.invoiced ? "Faturalandı" : closedOrder ? "Fatura yok" : "Fatura kesilmedi"}
+              subtitle={
+                inv.invoiced
+                  ? [order.invoice_number ? `No ${order.invoice_number}` : null, inv.sharedToTrendyol ? "Trendyol'a iletildi" : null]
+                      .filter(Boolean)
+                      .join(" · ") || "Muhasebe programında kayıtlı"
+                  : closedOrder
+                    ? "İptal ya da silinmiş siparişe fatura kesilmez."
+                    : "Muhasebe programınızda satış faturası oluşturun."
+              }
+              onPress={inv.canOpen ? handleOpenInvoice : undefined}
+              trailing={
+                inv.canOpen ? (
+                  <View style={[styles.copyPill, { backgroundColor: colors.primarySoft }]}>
+                    <Text style={[type.caption, { color: colors.primary, fontWeight: "600" }]}>Aç</Text>
+                  </View>
+                ) : undefined
+              }
+            />
+          </Card>
+          {canWriteOrder && (inv.canCreate || inv.canShare) ? (
+            <View style={styles.actions}>
+              {inv.canCreate ? (
+                <Button
+                  testID="invoice-create-btn"
+                  label="Fatura kes"
+                  icon={<FileTextIcon size={16} color="#FFFFFF" />}
+                  busy={invoiceBusy}
+                  onPress={handleCreateInvoice}
+                  style={styles.flexBtn}
+                />
+              ) : null}
+              {inv.canShare ? (
+                <Button
+                  testID="invoice-share-btn"
+                  label={inv.sharedToTrendyol ? "Mağazaya yeniden ilet" : "Mağazaya ilet"}
+                  variant="secondary"
+                  busy={shareBusy}
+                  onPress={handleShareInvoice}
+                  style={styles.flexBtn}
+                />
+              ) : null}
+            </View>
+          ) : null}
+        </SafeAnimatedView>
+
         {canChangeStatus ? (
           <SafeAnimatedView entering={FadeInDown.delay(105).duration(380)}>
             <SectionTitle title="Durumu değiştir" />
@@ -513,6 +705,33 @@ export default function OrderDetail() {
                 }
               />
             ) : null}
+            {hjBarcodes.map((bc) => (
+              <ListRow
+                key={bc}
+                divider
+                testID={`barcode-${bc}`}
+                leading={
+                  <IconTile tint={colors.surfaceMuted}>
+                    <TruckIcon size={18} color={colors.textSecondary} />
+                  </IconTile>
+                }
+                title="HepsiJet barkodu"
+                subtitle={bc}
+                trailing={
+                  canWriteOrder ? (
+                    <Button
+                      testID={`barcode-delete-${bc}`}
+                      size="sm"
+                      variant="ghost"
+                      label={barcodeBusy === bc ? "…" : "İptal et"}
+                      busy={barcodeBusy === bc}
+                      disabled={Boolean(barcodeBusy)}
+                      onPress={() => handleDeleteBarcode(bc)}
+                    />
+                  ) : undefined
+                }
+              />
+            ))}
           </Card>
         </SafeAnimatedView>
 
@@ -600,6 +819,9 @@ export default function OrderDetail() {
 }
 
 const styles = StyleSheet.create({
+  takeCard: { marginHorizontal: spacing.lg, marginTop: spacing.md, marginBottom: spacing.xs, padding: spacing.md, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, gap: spacing.sm },
+  takeHead: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start" },
+  takeBtn: { alignSelf: "stretch" },
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },
   flexText: { flex: 1, minWidth: 0 },

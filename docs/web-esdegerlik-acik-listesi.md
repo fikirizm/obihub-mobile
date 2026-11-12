@@ -48,6 +48,8 @@ Sıralama günlük kullanım sıklığına ve iş değerine göre yapıldı. Her
 
 ## 2. Siparişler
 
+> **Dalga 1 tamamlandı (12 Kas 2026):** A1, A2, A3, A4, A5 ve A7 mobilde; altyapıda ortak `haptic` yardımcısı (Button/Chip). Sahte API ile doğrulandı. A6 (toplu HepsiJet) sonraki dalgaya kaldı.
+
 | # | Web'de | Mobil | Önerilen mobil karşılığı | Sunucu | Büyüklük |
 |---|---|---|---|---|---|
 | A1 | Fatura kes: `POST /orders/{id}/create-invoice` (eşzamanlıda `{success:false,in_progress:true}`). Faturayı aç: `parasut_invoice_url`. Mağazaya paylaş: `POST /orders/{id}/share-invoice-to-store`. | Yok | Sipariş detayında "Fatura" bölümü: "Fatura kes", sonra "Faturayı aç" ve "Mağazaya gönder". Listede faturalı/faturasız rozeti. | Mevcut | M |

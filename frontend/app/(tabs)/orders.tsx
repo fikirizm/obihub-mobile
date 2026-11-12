@@ -7,8 +7,11 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, type } from "../../src/theme/tokens";
 import { getIntegrations, getOrdersPage } from "../../src/api";
+import { bulkDeleteOrders } from "../../src/api-siparis";
+import { canManage } from "../../src/auth/permissions";
+import { Button } from "../../src/ui/Button";
 import { isStoreIntegration, providerLabel } from "../../src/utils";
-import { InboxIcon, PrinterIcon } from "../../src/components/Icons";
+import { InboxIcon, PrinterIcon, TrashIcon } from "../../src/components/Icons";
 import { PressableScale } from "../../src/components/KPICard";
 import { printOrderLabel } from "../../src/labels";
 import { useFeedback } from "../../src/ui/Feedback";
@@ -21,7 +24,7 @@ import { Chip, ChipRow } from "../../src/ui/Chip";
 import { SearchField } from "../../src/ui/SearchField";
 import type { Integration, Order } from "../../src/types";
 
-type FilterKey = "all" | "pending" | "shipped" | "delivered" | "cancelled";
+type FilterKey = "all" | "pending" | "processing" | "shipped" | "delivered" | "cancelled" | "deleted";
 
 // Süzgeç adları web (IntegrationOrdersPage STATUS_OPTIONS) ile aynı. "Bekleyen" ve "Kargoda" panel kartının
 // saydığı durumları kapsar (routers/dashboard.py); sunucu tek durum süzdüğü için durumlar ayrı çağrılarla birleştirilir.
@@ -31,7 +34,11 @@ const FILTERS: { key: FilterKey; label: string; statuses: string[] }[] = [
   { key: "shipped", label: "Kargoda", statuses: ["shipped", "in_transit", "intransit", "cargo", "kargoda"] },
   { key: "delivered", label: "Tamamlandı", statuses: ["delivered", "completed"] },
   { key: "cancelled", label: "İptal", statuses: ["cancelled"] },
+  // Web sekmeleri: "Gönderime Hazır" (processing) ve "Silinmiş" (deleted). "Bekleyen" panel kartıyla aynı sayımı korur,
+  // bu yüzden "Gönderime hazır" onun alt kümesidir.
+  { key: "deleted", label: "Silinmiş", statuses: ["deleted"] },
 ];
+FILTERS.splice(2, 0, { key: "processing", label: "Gönderime hazır", statuses: ["processing"] });
 
 const PER_PAGE = 30;
 // Panel'deki "3 gündür bekliyor" uyarısı sunucuda bu eşikle sayılır: durumu "pending", kaydı 3 günden eski.
@@ -104,7 +111,7 @@ function SwipeableOrder({ order, divider, onPrint, busy }: { order: Order; divid
 
 export default function OrdersScreen() {
   const params = useLocalSearchParams<{ filter?: string; stale?: string; t?: string }>();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { colors } = useTheme();
   const [filter, setFilter] = useState<FilterKey>("all");
   // Panel uyarısından gelindiğinde yalnızca 3 günden eski bekleyen siparişler, en eskiden yeniye listelenir.
@@ -122,8 +129,9 @@ export default function OrdersScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestId = useRef(0);
-  const { toast } = useFeedback();
+  const { toast, confirm } = useFeedback();
   const [printingId, setPrintingId] = useState<string | null>(null);
+  const [purging, setPurging] = useState(false);
 
   const printLabel = useCallback(
     async (order: Order) => {
@@ -228,6 +236,31 @@ export default function OrdersScreen() {
     fetchPage(1, "reset");
   }, [fetchPage]);
 
+  // Web "Silinmişleri sil": yalnız "deleted" durumundaki siparişler kalıcı silinir; sunucu bir sonraki senkronda
+  // yeniden içeri almaz (mezar kaydı). Ekranda yüklü olanlar silinir; liste sonra yeniden okunur.
+  const deletedIds = filter === "deleted" && !staleOnly ? orders.filter((o) => o.status === "deleted").map((o) => o.id) : [];
+  const canPurge = deletedIds.length > 0 && canManage(user, "orders");
+  const purgeDeleted = async () => {
+    if (!token || purging || deletedIds.length === 0) return;
+    const ok = await confirm({
+      title: `${deletedIds.length} silinmiş sipariş kalıcı olarak kaldırılsın mı?`,
+      message: "Bu siparişler ObiHub'dan tamamen silinir ve mağaza senkronunda yeniden gelmez. Geri alınamaz.",
+      confirmLabel: "Kalıcı olarak sil",
+      destructive: true,
+    });
+    if (!ok) return;
+    setPurging(true);
+    try {
+      const r = await bulkDeleteOrders(token, deletedIds);
+      toast(`${r?.deleted_count ?? deletedIds.length} sipariş silindi.`, "success");
+      await fetchPage(1, "refresh");
+    } catch (e: any) {
+      toast(e?.message || "Toplu silme başarısız.", "error");
+    } finally {
+      setPurging(false);
+    }
+  };
+
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="orders-screen">
       <TabHeader title="Siparişler" subtitle={loading ? undefined : `${total}${staleOnly && hasMore ? "+" : ""} sipariş`} />
@@ -280,6 +313,24 @@ export default function OrdersScreen() {
             if (hasMore && !loadingMore && !loading) fetchPage(page + 1, "more");
           }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchPage(1, "refresh"); }} tintColor={colors.primary} />}
+          ListHeaderComponent={
+            canPurge ? (
+              <View style={[styles.purgeCard, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]} testID="orders-purge-card">
+                <Text style={[type.footnote, { color: colors.textSecondary, flex: 1 }]}>
+                  Mağazada silinen siparişler. Kalıcı olarak kaldırabilirsiniz.
+                </Text>
+                <Button
+                  testID="orders-purge-btn"
+                  size="sm"
+                  variant="destructive"
+                  label={`${deletedIds.length} siparişi sil`}
+                  icon={<TrashIcon size={14} color="#FFFFFF" />}
+                  busy={purging}
+                  onPress={purgeDeleted}
+                />
+              </View>
+            ) : null
+          }
           renderItem={({ item, index }) => (
             <View
               style={[
@@ -319,6 +370,7 @@ export default function OrdersScreen() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
+  purgeCard: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1, marginBottom: spacing.sm },
   list: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing.xxl },
   // Kaydırma eylemi satırın tam yüksekliğini kaplar (satır iki satıra çıksa da).
   swipeAction: { width: 88, alignSelf: "stretch", minHeight: 68, alignItems: "center", justifyContent: "center", gap: 4 },

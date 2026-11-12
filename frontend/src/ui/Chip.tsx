@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useTheme } from "../theme/ThemeProvider";
 import { spacing, type } from "../theme/tokens";
 import { PressableScale } from "../components/KPICard";
+import { haptic } from "../haptics";
 
 export function Chip({
   label,
@@ -21,7 +22,14 @@ export function Chip({
   return (
     <PressableScale
       testID={testID}
-      onPress={onPress}
+      onPress={
+        onPress
+          ? () => {
+              if (!selected) haptic.select();
+              onPress();
+            }
+          : undefined
+      }
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ selected: Boolean(selected) }}

@@ -5,7 +5,8 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { getIntegrations, getOrders, getOrdersPage, getOrderStats } from "../../src/api";
-import { rememberOrderRow, storeSyncDays, storeSyncMessage, syncStoreOrders } from "../../src/api-siparis";
+import { rememberOrderRow, storeSyncDays, storeSyncMessage, syncOrderByNumber, syncStoreOrders } from "../../src/api-siparis";
+import { FormField } from "../../src/ui/FormField";
 import type { OrderStats } from "../../src/api";
 import { useDebounce } from "../../src/hooks/useDebounce";
 import {
@@ -101,6 +102,10 @@ export default function IntegrationOrders() {
   const searchSeq = useRef(0);
   const [syncBusy, setSyncBusy] = useState(false);
   const [cooldownEnd, setCooldownEnd] = useState(0);
+  // Web "Sipariş no ile getir" (Hepsiburada'da ayrı uç). Bekleme süresine tabi değildir; tek siparişi çeker.
+  const [lookupOpen, setLookupOpen] = useState(false);
+  const [lookupNo, setLookupNo] = useState("");
+  const [lookupBusy, setLookupBusy] = useState(false);
   const [tickNow, setTickNow] = useState(Date.now());
 
   useEffect(() => {
@@ -207,6 +212,27 @@ export default function IntegrationOrders() {
     }
   };
 
+  const handleLookup = async () => {
+    const no = lookupNo.trim();
+    if (!token || !integration || lookupBusy || !no) return;
+    setLookupBusy(true);
+    try {
+      const r = await syncOrderByNumber(token, integration, no);
+      await load(true);
+      const found = Number(r?.count || 0) + Number(r?.updated_count || 0) + Number(r?.total_fetched || 0) > 0;
+      toast(found ? r?.message || `#${no} getirildi.` : r?.message || `#${no} mağazada bulunamadı.`, found ? "success" : "info");
+      if (found) {
+        setLookupNo("");
+        setLookupOpen(false);
+        setSearch(no);
+      }
+    } catch (e: any) {
+      toast(e?.message || "Sipariş getirilemedi.", "error");
+    } finally {
+      setLookupBusy(false);
+    }
+  };
+
   const onRefresh = () => {
     setRefreshing(true);
     load(true);
@@ -264,6 +290,25 @@ export default function IntegrationOrders() {
         <Text style={[type.caption, tabular, styles.syncNote, { color: colors.textTertiary }]} accessibilityLiveRegion="none">
           {cooldownText ? `Yeniden senkronizasyon: ${cooldownText}` : `Son ${storeSyncDays(integration?.provider || provider)} günün siparişleri çekilir.`}
         </Text>
+        {lookupOpen ? (
+          <View style={styles.lookupRow} testID="lookup-row">
+            <FormField
+              testID="lookup-input"
+              label="Sipariş numarası"
+              value={lookupNo}
+              onChangeText={setLookupNo}
+              placeholder="Örn. 4012345678"
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              onSubmitEditing={handleLookup}
+              style={{ flex: 1 }}
+            />
+            <Button testID="lookup-btn" size="sm" label="Getir" busy={lookupBusy} disabled={!lookupNo.trim()} onPress={handleLookup} style={styles.lookupBtn} />
+          </View>
+        ) : (
+          <Button testID="lookup-open" size="sm" variant="ghost" label="Sipariş no ile getir" onPress={() => setLookupOpen(true)} />
+        )}
       </SafeAnimatedView>
 
       <SafeAnimatedView entering={FadeInDown.delay(140).duration(380)}>
@@ -383,6 +428,8 @@ const styles = StyleSheet.create({
   syncBlock: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
   // Tam genişlikte: süre metni kesilmesin.
   syncNote: { paddingTop: spacing.xs, textAlign: "center" },
+  lookupRow: { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm, paddingTop: spacing.sm },
+  lookupBtn: { minWidth: 76 },
   syncDisabled: { opacity: 0.6 },
   searchGap: { height: spacing.sm },
   olderNote: { textAlign: "center", paddingHorizontal: spacing.xl, paddingTop: spacing.md },

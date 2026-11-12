@@ -2,6 +2,7 @@ import React from "react";
 import { ActivityIndicator, StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 import { useTheme } from "../theme/ThemeProvider";
 import { radius, spacing, type } from "../theme/tokens";
+import { haptic } from "../haptics";
 import { PressableScale } from "../components/KPICard";
 
 // Beyaz yazıyla her iki temada yeterli kontrast veren kırmızı.
@@ -37,7 +38,15 @@ export function Button({
   return (
     <PressableScale
       testID={testID}
-      onPress={onPress}
+      onPress={
+        onPress
+          ? () => {
+              // Birincil ve yıkıcı eylemlerde hafif dokunuş; sonuç bildirimi (toast) kendi titreşimini verir.
+              if (variant === "primary" || variant === "destructive") haptic.tap();
+              onPress();
+            }
+          : undefined
+      }
       disabled={disabled || busy}
       accessibilityRole="button"
       accessibilityLabel={label}

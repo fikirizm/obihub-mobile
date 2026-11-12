@@ -32,6 +32,14 @@ const orders = Array.from({ length: 74 }, (_, i) => {
   };
 });
 
+// Dalga 1 tohumları: o1 (Woo) HepsiJet barkodlu, o2 (Trendyol) işleme alınmayı bekliyor, o5 (Trendyol) faturalı,
+// o8 ve o16 mağazada silinmiş.
+Object.assign(orders[0], { cargo_barcodes: [{ barcode: "HJ100200300" }, { barcode: "HJ100200301" }], cargo_tracking: "HJ100200301" });
+Object.assign(orders[1], { trendyol_status: "Created" });
+Object.assign(orders[4], { parasut_invoice_id: "inv1", invoice_number: "OBI2026000123" });
+orders[7].status = "deleted";
+orders[15].status = "deleted";
+
 const products = Array.from({ length: 48 }, (_, i) => ({
   id: `p${i + 1}`, name: `Deneme Ürün ${i + 1}`, sku: `SKU-${i + 1}`, barcode: `86900000${String(i + 1).padStart(5, "0")}`,
   stock: (i * 7) % 40, price: 99.9 + i * 12.5,
@@ -140,6 +148,46 @@ http
           return send(res, 409, { detail: "Sipariş durumu güncellendi ancak stok iadesi yapılamadı: deneme" });
         send(res, 200, o);
       });
+    }
+    // --- Dalga 1 sipariş işlemleri
+    let m; // dalga 1
+    if (req.method === "POST" && (m = path.match(/^\/orders\/([^/]+)\/create-invoice$/))) {
+      const o = orders.find((x) => x.id === m[1]);
+      if (state.invoiceBusy === "1") return send(res, 200, { success: false, in_progress: true, message: "Bu sipariş için fatura kesimi sürüyor" });
+      Object.assign(o, { parasut_invoice_id: "inv-" + o.id, invoice_number: "OBI2026" + o.id.slice(1).padStart(6, "0") });
+      return send(res, 200, { success: true, message: "Fatura oluşturuldu: " + o.invoice_number });
+    }
+    if (req.method === "POST" && (m = path.match(/^\/orders\/([^/]+)\/share-invoice-to-store$/))) {
+      const o = orders.find((x) => x.id === m[1]);
+      o.trendyol_invoice_shared = true;
+      return send(res, 200, { success: true, message: "Fatura mağazaya iletildi" });
+    }
+    if (req.method === "POST" && (m = path.match(/^\/(trendyol|idefix)\/orders\/([^/]+)\/take-in-processing$/))) {
+      const o = orders.find((x) => x.id === m[2]);
+      o.trendyol_status = "Picking";
+      o.status = "processing";
+      return send(res, 200, { success: true, message: "Sipariş işleme alındı" });
+    }
+    if (req.method === "DELETE" && (m = path.match(/^\/hepsijet\/shipment\/([^/]+)$/))) {
+      const bc = decodeURIComponent(m[1]);
+      const o = orders.find((x) => (x.cargo_barcodes || []).some((b) => b.barcode === bc));
+      if (o) {
+        o.cargo_barcodes = o.cargo_barcodes.filter((b) => b.barcode !== bc);
+        o.cargo_tracking = o.cargo_barcodes.length ? o.cargo_barcodes[o.cargo_barcodes.length - 1].barcode : null;
+      }
+      return send(res, 200, { status: "OK" });
+    }
+    if (req.method === "POST" && path === "/orders/bulk-delete")
+      return (() => { let raw = ""; req.on("data", (c) => (raw += c)); req.on("end", () => {
+        const b = JSON.parse(raw || "{}");
+        const ids = (b.order_ids || []).filter((id) => orders.some((o) => o.id === id && o.status === "deleted"));
+        for (const id of ids) orders.splice(orders.findIndex((o) => o.id === id), 1);
+        send(res, 200, { deleted_count: ids.length });
+      }); })();
+    if (req.method === "POST" && /\/sync-order-by-number$/.test(path)) {
+      const no = url.searchParams.get("order_number");
+      const hit = orders.find((o) => o.channel_order_id === no);
+      return send(res, 200, { success: true, message: hit ? "Sipariş güncellendi" : "Sipariş bulunamadı", count: 0, updated_count: hit ? 1 : 0, total_fetched: hit ? 1 : 0 });
     }
     if (req.method === "POST" && path.startsWith("/print-jobs/enqueue/"))
       return send(res, 200, state.autoprint === "0" ? { success: false, message: "Auto print kapalı veya kullanıcı yetkili değil." } : { success: true, job_id: "j1", status: "pending" });
