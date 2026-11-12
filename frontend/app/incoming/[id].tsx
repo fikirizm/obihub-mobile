@@ -125,9 +125,12 @@ export default function IncomingImportScreen() {
   const [pdfBusy, setPdfBusy] = useState(false);
   const seq = useRef(0);
   const committed = useRef<ImportArgs | null>(null);
+  // Son başarılı isteğin "kullanıcı depo kararı verdi" bilgisi; başarısız denemede bununla birlikte geri alınır.
+  const committedTouched = useRef(false);
   const decisionRef = useRef<any>(null);
   const loadingRef = useRef(false);
   const confirmingRef = useRef(false);
+  const savingRef = useRef(false);
   const warehouseTouched = useRef(false);
 
   // Önizleme: başarısız denemede seçimler son başarılı isteğe döner (ekrandaki görünümle eşleşsin).
@@ -145,10 +148,12 @@ export default function IncomingImportScreen() {
         if (res?.document_view_error || !res?.document_view) {
           if (decisionRef.current && committed.current) {
             setArgs(committed.current);
+            warehouseTouched.current = committedTouched.current;
             setStale("view");
           } else setFailed(true);
         } else {
           committed.current = next;
+          committedTouched.current = warehouseTouched.current;
           decisionRef.current = res;
           setDecision(res);
           setFailed(false);
@@ -159,6 +164,7 @@ export default function IncomingImportScreen() {
         setRejection(rejectionOf(e));
         if (decisionRef.current && committed.current) {
           setArgs(committed.current);
+          warehouseTouched.current = committedTouched.current;
           setStale(Number(e?.status) === 429 ? "rate" : "server");
         } else setFailed(true);
       } finally {
@@ -206,28 +212,37 @@ export default function IncomingImportScreen() {
     if (gate === "preview" && !decisionRef.current) load(INITIAL_ARGS);
   }, [gate, load]);
 
-  // İşlem sürerken durum 5 sn'de bir, en çok 2 dk sorulur.
+  // İşlem sürerken durum 5 sn'de bir, en çok 2 dk sorulur. Bir istek bitmeden sonraki başlamaz (setTimeout zinciri);
+  // ekran kapanır ya da sonuç değişirse yanıt yok sayılır.
   useEffect(() => {
     if (outcome?.status !== "IN_PROGRESS" || !token) return;
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const started = Date.now();
-    const t = setInterval(async () => {
+    const tick = async () => {
+      if (!live) return;
       if (Date.now() - started > POLL_LIMIT_MS) {
         setPollExpired(true);
-        clearInterval(t);
         return;
       }
       try {
         const st = statusOutcome(await getQuickImportStatus(token, id));
+        if (!live) return;
         if (st && st.status !== "IN_PROGRESS" && st.status !== "NONE") {
           setOutcome(st);
-          clearInterval(t);
           if (st.status === "APPLIED") haptic.success();
+          return;
         }
       } catch {
         // bir sonraki turda yeniden sorulur
       }
-    }, POLL_MS);
-    return () => clearInterval(t);
+      if (live) timer = setTimeout(tick, POLL_MS);
+    };
+    timer = setTimeout(tick, POLL_MS);
+    return () => {
+      live = false;
+      if (timer) clearTimeout(timer);
+    };
   }, [outcome?.status, token, id]);
 
   const view = decision?.document_view || null;
@@ -312,13 +327,18 @@ export default function IncomingImportScreen() {
   const save = async () => {
     const d = decisionRef.current;
     const c = committed.current;
-    if (!token || confirmingRef.current || !d || !c || !canSave) return;
+    if (!token || confirmingRef.current || savingRef.current || !d || !c || !canSave) return;
+    // Onay sayfası açıkken ikinci dokunuş yeni sayfa açmasın.
+    savingRef.current = true;
     const ok = await ask({
       title: "Fatura içeri alınsın mı?",
       message: `${supplier.name || "Tedarikçi"} faturası ${formatMoney(doc.legal_payable ?? decision?.document_summary?.payable, currency)} tutarla gider olarak${stockOn ? " ve stoğa" : ""} kaydedilir; tedarikçiye borç yazılır.`,
       confirmLabel: "İçeri al",
     });
-    if (!ok) return;
+    if (!ok) {
+      savingRef.current = false;
+      return;
+    }
     confirmingRef.current = true;
     setConfirming(true);
     let result: ImportOutcome;
@@ -328,6 +348,7 @@ export default function IncomingImportScreen() {
       result = confirmErrorOutcome(e);
     }
     confirmingRef.current = false;
+    savingRef.current = false;
     setConfirming(false);
     setPollExpired(false);
     setOutcome(result);

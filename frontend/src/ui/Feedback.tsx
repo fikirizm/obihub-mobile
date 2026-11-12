@@ -37,21 +37,28 @@ type NumberPromptOptions = {
 // Kullanıcının yazdığı sayıyı çözer. Virgül ondalık ayırıcıdır; virgül yoksa sondaki
 // "nokta + 1-2 hane" de ondalık sayılır ("12.5" → 12,5), diğer noktalar binlik ayırıcıdır ("1.250" → 1250).
 export function parseAmount(text: string, decimal: boolean): number | null {
-  const raw = text.trim();
+  // Web finance-ui parseTrAmount ile aynı: nokta yalnız binlik deseninde (1.250 / 12.500.000) silinir; "1.2.5", "12.3456"
+  // gibi belirsiz girdiler reddedilir. Ondalık en çok 2 hane; tam sayı alanında ondalık reddedilir (sessiz yuvarlama yok).
+  const raw = text.trim().replace(/\s/g, "");
   if (!raw) return null;
   let normalized: string;
   if (raw.includes(",")) {
-    if (raw.split(",").length > 2) return null;
+    if (!/^(\d{1,3}(\.\d{3})+|\d+),\d+$/.test(raw)) return null;
     normalized = raw.replace(/\./g, "").replace(",", ".");
   } else if (decimal && /^\d+\.\d{1,2}$/.test(raw)) {
     normalized = raw;
-  } else {
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(raw)) {
     normalized = raw.replace(/\./g, "");
+  } else if (/^\d+$/.test(raw)) {
+    normalized = raw;
+  } else {
+    return null;
   }
-  if (!/^\d+(\.\d+)?$/.test(normalized)) return null;
+  const frac = normalized.split(".")[1] || "";
+  if (frac && (!decimal || frac.length > 2)) return null;
   const n = Number(normalized);
   if (!Number.isFinite(n) || n < 0) return null;
-  return decimal ? Math.round(n * 100) / 100 : Math.round(n);
+  return n;
 }
 
 type ChooseOptions<T extends string> = { title: string; message?: string; options: { value: T; label: string }[] };

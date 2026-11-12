@@ -215,6 +215,8 @@ export default function ManualExpenseScreen() {
   const built = useMemo(() => buildManualPayload(f), [f]);
   const bodyKey = built.body ? JSON.stringify(built.body) : "";
   const debouncedKey = useDebounce(bodyKey, 500);
+  // DRAFT_CHANGED sonrası aynı gövdeyle önizleme yeniden istenir (gövde değişmediği için anahtar tek başına tetiklemez).
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
   useEffect(() => {
     if (!token || !built.body || debouncedKey !== bodyKey) {
@@ -241,7 +243,7 @@ export default function ManualExpenseScreen() {
         setPv({ status: "error", data: null, message: manualErrorText(e, "Toplam şu anda hesaplanamadı. Biraz sonra yeniden deneyin."), key: bodyKey });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedKey, token]);
+  }, [debouncedKey, token, refreshNonce]);
 
   const fresh = pv.status === "ready" && pv.key === bodyKey;
   const canConfirm = fresh && pv.data?.canConfirm === true && !saving && !outcome?.final;
@@ -273,7 +275,7 @@ export default function ManualExpenseScreen() {
       if (status >= 400 && status < 500 && status !== 429) {
         keyRef.current = newIdempotencyKey("mpur");
         setOutcome({ tone: "bad", text: manualErrorText(e, "Kayıt yapılamadı.") });
-        if (e?.code === "DRAFT_CHANGED") setPv((p) => ({ ...p, status: "loading" }));
+        if (e?.code === "DRAFT_CHANGED") setRefreshNonce((n) => n + 1);
       } else if (status === 429) setOutcome({ tone: "bad", text: manualErrorText(e) });
       else setOutcome({ tone: "warn", text: "Kaydın sonucu belirsiz. Aynı faturayı yeniden girmeden önce Gider faturaları listesini kontrol edin.", final: true });
     } finally {

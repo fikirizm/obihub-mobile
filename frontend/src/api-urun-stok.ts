@@ -23,6 +23,7 @@ export type StockMovement = {
   reason: string;
   reference_id?: string | null;
   delta?: number | null;
+  product_name?: string | null;
   created_at: string;
 };
 
@@ -67,6 +68,8 @@ export async function getStockMovements(
     quantity: Number(m?.quantity) || 0,
     reason: String(m?.reason || ""),
     reference_id: m?.reference_id ?? null,
+    // Sunucu her satıra ürün adını ekler (silinmiş üründe null).
+    product_name: typeof m?.product_name === "string" && m.product_name ? m.product_name : null,
     delta: typeof m?.delta === "number" ? m.delta : null,
     created_at: String(m?.created_at || ""),
   }));
@@ -230,8 +233,10 @@ export async function getSourceProducts(token: string, integrationId: string, se
       barcode: String(x?.barcode || ""),
     }))
     .filter((x) => x.externalId);
+  // Sunucu sayfalaması (c0652d26f): has_more esas; yoksa (eski sunucu) toplamdan ya da dolu sayfadan tahmin.
   const total = Number(r?.total);
-  const hasMore = Number.isFinite(total) && total > page * perPage ? true : rows.length >= perPage;
+  const hasMore =
+    typeof r?.has_more === "boolean" ? r.has_more : Number.isFinite(total) && total > page * perPage ? true : rows.length >= perPage;
   return { items, hasMore };
 }
 

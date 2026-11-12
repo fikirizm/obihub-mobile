@@ -108,7 +108,7 @@ http
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -291,7 +291,7 @@ http
       const q = (url.searchParams.get("search") || "").toLocaleLowerCase("tr-TR");
       const pg = Number(url.searchParams.get("page") || 1), per = Number(url.searchParams.get("per_page") || 25);
       const rows = tySource.filter((x) => !q || [x.name, x.sku, x.barcode].some((v) => v.toLocaleLowerCase("tr-TR").includes(q)));
-      return send(res, 200, { items: rows.slice((pg - 1) * per, pg * per).map((x) => ({ ...x, external_id: x.id })), page: pg, per_page: per, total: rows.length });
+      return send(res, 200, { items: rows.slice((pg - 1) * per, pg * per).map((x) => ({ ...x, external_id: x.id })), page: pg, per_page: per, total: rows.length, total_known: true, total_pages: Math.ceil(rows.length / per), has_more: pg * per < rows.length });
     }
     if (req.method === "POST" && (lm = path.match(/^\/products\/([^/]+)\/(link|unlink)-channel$/))) {
       let raw = "";
@@ -349,7 +349,7 @@ http
         const rows = Array.from({ length: 35 }, (_, i) => ({
           id: `sm-all-${i}`, user_id: "u1", product_id: `p${(i % 9) + 1}`, movement_type: kinds[i % 5][0], quantity: kinds[i % 5][0] === "sale" ? -(1 + (i % 3)) : 1 + ((i * 3) % 12),
           delta: kinds[i % 5][0] === "accounting_sync" ? (i % 2 ? 4 : -2) : null,
-          reason: kinds[i % 5][1], reference_id: null, created_at: new Date(Date.now() - i * 3600000).toISOString(),
+          reason: kinds[i % 5][1], reference_id: null, created_at: new Date(Date.now() - i * 3600000).toISOString(), product_name: `Deneme Ürün ${(i % 9) + 1}`,
         }));
         return send(res, 200, rows.slice(skip, skip + limit));
       }
@@ -550,6 +550,8 @@ http
         ex.remaining = Math.round((ex.remaining - amt) * 100) / 100;
         const acc = accounts.find((x) => x.id === b.account_id);
         ex.payments.push({ id: "pp" + ex.payments.length, date: b.date, amount: Number(b.amount).toFixed(2), currency: "TRY", account_name: acc ? acc.name : "", status: "completed" });
+        // /__mode?payFail=1: ödeme işlenir ama yanıt 500 döner (belirsiz sonuç denemesi; bir kez).
+        if (state.payFail === "1") { state.payFail = "0"; return send(res, 500, { detail: "Sunucu hatası" }); }
         send(res, 201, view());
       });
       return;

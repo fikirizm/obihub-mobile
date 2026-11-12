@@ -23,6 +23,7 @@ import { canManage } from "../../src/auth/permissions";
 import { getCashAccounts, newIdempotencyKey } from "../../src/api";
 import {
   addPayablePayment,
+  decimalText,
   getPayableInfo,
   istanbulToday,
   toMinor,
@@ -37,7 +38,7 @@ import { AlertIcon, WalletIcon } from "../../src/components/Icons";
 import { Skeleton } from "../../src/components/Skeleton";
 import { Button } from "../../src/ui/Button";
 import { Chip, ChipRow } from "../../src/ui/Chip";
-import { parseAmount, useFeedback } from "../../src/ui/Feedback";
+import { useFeedback } from "../../src/ui/Feedback";
 import { FormField } from "../../src/ui/FormField";
 import { StackHeader } from "../../src/ui/Header";
 import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
@@ -51,7 +52,8 @@ const curOf = (c: unknown) => {
       .toUpperCase() || "TRY";
   return v === "TRL" ? "TRY" : v;
 };
-const fixed2 = (n: number) => n.toFixed(2);
+// Kuruş → "1250.50"
+const fixed2 = (minor: number) => `${Math.floor(minor / 100)}.${String(minor % 100).padStart(2, "0")}`;
 const shiftDay = (iso: string, days: number) => {
   const [y, m, d] = iso.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d + days));
@@ -71,6 +73,8 @@ function parseDateInput(text: string): string {
   if (!m) return "";
   return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
 }
+
+const LEDGER_BLOCKED = new Set<string>();
 
 export default function PayablePayScreen() {
   const params = useLocalSearchParams<{ ref: string; title?: string }>();
@@ -92,7 +96,11 @@ export default function PayablePayScreen() {
   const [tried, setTried] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [blocked, setBlocked] = useState(false);
+  // PAYMENT_LEDGER_CONFLICT görülen borç bu oturumda yeniden ödenmez (ekran kapanıp açılsa da).
+  const [blocked, setBlocked] = useState(() => LEDGER_BLOCKED.has(ref));
+  // Sonucu bilinmeyen gönderimden sonra (ağ hatası / 5xx) alanlar kilitlenir: yalnız AYNI gövde, AYNI anahtarla yeniden
+  // gönderilebilir. Aksi halde farklı tutarla ikinci bir ödeme yazılabilirdi.
+  const [uncertain, setUncertain] = useState(false);
   const keyRef = useRef(newIdempotencyKey("pay"));
   const busy = useRef(false);
 
@@ -133,8 +141,10 @@ export default function PayablePayScreen() {
   }, [load]);
 
   const currency = info?.currency || "TRY";
-  const amount = parseAmount(amountText, true);
-  const minor = amount !== null ? Math.round(amount * 100) : null;
+  // Tutar dize olarak ayrıştırılır ve kuruşa çevrilir; float'a girilmez (en çok 2 ondalık, fazlası reddedilir).
+  const amountStr = decimalText(amountText, 2);
+  const minor = amountStr !== null ? toMinor(amountStr) : null;
+  const amount = minor !== null ? minor / 100 : null;
   const remainingMinor = info ? toMinor(info.remaining) : null;
   const date = parseDateInput(dateText);
   const amountErr = !tried
@@ -172,19 +182,30 @@ export default function PayablePayScreen() {
     setSaving(true);
     try {
       await addPayablePayment(token, ref, {
-        amount: fixed2(minor / 100),
+        amount: fixed2(minor),
         date,
         account_id: accountId,
         idempotency_key: keyRef.current,
         note,
       });
       toast("Ödeme kaydedildi.", "success");
-      router.back();
+      if (router.canGoBack()) router.back();
+      else router.replace("/expenses");
     } catch (e: any) {
       const status = Number(e?.status || 0);
-      if (e?.code === "PAYMENT_LEDGER_CONFLICT") setBlocked(true);
-      else if (status >= 400 && status < 500 && status !== 429)
+      if (e?.code === "PAYMENT_LEDGER_CONFLICT") {
+        LEDGER_BLOCKED.add(ref);
+        setBlocked(true);
+      } else if (e?.code === "PAYMENT_IDEMPOTENCY_CONFLICT") {
+        // Aynı anahtar farklı gövdeyle gitti: önceki gönderim işlenmiş olabilir. Anahtar yenilenmez; borç yeniden okunur.
+        setUncertain(true);
+        load();
+      } else if (status === 0 || status >= 500) {
+        setUncertain(true);
+      } else if (status >= 400 && status < 500 && status !== 429) {
         keyRef.current = newIdempotencyKey("pay");
+        setUncertain(false);
+      }
       setError(
         status === 404
           ? "Ödeme özelliği şu anda kullanılamıyor."
@@ -332,6 +353,7 @@ export default function PayablePayScreen() {
               label={`Tutar (${currency})`}
               value={amountText}
               onChangeText={setAmountText}
+              editable={!uncertain}
               keyboardType="decimal-pad"
               placeholder="0,00"
               error={amountErr}
@@ -342,6 +364,7 @@ export default function PayablePayScreen() {
                 label="Ödeme tarihi"
                 value={dateText}
                 onChangeText={setDateText}
+                editable={!uncertain}
                 placeholder="GG.AA.YYYY"
                 error={dateErr}
               />
@@ -352,13 +375,13 @@ export default function PayablePayScreen() {
                     testID="pay-date-today"
                     label="Bugün"
                     selected={date === today}
-                    onPress={() => setDateText(trDate(today))}
+                    onPress={() => !uncertain && setDateText(trDate(today))}
                   />
                   <Chip
                     testID="pay-date-yesterday"
                     label="Dün"
                     selected={date === shiftDay(today, -1)}
-                    onPress={() => setDateText(trDate(shiftDay(today, -1)))}
+                    onPress={() => !uncertain && setDateText(trDate(shiftDay(today, -1)))}
                   />
                 </ChipRow>
               </View>
@@ -383,7 +406,7 @@ export default function PayablePayScreen() {
                     account={a}
                     selected={a.id === accountId}
                     divider={i > 0}
-                    onPress={() => setAccountId(a.id)}
+                    onPress={() => !uncertain && setAccountId(a.id)}
                   />
                 ))}
               </View>
@@ -401,6 +424,7 @@ export default function PayablePayScreen() {
               label="Not (isteğe bağlı)"
               value={note}
               onChangeText={setNote}
+              editable={!uncertain}
               maxLength={200}
               placeholder="Ör. havale açıklaması"
             />
@@ -408,6 +432,15 @@ export default function PayablePayScreen() {
               Ödeme, seçtiğiniz hesaptan para çıkışı olarak Kasa ve Bankalar'a
               da işlenir. Gider tutarı değişmez.
             </Text>
+            {uncertain ? (
+              <View style={[styles.errorBox, { backgroundColor: colors.warningBg }]} testID="pay-uncertain">
+                <AlertIcon size={16} color={colors.amber} />
+                <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>
+                  Önceki gönderimin sonucu alınamadı; ödeme kaydedilmiş olabilir. Bilgiler kilitlendi: aynı ödemeyi yeniden
+                  gönderebilirsiniz, ikinci kez işlenmez. Önceki ödemeler listesinde görünüyorsa ekranı kapatın.
+                </Text>
+              </View>
+            ) : null}
             {error ? (
               <View
                 style={[styles.errorBox, { backgroundColor: colors.errorBg }]}

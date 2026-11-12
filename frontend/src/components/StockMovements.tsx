@@ -90,7 +90,8 @@ export function StockMovements({
 
   useEffect(() => {
     if (!all || !token) return;
-    const missing = Array.from(new Set(items.map((m) => m.product_id))).filter((pid) => pid && !names[pid] && !asked.current.has(pid));
+    // Ad sunucudan gelmeyen (eski sunucu ya da silinmiş ürün) satırlar için önbellek / ürün ucu.
+    const missing = Array.from(new Set(items.filter((m) => !m.product_name).map((m) => m.product_id))).filter((pid) => pid && !names[pid] && !asked.current.has(pid));
     if (missing.length === 0) return;
     const known: Record<string, string> = {};
     const fetchIds: string[] = [];
@@ -172,7 +173,7 @@ export function StockMovements({
           <>
             {items.map((m, i) => {
               const k = look(m.movement_type, m.quantity, m.delta);
-              const productName = all ? names[m.product_id] || "Ürün" : "";
+              const productName = all ? m.product_name || names[m.product_id] || "Ürün" : "";
               const Row: any = all && onOpenProduct ? PressableScale : View;
               return (
                 <Row

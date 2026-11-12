@@ -480,13 +480,22 @@ export type ManualForm = {
 
 // "1.250,50" / "1250.5" → "1250.50" benzeri düz ondalık dize (en çok `maxDecimals` hane); geçersizse null. Float'a çevrilmez.
 export function decimalText(text: string, maxDecimals: number): string | null {
-  const raw = String(text || "").trim();
+  // parseAmount ile aynı kural (nokta yalnız binlik deseninde silinir), sonuç dize kalır.
+  const raw = String(text || "").trim().replace(/\s/g, "");
   if (!raw) return null;
-  let n = raw;
-  if (n.includes(",")) n = n.replace(/\./g, "").replace(",", ".");
-  else if (!new RegExp(`^\\d+\\.\\d{1,${maxDecimals}}$`).test(n)) n = n.replace(/\./g, "");
-  if (!new RegExp(`^\\d+(\\.\\d{1,${maxDecimals}})?$`).test(n)) return null;
+  let n: string;
+  if (raw.includes(",")) {
+    if (!/^(\d{1,3}(\.\d{3})+|\d+),\d+$/.test(raw)) return null;
+    n = raw.replace(/\./g, "").replace(",", ".");
+  } else if (new RegExp(`^\\d+\\.\\d{1,${maxDecimals}}$`).test(raw) && !/^\d{1,3}\.\d{3}$/.test(raw)) {
+    n = raw;
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(raw)) {
+    n = raw.replace(/\./g, "");
+  } else if (/^\d+$/.test(raw)) {
+    n = raw;
+  } else return null;
   const [w, f = ""] = n.split(".");
+  if (f.length > maxDecimals) return null;
   return f ? `${String(Number(w))}.${f}` : String(Number(w));
 }
 
