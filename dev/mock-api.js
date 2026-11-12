@@ -79,7 +79,7 @@ const entries = [
   { id: "e2", account_id: "a1", entry_type: "expense", amount: 380.5, entry_date: "2026-11-09", description: "Kargo malzemesi" },
 ];
 const parties = [
-  { id: "c1", name: "Elif Kaya", phone: "0555 111 22 33", source: "registered", balance: 4075, payments: [],
+  { id: "c1", name: "Elif Kaya", phone: "0555 111 22 33", source: "registered", balance: 4725, advance: 250, payments: [],
     // P11: cari tahsilatı (faturaya dağıtılmış) — ekstrede düzenle / sil
     collections: [{ id: "cp1", type: "customer", amount: "1500.00", currency: "TRY", date: "2026-11-05", method: "havale", note: "Kasım ödemesi", account_id: "a2", invoices: [{ invoice_id: "li1", invoice_number: "OBI2026101", amount: "1500.00" }], parasut: false }] },
   { id: "c2", name: "Can Öztürk", email: "can@example.test", source: "registered", balance: 12850.5, payments: [] },
@@ -93,6 +93,9 @@ const localInvoices = [
       { id: "ip3", amount: 50, date: "2026-11-08", method: "nakit", account_id: "a1", parasut_synced: false },
       { id: "ip4", amount: 75, date: "2026-10-25", method: "nakit", account_id: "a1", parasut_sync_state: "not_sent" }], voided_payments: [], parasut_invoice_id: "ps0", items: [{ name: "Deneme Ürün 3", quantity: 4, unit_price: 1291.67, vat_rate: 20, total: 6200 }] },
   { id: "li2", invoice_number: "", status: "taslak", display_status: "taslak", money_state: "not_issued", customer_name: "Can Öztürk", issue_date: "2026-11-10", due_date: "2026-11-22", currency: "TRY", subtotal: 10708.75, discount_amount: 0, vat_amount: 2141.75, total: 12850.5, paid_amount: 0, remaining_amount: 12850.5, payments: [], items: [{ name: "Deneme Ürün 9", quantity: 10, unit_price: 1070.88, vat_rate: 20, total: 12850.5 }], notes: "Teslimat 15 Kasım." },
+  // P8: c1'in ikinci açık faturası ve bir taslağı (K4: taslağa dağıtım yok; sahte sunucu taslağı da döndürür, istemci eler)
+  { id: "li4", invoice_number: "OBI2026110", status: "gonderildi", display_status: "gonderildi", money_state: "pending", customer_id: "c1", customer_name: "Elif Kaya", issue_date: "2026-11-01", due_date: "2026-11-25", currency: "TRY", subtotal: 750, discount_amount: 0, vat_amount: 150, total: 900, paid_amount: 0, remaining_amount: 900, payments: [], voided_payments: [], items: [{ name: "Deneme Ürün 5", quantity: 1, unit_price: 750, vat_rate: 20, total: 900 }] },
+  { id: "li5", invoice_number: "", status: "taslak", display_status: "taslak", money_state: "not_issued", customer_id: "c1", customer_name: "Elif Kaya", issue_date: "2026-11-12", due_date: "2026-11-30", currency: "TRY", subtotal: 100, discount_amount: 0, vat_amount: 20, total: 120, paid_amount: 0, remaining_amount: 120, payments: [], voided_payments: [], items: [] },
   { id: "li3", invoice_number: "OBI2026102", status: "gecikti", display_status: "gonderildi", money_state: "pending", customer_name: "Acme GmbH", issue_date: "2026-11-08", due_date: "2026-12-08", currency: "USD", subtotal: 1000, discount_amount: 0, vat_amount: 200, total: 1200, paid_amount: 0, remaining_amount: 1200, payments: [], items: [{ name: "İhracat", quantity: 1, unit_price: 1000, vat_rate: 20, total: 1200 }] },
 ];
 const payKeys = new Map(); // Aşama 4 P2: tahsilat işlem anahtarları (anahtar → ilk yanıt)
@@ -144,7 +147,7 @@ http
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -642,6 +645,47 @@ http
     }
     if ((cm = path.match(/^\/customers\/([^/]+)\/orders$/)))
       return send(res, 200, { items: orders.slice(0, 3).map((o, i) => ({ id: o.id, channel_order_id: o.channel_order_id, channel: o.channel, status: o.status, total_amount: o.total_amount, currency: "TRY", order_date: o.order_date, ...(i === 0 ? { invoice_number: "OBI2026101" } : i === 1 ? { parasut_invoice_id: 98765 } : {}) })), total: 3 });
+    // Aşama 4 / P8: dağıtım durumu ve avans dağıtımı
+    let am;
+    const openFor = (cid) => localInvoices.filter((i) => i.customer_id === cid && i.currency === "TRY" && i.remaining_amount > 0.004).sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)));
+    if ((am = path.match(/^\/customers\/([^/]+)\/allocation-state$/))) {
+      const party = parties.find((p) => p.id === am[1]);
+      if (!party) return send(res, 404, { detail: "Müşteri bulunamadı" });
+      return send(res, 200, { currency: "TRY", advance: Number(party.advance || 0).toFixed(2),
+        open_invoices: openFor(party.id).map((i) => ({ id: i.id, invoice_number: i.invoice_number, invoice_date: i.issue_date, due_date: i.due_date, total: Number(i.total).toFixed(2), remaining: Number(i.remaining_amount).toFixed(2), status: i.status })) });
+    }
+    const applyAlloc = (party, items) => {
+      for (const it of items) { const i = localInvoices.find((q) => q.id === it.invoice_id); const a = Number(it.amount); i.paid_amount += a; i.remaining_amount -= a; i.payments.push({ id: "al" + Date.now() + i.id, amount: a, date: new Date().toISOString().slice(0, 10), method: "havale", source: "customer_payment" }); }
+    };
+    const checkAlloc = (party, items) => {
+      const seen = new Set();
+      for (const it of items) {
+        const i = localInvoices.find((q) => q.id === it.invoice_id);
+        if (!i || i.customer_id !== party.id || seen.has(it.invoice_id)) return [422, { code: "ALLOCATION_INVALID", detail: "Dağıtım geçersiz." }];
+        seen.add(it.invoice_id);
+        if (i.status === "taslak") return [409, { code: "INVOICE_NOT_ISSUED", detail: "Taslak faturaya dağıtım yapılamaz." }];
+        if (Number(it.amount) > i.remaining_amount + 0.004) return [409, { code: "PAYMENT_EXCEEDS_REMAINING", detail: "Fatura kalanı aşıldı." }];
+      }
+      return null;
+    };
+    if (req.method === "POST" && (am = path.match(/^\/customers\/([^/]+)\/allocations$/))) {
+      const party = parties.find((p) => p.id === am[1]);
+      const key = req.headers["idempotency-key"];
+      return readBody((b) => {
+        console.log(`ALLOCATE key=${key} body=${JSON.stringify(b)}`);
+        if (key && payKeys.has(key)) return send(res, 200, { ...payKeys.get(key), replayed: true });
+        const items = Array.isArray(b.allocations) ? b.allocations : [];
+        if (!items.length) return send(res, 422, { code: "ALLOCATION_REQUIRED", detail: "En az bir dağıtım gerekli." });
+        const bad = checkAlloc(party, items); if (bad) return send(res, bad[0], bad[1]);
+        const total = items.reduce((t, x) => t + Math.round(Number(x.amount) * 100), 0);
+        if (total > Math.round(Number(party.advance || 0) * 100)) return send(res, 409, { code: "ADVANCE_INSUFFICIENT", detail: "Avans yetersiz." });
+        applyAlloc(party, items); party.advance = (Math.round(Number(party.advance) * 100) - total) / 100;
+        const out = { ok: true, allocations: items, skipped: [], advance_remaining: party.advance.toFixed(2), currency: "TRY", replayed: false };
+        if (key) payKeys.set(key, out);
+        if (state.colFail === "1") { state.colFail = "0"; return send(res, 500, { code: "MONEY_INCOMPLETE", detail: "İşlem tamamlanamadı." }); }
+        send(res, 200, out);
+      });
+    }
     const partyMatch = path.match(/^\/customers\/([^/]+)\/(ledger|payments)$/);
     if (partyMatch) {
       const party = parties.find((p) => p.id === partyMatch[1]);
@@ -665,10 +709,23 @@ http
         const pk = req.headers["idempotency-key"];
         console.log("PARTY-PAY key=" + (pk || "-") + " account=" + (b.account_id || "-") + " allocations=" + JSON.stringify(b.allocations));
         if (pk && payKeys.has(pk)) return send(res, 200, { ...payKeys.get(pk), replayed: true });
-        party.balance -= b.amount; party.payments.unshift(b.amount);
-        // Dağıtım verilmezse açık faturalara (en eski vade) işlenir; burada en çok 6200 dağıtılır, artan avans.
-        const allocated = Math.min(b.amount, 6200);
-        const out = { id: "pm" + Date.now(), amount: b.amount, currency: party.currency || "TRY", allocated_amount: allocated.toFixed(2), advance_amount: (b.amount - allocated).toFixed(2), allocations: allocated > 0 ? [{ invoice_id: "li1", invoice_number: "OBI2026101", amount: allocated.toFixed(2) }] : [], skipped: [], replayed: false };
+        console.log("PARTY-PAY body=" + JSON.stringify(b));
+        if (state.curMismatch === "1") return send(res, 422, { code: "CURRENCY_MISMATCH", detail: "Hesap para birimi uyuşmuyor." });
+        const amt = Number(b.amount);
+        let items;
+        if (Array.isArray(b.allocations)) {
+          items = b.allocations;
+          const sum = items.reduce((t, x) => t + Math.round(Number(x.amount) * 100), 0);
+          if (sum > Math.round(amt * 100)) return send(res, 422, { code: "ALLOCATION_EXCEEDS_AMOUNT", detail: "Dağıtım tutarı aşıyor." });
+          const bad = checkAlloc(party, items); if (bad) return send(res, bad[0], bad[1]);
+        } else {
+          let left = Math.round(amt * 100); items = [];
+          for (const i of openFor(party.id).filter((x) => x.status !== "taslak")) { if (left <= 0) break; const take = Math.min(left, Math.round(i.remaining_amount * 100)); items.push({ invoice_id: i.id, amount: (take / 100).toFixed(2) }); left -= take; }
+        }
+        const allocatedC = items.reduce((t, x) => t + Math.round(Number(x.amount) * 100), 0);
+        applyAlloc(party, items);
+        party.balance -= amt; party.payments.unshift(amt); party.advance = Number(party.advance || 0) + (Math.round(amt * 100) - allocatedC) / 100;
+        const out = { id: "pm" + Date.now(), amount: amt.toFixed(2), currency: party.currency || "TRY", allocated_amount: (allocatedC / 100).toFixed(2), advance_amount: ((Math.round(amt * 100) - allocatedC) / 100).toFixed(2), allocations: items, skipped: [], replayed: false };
         if (pk) payKeys.set(pk, out);
         if (state.payFail === "1") { state.payFail = "0"; return send(res, 500, { code: "INTERNAL", detail: "Sunucu hatası" }); }
         send(res, 200, out);

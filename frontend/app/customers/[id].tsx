@@ -5,10 +5,8 @@ import { FadeInDown } from "react-native-reanimated";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { getCashAccounts, newIdempotencyKey } from "../../src/api";
-import { collectPartyPaymentCompat, getLegacyPartyCurrency, getPartyLedgerCompat, legacyIdOf } from "../../src/api-gider";
-import { accountOptionLabel, accountsForCurrency, collectErrorText, deleteParty, deletePartyErrorText, getParty, getPartyOrders, isUncertainWrite, sendKeyedMoney, type PartyOrder } from "../../src/api-finans";
-import { PAYMENT_METHODS, todayIso } from "../../src/finance";
+import { getLegacyPartyCurrency, getPartyLedgerCompat, legacyIdOf } from "../../src/api-gider";
+import { deleteParty, deletePartyErrorText, getParty, getPartyOrders, type PartyOrder } from "../../src/api-finans";
 import { ledgerCollection, ledgerRowActions } from "../../src/collection-actions";
 import { runVoidCollection } from "../../src/collection-flow";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -57,7 +55,7 @@ export default function CustomerDetailScreen() {
   const [cur, setCur] = useState<string | null>(params.currency ? String(params.currency).toUpperCase().replace("TRL", "TRY") : null);
   const { token, user } = useAuth();
   const { colors } = useTheme();
-  const { toast, promptEntry, confirm } = useFeedback();
+  const { toast, confirm } = useFeedback();
   // C5: düzenle / sil / siparişler (liste satırının actions bayrakları; müşteri yönetme yetkisi).
   const mayManage = canManage(user, "customers");
   const canEditParty = mayManage && params.edit === "1";
@@ -92,7 +90,7 @@ export default function CustomerDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const busy = false;
   // Tahsilat yalnızca kayıtlı carilerde yapılabilir; siparişlerden türetilen carilerde uç 404 döner.
   const registered = params.registered === "1";
   // Web (CustomersPage.js): kaynağı ObiHub defteri olan caride tahsilat bu ekrandan alınmaz.
@@ -230,69 +228,13 @@ export default function CustomerDetailScreen() {
 
   const collectFlow = async () => {
     if (!token || !cur) return;
-    // Fatura tahsilatındaki gibi tahsilatın yazılacağı kasa/banka hesabı seçilir; yalnız carinin para birimindeki hesaplar.
-    let accounts: Awaited<ReturnType<typeof getCashAccounts>> = [];
-    try {
-      accounts = await getCashAccounts(token);
-    } catch (e: any) {
-      toast(e?.message || "Kasa/banka hesapları okunamadı.", "error");
-      return;
-    }
     // Sunucu tahsilatı carinin KENDİ para birimiyle yazar; okuma modeli listesi bakiye birimini (TRY önce) taşıyabilir.
     // Kayıtlı caride birim tahsilattan hemen önce /customers/{id}'den doğrulanır (okunamazsa eldeki değer).
     const own = registered ? await getLegacyPartyCurrency(token, id) : null;
     const payCur = (own || cur).replace("TRL", "TRY");
     if (payCur !== cur) setCur(payCur);
-    const usable = accountsForCurrency(accounts, payCur);
-    if (accounts.length > 0 && usable.length === 0) {
-      toast(`${payCur} para biriminde kasa/banka hesabı yok. Önce Kasa ve Bankalar'dan hesap ekleyin.`, "error");
-      return;
-    }
-    const entry = await promptEntry({
-      title: "Tahsilat al",
-      message: String(params.name || ""),
-      initial: Math.max(0, balance),
-      decimal: true,
-      noteLabel: "Not (isteğe bağlı)",
-      methods: [...PAYMENT_METHODS],
-      accounts: usable.map((a) => ({ value: a.id, label: accountOptionLabel(a, usable.length > 1) })),
-      accountsLabel: usable.length > 0 ? "Hesap" : undefined,
-    });
-    if (!entry || entry.amount <= 0) return;
-    setBusy(true);
-    // Aşama 4 P2: işlem başına bir anahtar; belirsiz sonuçta aynı anahtar ve gövdeyle yeniden gönderilir.
-    // Dağıtım gönderilmez: sunucu en eski vadeli açık faturalara işler, artan kısım avans kalır.
-    const key = newIdempotencyKey("party-pay");
-    const body = { amount: entry.amount, payment_method: entry.method || "nakit", note: entry.note || undefined, payment_date: todayIso(), account_id: entry.account || null };
-    try {
-      const out = await sendKeyedMoney(
-        () => collectPartyPaymentCompat(token, id, body, key),
-        () =>
-          confirm({
-            title: "Sonuç alınamadı",
-            message: `${formatMoney(entry.amount, payCur)} tahsilat kaydedilmiş olabilir. Aynı işlemi yeniden gönderebilirsiniz; ikinci kez kaydedilmez.`,
-            confirmLabel: "Yeniden gönder",
-          })
-      );
-      if (out.ok) {
-        const r = out.result;
-        const allocated = Number(r?.allocated_amount || 0);
-        const advance = Number(r?.advance_amount || 0);
-        const rc = r?.currency || payCur;
-        if (r?.replayed) toast("Tahsilat zaten kaydedilmişti.", "success");
-        else if (allocated > 0)
-          toast(
-            advance > 0
-              ? `Tahsilat kaydedildi: ${formatMoney(allocated, rc)} açık faturalara işlendi, ${formatMoney(advance, rc)} avans kaldı.`
-              : `Tahsilat kaydedildi: ${formatMoney(allocated, rc)} açık faturalara işlendi.`,
-            "success"
-          );
-        else toast(advance > 0 ? `Tahsilat avans olarak kaydedildi (${formatMoney(advance, rc)}).` : "Tahsilat kaydedildi", "success");
-      } else toast(collectErrorText(out.error, out.uncertain), "error");
-      await load();
-    } finally {
-      setBusy(false);
-    }
+    // Aşama 4 / P8: tahsilat ve faturalara dağıtım ayrı ekranda (web CollectionDialogOS); dönüşte ekstre yenilenir.
+    router.push({ pathname: "/customers/collect", params: { id: legacyIdOf(id), name: nameOverride || String(params.name || ""), currency: payCur, balance: String(balance) } });
   };
 
   const name = nameOverride || String(params.name || "Cari");
@@ -338,6 +280,14 @@ export default function CustomerDetailScreen() {
               icon={<WalletIcon size={18} color="#FFFFFF" />}
               busy={busy}
               onPress={onCollect}
+            />
+            {/* Aşama 4 / P8: dağıtılmamış avansı kesilmiş faturalara bağlar (web "Avansı faturaya dağıt"). */}
+            <Button
+              testID="customer-allocate"
+              variant="secondary"
+              label="Avansı faturaya dağıt"
+              style={{ marginTop: spacing.sm }}
+              onPress={() => router.push({ pathname: "/customers/allocate", params: { id: legacyIdOf(id), name: nameOverride || String(params.name || ""), currency: cur || "TRY" } })}
             />
           </SafeAnimatedView>
         ) : null}

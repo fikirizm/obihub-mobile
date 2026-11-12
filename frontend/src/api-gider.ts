@@ -332,11 +332,13 @@ export type PartyPaymentResult = {
 export async function collectPartyPaymentCompat(
   token: string,
   partyId: string,
-  body: { amount: number; payment_method: string; note?: string; payment_date: string; account_id?: string | null },
+  // allocations: verilmezse sunucu en eski vadeden dağıtır; [] = tamamı avans (Aşama 4 / P8).
+  body: { amount: number | string; payment_method: string; note?: string; payment_date: string; account_id?: string | null; allocations?: { invoice_id: string; amount: string }[] },
   idempotencyKey?: string
 ) {
   const payload: Record<string, unknown> = { ...body };
   if (!body.account_id) delete payload.account_id;
+  if (body.allocations === undefined) delete payload.allocations;
   return request<PartyPaymentResult>(
     `/customers/${encodeURIComponent(legacyIdOf(partyId))}/payments`,
     { method: "POST", body: JSON.stringify(payload), headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined },

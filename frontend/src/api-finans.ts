@@ -364,3 +364,22 @@ export async function getParasutAccounts(token: string): Promise<ParasutAccount[
 export async function postParasutPaymentAction(token: string, path: string, body: Record<string, unknown>) {
   return request<any>(path, { method: "POST", body: JSON.stringify(body) }, token);
 }
+
+// ---------------------------------------------------------------------------
+// Aşama 4 / P8: cari tahsilatı dağıtımı (web CustomersPage, AllocateAdvanceDialog).
+export type AllocationState = { currency: string; advance: string; open_invoices: import("./allocation").OpenInvoice[] };
+export async function getAllocationState(token: string, customerId: string): Promise<AllocationState> {
+  const d = await request<any>(`/customers/${encodeURIComponent(customerId)}/allocation-state`, { method: "GET" }, token);
+  return {
+    currency: String(d?.currency || "TRY").toUpperCase().replace("TRL", "TRY"),
+    advance: String(d?.advance ?? "0"),
+    open_invoices: (Array.isArray(d?.open_invoices) ? d.open_invoices : []).map((i: any) => ({ ...i, id: String(i?.id || ""), remaining: String(i?.remaining ?? "0") })),
+  };
+}
+export async function postAllocations(token: string, customerId: string, allocations: { invoice_id: string; amount: string }[], idempotencyKey: string) {
+  return request<any>(
+    `/customers/${encodeURIComponent(customerId)}/allocations`,
+    { method: "POST", body: JSON.stringify({ allocations }), headers: { "Idempotency-Key": idempotencyKey } },
+    token
+  );
+}
