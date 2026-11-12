@@ -285,8 +285,9 @@ export type CatalogProduct = {
   reserved?: number;
   onHand?: number;
   price: number;
-  channelStocks: { integration_id: string; stock: number; active?: boolean }[];
-  channelPrices: { integration_id: string; price: number; active?: boolean }[];
+  // `pending`: kanalın onayını bekleyen girilen değer (yoksa null); stock/price onaylı değerdir.
+  channelStocks: { integration_id: string; stock: number; active?: boolean; pending?: number | null }[];
+  channelPrices: { integration_id: string; price: number; active?: boolean; pending?: number | null }[];
 };
 
 export type SyncJob = {

@@ -625,11 +625,14 @@ export async function getCatalog(
         integration_id: String(x.integration_id),
         stock: Number(x.stock || 0),
         active: x.active,
+        // Kanalın onayını bekleyen, kullanıcının girdiği değer (Trendyol/Hepsiburada); `stock` onaylı değerdir.
+        pending: x.pending === true && x.pending_stock != null ? Math.trunc(Number(x.pending_stock)) : null,
       })),
       channelPrices: (Array.isArray(pr?.integration_prices) ? pr.integration_prices : []).map((x: any) => ({
         integration_id: String(x.integration_id),
         price: Number(x.price || 0),
         active: x.active,
+        pending: x.pending === true && x.pending_price != null && Number.isFinite(Number(x.pending_price)) ? Number(x.pending_price) : null,
       })),
     };
   });

@@ -604,7 +604,7 @@ export default function ProductDetailScreen() {
                       divider={i > 0}
                       matched={Boolean(row)}
                       value={row ? `${row.stock} adet` : "-"}
-                      note={!row ? undefined : unsent.stock.includes(ch.id) ? UNSENT_NOTE : row.stock !== product.stock ? "Ana stoktan farklı" : undefined}
+                      note={!row ? undefined : row.pending != null ? `İşlem sürüyor: ${row.pending} adet` : unsent.stock.includes(ch.id) ? UNSENT_NOTE : row.stock !== product.stock ? "Ana stoktan farklı" : undefined}
                       push={row ? pushOf(ch) : null}
                       busy={busyKey === `cs-${ch.id}`}
                       editable={canEdit && Boolean(row)}
@@ -635,7 +635,7 @@ export default function ProductDetailScreen() {
                       divider={i > 0}
                       matched={Boolean(row)}
                       value={row ? formatTry(row.price) : "-"}
-                      note={!row ? undefined : unsent.price.includes(ch.id) ? UNSENT_NOTE : keptChannel.includes(ch.id) && !samePrice(row.price, product.price) ? CHANNEL_KEPT_NOTE : undefined}
+                      note={!row ? undefined : row.pending != null ? `İşlem sürüyor: ${formatTry(row.pending)}` : unsent.price.includes(ch.id) ? UNSENT_NOTE : keptChannel.includes(ch.id) && !samePrice(row.price, product.price) ? CHANNEL_KEPT_NOTE : undefined}
                       push={row ? pushOf(ch) : null}
                       busy={busyKey === `cp-${ch.id}`}
                       editable={canEdit && Boolean(row)}
