@@ -115,3 +115,56 @@ export function channelPushBadge(push: ChannelPush | undefined): PushBadge | nul
       return { label: detail ? `Gönderilemedi: ${detail}` : "Gönderilemedi", tone: "bad" };
   }
 }
+
+// Aşama 3 / P5 — Muhasebe farkları. ObiHub stok sahibiyken programdaki stok farklıysa stok turu yazmaz, buraya düşürür.
+// Web karşılığı: frontend/src/components/stock/AccountingDifferences.jsx.
+export type ReconItem = {
+  id: string;
+  product_id: string;
+  product_name?: string;
+  sku?: string;
+  program?: string;
+  remote_qty: number;
+  pending_out: number;
+  expected: number;
+  observed_stock: number;
+  diff: number;
+};
+export type ReconLastRun = { aborted_reason?: string | null; program?: string; would_zero?: number; stocked?: number; matched_stocked?: number } | null;
+export type Reconciliation = { items: ReconItem[]; openCount: number; ownerProgram?: string | null; lastRun: ReconLastRun };
+
+export async function getReconciliation(token: string): Promise<Reconciliation | null> {
+  const r = await request<any>("/stock/reconciliation", {}, token);
+  if (!r || !Array.isArray(r.items)) return null;
+  const n = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const items: ReconItem[] = r.items.map((x: any) => ({
+    id: String(x.id),
+    product_id: String(x.product_id || ""),
+    product_name: x.product_name || undefined,
+    sku: x.sku || undefined,
+    program: x.program || undefined,
+    remote_qty: n(x.remote_qty),
+    pending_out: n(x.pending_out),
+    expected: n(x.expected),
+    observed_stock: n(x.observed_stock),
+    diff: n(x.diff),
+  }));
+  return { items, openCount: r.open_count == null ? items.length : n(r.open_count), ownerProgram: r.owner?.program ?? null, lastRun: r.last_run ?? null };
+}
+
+// 409: detail = {code: ITEM_OUTDATED | PRODUCT_NOT_SYNCED, message, item_ids}; mesaj ortak request()'ten gelir.
+export async function applyReconciliation(token: string, itemIds: string[]) {
+  return request<{ applied?: number; stale?: number; failed?: number; not_found?: number }>(
+    "/stock/reconciliation/apply",
+    { method: "POST", body: JSON.stringify({ item_ids: itemIds }) },
+    token
+  );
+}
+
+export async function dismissReconciliation(token: string, itemIds: string[]) {
+  return request<{ dismissed?: number; not_found?: number }>(
+    "/stock/reconciliation/dismiss",
+    { method: "POST", body: JSON.stringify({ item_ids: itemIds }) },
+    token
+  );
+}

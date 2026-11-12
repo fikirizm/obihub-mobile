@@ -64,6 +64,10 @@ const tickets = [
     ] },
 ];
 
+const recon = [
+  { id: "r1", product_id: "p4", product_name: "Deneme Ürün 4", sku: "SKU-4", program: "bizimhesap", remote_qty: 25, pending_out: 1, expected: 24, observed_stock: 21, diff: 3, status: "open" },
+  { id: "r2", product_id: "p5", product_name: "Deneme Ürün 5", sku: "SKU-5", program: "bizimhesap", remote_qty: 20, pending_out: 0, expected: 20, observed_stock: 28, diff: -8, status: "open" },
+];
 function send(res, status, body) {
   res.writeHead(status, {
     "Content-Type": "application/json",
@@ -291,6 +295,19 @@ http
     // --- Finans, cari, kasa, faturalar
     const today = new Date().toISOString().slice(0, 10);
     const readBody = (cb) => { let raw = ""; req.on("data", (c) => (raw += c)); req.on("end", () => { console.log("WRITE", path, raw); cb(JSON.parse(raw || "{}")); }); };
+    // --- Muhasebe farkları (P5). r2'de "Farkı al" 409 ITEM_OUTDATED döner (eski kayıt yolu denensin).
+    if (path === "/stock/reconciliation" && req.method === "GET")
+      return send(res, 200, { items: recon, open_count: recon.length, owner: { owner: "obihub", program: "bizimhesap", label: "ObiHub" }, last_run: null });
+    if (req.method === "POST" && (path === "/stock/reconciliation/apply" || path === "/stock/reconciliation/dismiss"))
+      return readBody((b) => {
+        const ids = b.item_ids || [];
+        if (path.endsWith("/apply") && ids.includes("r2"))
+          return send(res, 409, { detail: { code: "ITEM_OUTDATED", message: "Seçilen fark kaydı son stok turundan eski; liste yenilendi.", item_ids: ["r2"] } });
+        const before = recon.length;
+        for (let i = recon.length - 1; i >= 0; i--) if (ids.includes(recon[i].id)) recon.splice(i, 1);
+        const n = before - recon.length;
+        return send(res, 200, path.endsWith("/apply") ? { applied: n, stale: 0, failed: 0, not_found: 0 } : { dismissed: n, not_found: 0 });
+      });
     if (path === "/finance/overview")
       return send(res, 200, { cash_balance: accounts.reduce((n, a) => n + a.balance, 0), receivable: 42850.5, overdue_receivable: 6200, payable: 18400, overdue_payable: 0, month_cash_in: 91200, month_cash_out: 37400, today,
         upcoming: [
