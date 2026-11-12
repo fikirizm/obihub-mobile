@@ -31,13 +31,16 @@ t("Türkçe tutar → noktalı dize; geçersiz ve 2'den fazla ondalık reddedili
   assert.equal(m.parseTrAmount("-5"), null);
   assert.equal(m.parseTrAmount(""), null);
 });
-t("kuruş (BigInt): dize ↔ kuruş, biçim", () => {
+t("kuruş (BigInt): dize ↔ kuruş, biçim (uygulamanın formatMoney biçimi: simge başta)", () => {
+  assert.equal(m.formatMinor(-500n, "TRY"), "-₺5,00");
+  assert.equal(m.formatMinor(100n, "EUR"), "€1,00");
+  assert.equal(m.formatMinor(100n, "CHF"), "1,00 CHF");
   assert.equal(m.toMinor("300.95"), 30095n);
   assert.equal(m.toMinor("0.1"), 10n);
   assert.equal(m.toMinor("x"), null);
   assert.equal(m.fromMinor(125050n), "1250.50");
-  assert.equal(m.formatMinor(125050n, "TRY"), "1.250,50 ₺");
-  assert.equal(m.formatMinor(5n, "USD"), "0,05 USD");
+  assert.equal(m.formatMinor(125050n, "TRY"), "₺1.250,50");
+  assert.equal(m.formatMinor(5n, "USD"), "$0,05");
   assert.equal(m.toTrInput("1250.5"), "1.250,50");
 });
 
@@ -85,8 +88,8 @@ t("avans dağıtımı doğrulaması: hata, boş, avansı aşan", () => {
   assert.equal(m.advanceAllocationError(m.buildAllocations(invs, { i1: "10,00" }), 1000n), "");
 });
 t("bakiye notu: kısmi, fazla (avans), kapanır", () => {
-  assert.deepEqual(m.balanceNote(50000n, 20000n, "TRY"), { tone: "warn", text: "Kısmi tahsilat: 300,00 ₺ açık kalacak." });
-  assert.deepEqual(m.balanceNote(50000n, 60000n, "TRY"), { tone: "warn", text: "Fazla tahsilat: 100,00 ₺ cari hesapta avans olarak kalacak." });
+  assert.deepEqual(m.balanceNote(50000n, 20000n, "TRY"), { tone: "warn", text: "Kısmi tahsilat: ₺300,00 açık kalacak." });
+  assert.deepEqual(m.balanceNote(50000n, 60000n, "TRY"), { tone: "warn", text: "Fazla tahsilat: ₺100,00 cari hesapta avans olarak kalacak." });
   assert.deepEqual(m.balanceNote(50000n, 50000n, "TRY"), { tone: "ok", text: "Cari bakiyesi kapanacak." });
   assert.equal(m.balanceNote(0n, 100n, "TRY"), null);
   assert.equal(m.balanceNote(50000n, null, "TRY"), null);
@@ -102,16 +105,16 @@ t("hata metinleri: dağıtım ve hesap kodları kendi metnimizle; CURRENCY_MISMA
 });
 
 t("tahsilat sonucu metni: dağıtılan + avans, atlanan, tekrar", () => {
-  assert.deepEqual(m.collectDoneTexts({ allocated_amount: "300.00", advance_amount: "50.00" }, "TRY"), ["Tahsilat kaydedildi: 300,00 ₺ açık faturalara işlendi, 50,00 ₺ avans kaldı."]);
-  assert.deepEqual(m.collectDoneTexts({ allocated_amount: "300.00", advance_amount: "0.00" }, "TRY"), ["Tahsilat kaydedildi: 300,00 ₺ açık faturalara işlendi."]);
-  assert.deepEqual(m.collectDoneTexts({ allocated_amount: "0", advance_amount: "75.00" }, "TRY"), ["Tahsilat avans olarak kaydedildi (75,00 ₺)."]);
+  assert.deepEqual(m.collectDoneTexts({ allocated_amount: "300.00", advance_amount: "50.00" }, "TRY"), ["Tahsilat kaydedildi: ₺300,00 açık faturalara işlendi, ₺50,00 avans kaldı."]);
+  assert.deepEqual(m.collectDoneTexts({ allocated_amount: "300.00", advance_amount: "0.00" }, "TRY"), ["Tahsilat kaydedildi: ₺300,00 açık faturalara işlendi."]);
+  assert.deepEqual(m.collectDoneTexts({ allocated_amount: "0", advance_amount: "75.00" }, "TRY"), ["Tahsilat avans olarak kaydedildi (₺75,00)."]);
   assert.deepEqual(m.collectDoneTexts({ allocated_amount: "100.00", advance_amount: "0", skipped: [{ invoice_id: "i2" }] }, "TRY"),
-    ["Tahsilat kaydedildi: 100,00 ₺ açık faturalara işlendi.", "1 fatura bu sırada değiştiği için atlandı; tutarı avansta kaldı."]);
+    ["Tahsilat kaydedildi: ₺100,00 açık faturalara işlendi.", "1 fatura bu sırada değiştiği için atlandı; tutarı avansta kaldı."]);
   assert.deepEqual(m.collectDoneTexts({ replayed: true }, "TRY"), ["Bu işlem zaten kaydedilmişti; ikinci kez işlenmedi."]);
 });
 t("avans dağıtımı sonucu metni", () => {
-  assert.deepEqual(m.allocateDoneTexts({ advance_remaining: "25.00" }, 30000n, "TRY"), ["300,00 ₺ faturalara işlendi; kalan avans 25,00 ₺."]);
-  assert.deepEqual(m.allocateDoneTexts({ skipped: [1, 2] }, 100n, "TRY"), ["1,00 ₺ faturalara işlendi.", "2 fatura bu sırada değiştiği için atlandı; tutarı avansta kaldı."]);
+  assert.deepEqual(m.allocateDoneTexts({ advance_remaining: "25.00" }, 30000n, "TRY"), ["₺300,00 faturalara işlendi; kalan avans ₺25,00."]);
+  assert.deepEqual(m.allocateDoneTexts({ skipped: [1, 2] }, 100n, "TRY"), ["₺1,00 faturalara işlendi.", "2 fatura bu sırada değiştiği için atlandı; tutarı avansta kaldı."]);
   assert.deepEqual(m.allocateDoneTexts({ replayed: true }, 100n, "TRY"), ["Bu işlem zaten kaydedilmişti; ikinci kez işlenmedi."]);
 });
 

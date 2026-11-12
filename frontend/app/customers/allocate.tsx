@@ -10,7 +10,7 @@ import { getAllocationState, postAllocations, type AllocationState } from "../..
 import { advanceAllocationError, allocatableInvoices, allocateDoneTexts, allocationErrorText, autoFill, buildAllocations, formatMinor, toMinor } from "../../src/allocation";
 import { moneySubmitLabel, useMoneyWrite } from "../../src/useMoneyWrite";
 import { useTheme } from "../../src/theme/ThemeProvider";
-import { radius, spacing, tabular, type } from "../../src/theme/tokens";
+import { radius, spacing, type } from "../../src/theme/tokens";
 import { AllocationRows } from "../../src/components/AllocationRows";
 import { EmptyState } from "../../src/components/EmptyState";
 import { AlertIcon, WalletIcon } from "../../src/components/Icons";
@@ -18,7 +18,7 @@ import { Skeleton } from "../../src/components/Skeleton";
 import { Button } from "../../src/ui/Button";
 import { useFeedback } from "../../src/ui/Feedback";
 import { StackHeader } from "../../src/ui/Header";
-import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
+import { SummaryHero } from "../../src/ui/SummaryHero";
 import { Card } from "../../src/ui/ListRow";
 
 export default function AllocateAdvanceScreen() {
@@ -89,30 +89,17 @@ export default function AllocateAdvanceScreen() {
     return (
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-          <HeroCard tone="violet">
-            <Text style={styles.heroLabel}>Dağıtılabilir avans</Text>
-            <Text testID="alloc-advance" style={[styles.heroValue, tabular]} numberOfLines={1} adjustsFontSizeToFit>
-              {formatMinor(advance, cur)}
-            </Text>
-            <View style={styles.heroFacts}>
-              <View style={styles.heroFact}>
-                <Text style={styles.heroFactLabel}>Açık fatura</Text>
-                <Text style={[styles.heroFactValue, tabular]}>{invoices.length}</Text>
-              </View>
-              <View style={styles.heroFact}>
-                <Text style={styles.heroFactLabel}>Dağıtılacak</Text>
-                <Text testID="alloc-total" style={[styles.heroFactValue, tabular]} numberOfLines={1} adjustsFontSizeToFit>
-                  {formatMinor(alloc.total, cur)}
-                </Text>
-              </View>
-              <View style={styles.heroFact}>
-                <Text style={styles.heroFactLabel}>Kalan avans</Text>
-                <Text style={[styles.heroFactValue, tabular, alloc.total > advance && { color: "#FECACA" }]} numberOfLines={1} adjustsFontSizeToFit>
-                  {formatMinor(alloc.total > advance ? 0n : advance - alloc.total, cur)}
-                </Text>
-              </View>
-            </View>
-          </HeroCard>
+          <SummaryHero
+            testID="alloc-advance"
+            tone="violet"
+            label="Dağıtılabilir avans"
+            value={formatMinor(advance, cur)}
+            facts={[
+              { label: "Açık fatura", value: String(invoices.length) },
+              { label: "Dağıtılacak", value: formatMinor(alloc.total, cur) },
+              { label: "Kalan avans", value: formatMinor(alloc.total > advance ? 0n : advance - alloc.total, cur), tone: alloc.total > advance ? "bad" : undefined },
+            ]}
+          />
 
           {advance <= 0n ? (
             <Card padded style={[styles.block, { marginTop: spacing.md }]}>
@@ -182,12 +169,6 @@ const styles = StyleSheet.create({
   wrap: { flex: 1 },
   body: { paddingTop: spacing.xs, paddingBottom: spacing.huge },
   block: { marginHorizontal: spacing.lg },
-  heroLabel: { color: ON_HERO.soft, fontSize: 13, fontWeight: "600" },
-  heroValue: { color: ON_HERO.text, fontSize: 34, fontWeight: "800", letterSpacing: -0.6, marginTop: 2 },
-  heroFacts: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: ON_HERO.faint },
-  heroFact: { flex: 1, minWidth: 0 },
-  heroFactLabel: { color: ON_HERO.soft, fontSize: 12 },
-  heroFactValue: { color: ON_HERO.text, fontSize: 15, fontWeight: "700", marginTop: 2 },
   form: { paddingHorizontal: spacing.lg, gap: spacing.md, marginTop: spacing.md },
   inline: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   hint: { marginHorizontal: spacing.lg, marginTop: spacing.sm },

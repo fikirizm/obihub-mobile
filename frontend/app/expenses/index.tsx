@@ -20,12 +20,13 @@ import { formatDate, formatMoney } from "../../src/utils";
 import { AlertIcon, DownloadIcon, PlusIcon } from "../../src/components/Icons";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { Chip, ChipRow } from "../../src/ui/Chip";
+import { SummaryHero } from "../../src/ui/SummaryHero";
 import { StackHeader } from "../../src/ui/Header";
 import { Button } from "../../src/ui/Button";
 import { canManage } from "../../src/auth/permissions";
 import { ListBody } from "../../src/ui/ListBody";
 import { IconTile } from "../../src/ui/ListRow";
-import { RowCard, StatCard } from "../../src/ui/RowCard";
+import { RowCard } from "../../src/ui/RowCard";
 import type { ExpenseInvoice, ExpenseLedgerRow, ExpenseSummaryRow, UiCapabilities } from "../../src/types";
 
 // Web ile aynı (frontend/src/pages/ExpenseInvoicesPage.js): varsayılan liste ObiHub'ın kendi gider defteri
@@ -166,10 +167,17 @@ export default function ExpensesScreen() {
     <View>
       {!moduleOn ? note("ObiHub ön muhasebesi kapalı. Mevcut kayıtlar yalnız görüntülenir; Ayarlar'dan yeniden açabilirsiniz.", "warning") : null}
       {summary.map((c) => (
-        <View key={c.currency} style={styles.stats} testID={`expenses-summary-${c.currency}`}>
-          <StatCard label={`Ödenecek borç · ${c.currency}`} value={formatMoney(c.payable, c.currency)} />
-          <StatCard label={`Gecikmiş · ${c.currency}`} value={formatMoney(c.overdue, c.currency)} tone={c.overdue > 0 ? "error" : undefined} />
-        </View>
+        <SummaryHero
+          key={c.currency}
+          testID={`expenses-summary-${c.currency}`}
+          tone="blue"
+          label={`Ödenecek borç · ${c.currency === "TRY" ? "TL" : c.currency}`}
+          value={formatMoney(c.payable, c.currency)}
+          amount={Number(c.payable) || 0}
+          format={(n) => formatMoney(n, c.currency)}
+          facts={[{ label: "Gecikmiş", value: formatMoney(c.overdue, c.currency), tone: c.overdue > 0 ? "bad" : undefined }]}
+          style={{ marginHorizontal: 0, marginBottom: spacing.sm }}
+        />
       ))}
       {canAdd ? (
         <View style={{ marginBottom: spacing.sm }}>
@@ -229,6 +237,5 @@ export default function ExpensesScreen() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
-  stats: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.sm },
   note: { flexDirection: "row", alignItems: "center", gap: spacing.xs, padding: spacing.sm, borderRadius: radius.md, marginBottom: spacing.sm },
 });

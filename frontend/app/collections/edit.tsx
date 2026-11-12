@@ -23,7 +23,7 @@ import {
   type Collection,
 } from "../../src/collection-actions";
 import { useTheme } from "../../src/theme/ThemeProvider";
-import { radius, spacing, tabular, type } from "../../src/theme/tokens";
+import { radius, spacing, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney } from "../../src/utils";
 import { AccountOption } from "../../src/components/AccountOption";
 import { EmptyState } from "../../src/components/EmptyState";
@@ -34,7 +34,7 @@ import { Chip, ChipRow } from "../../src/ui/Chip";
 import { useFeedback } from "../../src/ui/Feedback";
 import { FormField } from "../../src/ui/FormField";
 import { StackHeader } from "../../src/ui/Header";
-import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
+import { SummaryHero } from "../../src/ui/SummaryHero";
 import { Card, SectionTitle } from "../../src/ui/ListRow";
 import type { CashAccount } from "../../src/types";
 
@@ -145,26 +145,17 @@ export default function CollectionEditScreen() {
     return (
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-          <HeroCard tone="emerald">
-            <Text style={styles.heroLabel}>Yeni tutar</Text>
-            <Text testID="collection-edit-preview" style={[styles.heroValue, tabular]} numberOfLines={1} adjustsFontSizeToFit>
-              {formatMoney(amountStr !== null ? Number(amountStr) : 0, currency)}
-            </Text>
-            <View style={styles.heroFacts}>
-              {[
-                ["Kayıtlı tutar", formatMoney(Number(c.amount || 0), currency)],
-                ["Tarih", c.date ? formatDate(c.date) : "—"],
-                ...(c.type === "invoice" && c.invoice_number ? [["Fatura", c.invoice_number]] : []),
-              ].map(([k, v]) => (
-                <View key={k} style={styles.heroFact}>
-                  <Text style={styles.heroFactLabel}>{k}</Text>
-                  <Text style={[styles.heroFactValue, tabular]} numberOfLines={1} adjustsFontSizeToFit>
-                    {v}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          </HeroCard>
+          <SummaryHero
+            testID="collection-edit-preview"
+            tone="emerald"
+            label="Yeni tutar"
+            value={formatMoney(amountStr !== null ? Number(amountStr) : 0, currency)}
+            facts={[
+              { label: "Kayıtlı tutar", value: formatMoney(Number(c.amount || 0), currency) },
+              { label: "Tarih", value: c.date ? formatDate(c.date) : "—" },
+              ...(c.type === "invoice" && c.invoice_number ? [{ label: "Fatura", value: c.invoice_number }] : []),
+            ]}
+          />
 
           <View style={styles.form}>
             <Text style={[type.footnote, { color: colors.textSecondary }]}>{EDIT_TEXT}</Text>
@@ -272,12 +263,6 @@ const styles = StyleSheet.create({
   wrap: { flex: 1 },
   body: { paddingTop: spacing.xs, paddingBottom: spacing.huge },
   block: { marginHorizontal: spacing.lg },
-  heroLabel: { color: ON_HERO.soft, fontSize: 13, fontWeight: "600" },
-  heroValue: { color: ON_HERO.text, fontSize: 34, fontWeight: "800", letterSpacing: -0.6, marginTop: 2 },
-  heroFacts: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: ON_HERO.faint },
-  heroFact: { flex: 1, minWidth: 0 },
-  heroFactLabel: { color: ON_HERO.soft, fontSize: 12 },
-  heroFactValue: { color: ON_HERO.text, fontSize: 15, fontWeight: "700", marginTop: 2 },
   form: { paddingHorizontal: spacing.lg, gap: spacing.md, marginTop: spacing.md },
   err: { marginHorizontal: spacing.lg, marginTop: spacing.xs },
   box: { flexDirection: "row", gap: spacing.xs, alignItems: "flex-start", padding: spacing.sm, borderRadius: radius.md },

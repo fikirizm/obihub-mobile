@@ -298,6 +298,8 @@ export function OffersList() {
           tone="violet"
           label={totals.label}
           value={formatMoney(totals.total, totals.currency)}
+          amount={totals.total}
+          format={(n) => formatMoney(n, totals.currency)}
           facts={[{ label: "Teklif", value: String(totals.count) }]}
           style={styles.hero}
         />

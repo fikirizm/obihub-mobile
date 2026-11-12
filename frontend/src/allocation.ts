@@ -40,12 +40,16 @@ export function fromMinor(minor: bigint): string {
   const abs = neg ? -minor : minor;
   return `${neg ? "-" : ""}${abs / 100n}.${String(abs % 100n).padStart(2, "0")}`;
 }
+// Uygulamanın formatMoney biçimiyle aynı (Intl tr-TR): bilinen simge başta ("₺1.250,50", "$0,05"), diğerleri sonda ("1,00 CHF").
+const SYMBOLS: Record<string, string> = { TRY: "₺", TRL: "₺", USD: "$", EUR: "€", GBP: "£" };
 export function formatMinor(minor: bigint, currency = "TRY"): string {
   const neg = minor < 0n;
   const abs = neg ? -minor : minor;
   const whole = (abs / 100n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  const num = `${whole},${String(abs % 100n).padStart(2, "0")}`;
   const code = String(currency || "TRY").toUpperCase();
-  return `${neg ? "−" : ""}${whole},${String(abs % 100n).padStart(2, "0")} ${code === "TRY" || code === "TRL" ? "₺" : code}`;
+  const sym = SYMBOLS[code];
+  return `${neg ? "-" : ""}${sym ? `${sym}${num}` : `${num} ${code}`}`;
 }
 // Noktalı dize → Türkçe giriş metni ("1250.5" → "1.250,50").
 export function toTrInput(dot: unknown): string {

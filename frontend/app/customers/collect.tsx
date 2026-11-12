@@ -40,7 +40,7 @@ import { Chip, ChipRow } from "../../src/ui/Chip";
 import { useFeedback } from "../../src/ui/Feedback";
 import { FormField } from "../../src/ui/FormField";
 import { StackHeader } from "../../src/ui/Header";
-import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
+import { SummaryHero } from "../../src/ui/SummaryHero";
 import { Card, SectionTitle } from "../../src/ui/ListRow";
 import type { CashAccount } from "../../src/types";
 
@@ -170,26 +170,16 @@ export default function CustomerCollectScreen() {
     return (
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-          <HeroCard tone="emerald">
-            <Text style={styles.heroLabel}>Tahsil edilecek</Text>
-            <Text testID="collect-amount-preview" style={[styles.heroValue, tabular]} numberOfLines={1} adjustsFontSizeToFit>
-              {formatMinor(amt ?? 0n, currency)}
-            </Text>
-            <View style={styles.heroFacts}>
-              <View style={styles.heroFact}>
-                <Text style={styles.heroFactLabel}>Açık bakiye</Text>
-                <Text style={[styles.heroFactValue, tabular]} numberOfLines={1} adjustsFontSizeToFit>
-                  {formatMinor(due ?? 0n, currency)}
-                </Text>
-              </View>
-              <View style={styles.heroFact}>
-                <Text style={styles.heroFactLabel}>Mevcut avans</Text>
-                <Text style={[styles.heroFactValue, tabular]} numberOfLines={1} adjustsFontSizeToFit>
-                  {formatMinor(advance, currency)}
-                </Text>
-              </View>
-            </View>
-          </HeroCard>
+          <SummaryHero
+            testID="collect-amount-preview"
+            tone="emerald"
+            label="Tahsil edilecek"
+            value={formatMinor(amt ?? 0n, currency)}
+            facts={[
+              { label: "Açık bakiye", value: formatMinor(due ?? 0n, currency) },
+              { label: "Mevcut avans", value: formatMinor(advance, currency) },
+            ]}
+          />
 
           <View style={styles.form}>
             <FormField testID="collect-amount" label={`Tutar (${currency})`} value={amountText} onChangeText={setAmountText} editable={!locked} keyboardType="decimal-pad" placeholder="0,00" error={amountErr} />
@@ -347,12 +337,6 @@ const styles = StyleSheet.create({
   wrap: { flex: 1 },
   body: { paddingTop: spacing.xs, paddingBottom: spacing.huge },
   block: { marginHorizontal: spacing.lg },
-  heroLabel: { color: ON_HERO.soft, fontSize: 13, fontWeight: "600" },
-  heroValue: { color: ON_HERO.text, fontSize: 34, fontWeight: "800", letterSpacing: -0.6, marginTop: 2 },
-  heroFacts: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: ON_HERO.faint },
-  heroFact: { flex: 1, minWidth: 0 },
-  heroFactLabel: { color: ON_HERO.soft, fontSize: 12 },
-  heroFactValue: { color: ON_HERO.text, fontSize: 15, fontWeight: "700", marginTop: 2 },
   form: { paddingHorizontal: spacing.lg, gap: spacing.md, marginTop: spacing.md },
   inline: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   summary: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: spacing.sm, marginTop: spacing.md },

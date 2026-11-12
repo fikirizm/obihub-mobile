@@ -13,9 +13,9 @@ import { StatusBadge } from "../src/components/StatusBadge";
 import { Button } from "../src/ui/Button";
 import { Chip, ChipRow } from "../src/ui/Chip";
 import { useFeedback } from "../src/ui/Feedback";
+import { SummaryHero } from "../src/ui/SummaryHero";
 import { StackHeader } from "../src/ui/Header";
 import { IconTile } from "../src/ui/ListRow";
-import { StatCard } from "../src/ui/RowCard";
 import type { SyncJob } from "../src/types";
 
 type Filter = "all" | "failed" | "success";
@@ -99,10 +99,18 @@ export default function JobsScreen() {
           ItemSeparatorComponent={() => <View style={{ height: spacing.xs }} />}
           ListHeaderComponent={
             filter === "all" && jobs.length > 0 ? (
-              <SafeAnimatedView entering={FadeInDown.duration(380)} style={styles.stats}>
-                <StatCard label="Listelenen" value={String(jobs.length)} />
-                <StatCard label="Başarısız" value={String(failedCount)} tone={failedCount > 0 ? "error" : undefined} />
-                <StatCard label="Başarılı" value={String(jobs.length - failedCount)} tone="success" />
+              <SafeAnimatedView entering={FadeInDown.duration(380)} style={{ marginBottom: spacing.sm }}>
+                <SummaryHero
+                  style={{ marginHorizontal: 0 }}
+                  testID="jobs-summary"
+                  tone={failedCount > 0 ? "violet" : "emerald"}
+                  label="Son senkron işleri"
+                  value={String(jobs.length)}
+                  facts={[
+                    { label: "Başarısız", value: String(failedCount), tone: failedCount > 0 ? "bad" : undefined },
+                    { label: "Başarılı", value: String(jobs.length - failedCount), tone: "good" },
+                  ]}
+                />
               </SafeAnimatedView>
             ) : null
           }
@@ -182,7 +190,6 @@ export default function JobsScreen() {
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
   list: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing.huge },
-  stats: { flexDirection: "row", gap: spacing.xs, marginBottom: spacing.sm },
   card: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.md },
   accent: { position: "absolute", left: 0, top: 12, bottom: 12, width: 4, borderTopRightRadius: 4, borderBottomRightRadius: 4 },
   cardHead: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm },

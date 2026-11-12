@@ -187,6 +187,8 @@ export function InvoicesList({ source = "parasut" }: { source?: "parasut" | "biz
           tone="emerald"
           label="Ay toplamı"
           value={formatTry(monthTotals.total)}
+          amount={monthTotals.total}
+          format={formatTry}
           facts={[
             { label: "Fatura", value: String(monthTotals.count) },
             { label: "Resmileşen", value: String(monthTotals.officialized), tone: "good" },

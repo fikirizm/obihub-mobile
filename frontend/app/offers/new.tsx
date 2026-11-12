@@ -21,7 +21,7 @@ import { Chip, ChipRow } from "../../src/ui/Chip";
 import { useFeedback } from "../../src/ui/Feedback";
 import { FormField } from "../../src/ui/FormField";
 import { StackHeader } from "../../src/ui/Header";
-import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
+import { SummaryHero } from "../../src/ui/SummaryHero";
 import { Card, SectionTitle } from "../../src/ui/ListRow";
 
 type Contact = { id: string; name: string; email?: string; city?: string };
@@ -153,27 +153,18 @@ export default function NewOfferScreen() {
     return (
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-          <HeroCard tone="violet">
-            <Text style={styles.heroLabel}>Tahmini genel toplam</Text>
-            <Text testID="offer-total" style={[styles.heroValue, tabular]} numberOfLines={1} adjustsFontSizeToFit>
-              {formatMinor(totals.total, curCode(currency))}
-            </Text>
-            <View style={styles.heroFacts}>
-              {[
-                ["Ara toplam", totals.subtotal],
-                ["İndirim", totals.discount],
-                ["KDV", totals.vat],
-              ].map(([k, val]) => (
-                <View key={String(k)} style={styles.heroFact}>
-                  <Text style={styles.heroFactLabel}>{String(k)}</Text>
-                  <Text style={[styles.heroFactValue, tabular]} numberOfLines={1} adjustsFontSizeToFit>
-                    {formatMinor(val as bigint, curCode(currency))}
-                  </Text>
-                </View>
-              ))}
-            </View>
-            <Text style={styles.heroHint}>Kesin tutarı Paraşüt hesaplar.</Text>
-          </HeroCard>
+          <SummaryHero
+            testID="offer-total"
+            tone="violet"
+            label="Tahmini genel toplam"
+            value={formatMinor(totals.total, curCode(currency))}
+            facts={[
+              { label: "Ara toplam", value: formatMinor(totals.subtotal, curCode(currency)) },
+              { label: "İndirim", value: formatMinor(totals.discount, curCode(currency)) },
+              { label: "KDV", value: formatMinor(totals.vat, curCode(currency)) },
+            ]}
+            footer={<Text style={{ color: "#CBD5E1", fontSize: 12, marginTop: spacing.sm }}>Kesin tutarı Paraşüt hesaplar.</Text>}
+          />
 
           <SectionTitle title="Müşteri" />
           {contact ? (
@@ -372,13 +363,6 @@ const styles = StyleSheet.create({
   wrap: { flex: 1 },
   body: { paddingTop: spacing.xs, paddingBottom: spacing.huge },
   block: { marginHorizontal: spacing.lg },
-  heroLabel: { color: ON_HERO.soft, fontSize: 13, fontWeight: "600" },
-  heroValue: { color: ON_HERO.text, fontSize: 34, fontWeight: "800", letterSpacing: -0.6, marginTop: 2 },
-  heroFacts: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: ON_HERO.faint },
-  heroFact: { flex: 1, minWidth: 0 },
-  heroFactLabel: { color: ON_HERO.soft, fontSize: 12 },
-  heroFactValue: { color: ON_HERO.text, fontSize: 15, fontWeight: "700", marginTop: 2 },
-  heroHint: { color: ON_HERO.soft, fontSize: 12, marginTop: spacing.sm },
   form: { paddingHorizontal: spacing.lg, gap: spacing.md, marginTop: spacing.md },
   picked: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   pad: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, minHeight: 44, justifyContent: "center" },

@@ -1,7 +1,10 @@
 // Kısa bildirim (toast) ve onay alt sayfası. Sistem uyarı kutularının yerini alır.
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import Animated, { FadeInDown, FadeOutDown, SlideInDown, SlideOutDown } from "react-native-reanimated";
+import Animated, { FadeInDown, FadeOutDown, ReduceMotion, SlideInDown, SlideOutDown } from "react-native-reanimated";
+
+// G5: alt sayfalar yay eğrisiyle açılır (hafif sönümlü, sekmesiz); "hareketi azalt" açıksa animasyon atlanır.
+const SHEET_IN = SlideInDown.springify().damping(22).stiffness(240).mass(0.9).reduceMotion(ReduceMotion.System);
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../theme/ThemeProvider";
@@ -235,7 +238,7 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
         <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={() => settle(false)} accessibilityLabel="Kapat" />
         {confirmState ? (
           <Animated.View
-            entering={SlideInDown.duration(220)}
+            entering={SHEET_IN}
             exiting={SlideOutDown.duration(180)}
             testID="confirm-sheet"
             accessibilityViewIsModal
@@ -266,7 +269,7 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
           <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={() => settleNumber(null)} accessibilityLabel="Kapat" />
           {numberState ? (
             <Animated.View
-              entering={SlideInDown.duration(220)}
+              entering={SHEET_IN}
               exiting={SlideOutDown.duration(180)}
               testID="number-sheet"
               accessibilityViewIsModal
@@ -431,7 +434,7 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
         <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={() => settleChoice(null)} accessibilityLabel="Kapat" />
         {chooseState ? (
           <Animated.View
-            entering={SlideInDown.duration(220)}
+            entering={SHEET_IN}
             exiting={SlideOutDown.duration(180)}
             testID="choose-sheet"
             accessibilityViewIsModal
