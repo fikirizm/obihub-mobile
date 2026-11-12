@@ -60,6 +60,8 @@ const tySource = [
 const accounts = [
   { id: "a1", name: "Nakit Kasa", account_type: "cash", currency: "TRY", balance: 12450.75, is_default: true },
   { id: "a2", name: "Garanti Ticari", account_type: "bank", currency: "TRY", balance: 86320.1, bank_name: "Garanti BBVA" },
+  { id: "a3", name: "POS (Kart)", account_type: "pos", currency: "TRY", balance: 0 },
+  { id: "a4", name: "Eski Kasa", account_type: "cash", currency: "TRY", balance: 0, is_active: false },
 ];
 // Dalga 3 / C2 gider durumları (detay + ödeme).
 const expenseState = {
@@ -116,7 +118,7 @@ http
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -317,8 +319,25 @@ http
           if (prev.fp !== fp) return send(res, 409, { detail: "Bu ödeme anahtarı farklı bir sepetle kullanılmış; yeni satış başlatın" });
           return send(res, 200, prev.resp);
         }
+        // P4: kasa bacakları
+        const totalC = Math.round(b.total * 100);
+        let legs;
+        if (b.payment_type === "karma") {
+          if (!Array.isArray(b.payments)) return send(res, 422, { code: "POS_PAYMENT_SPLIT_REQUIRED", detail: "Karma ödemede nakit ve kart tutarları gerekli." });
+          const sum = b.payments.reduce((t, x) => t + Math.round(Number(x.amount) * 100), 0);
+          if (Math.abs(sum - totalC) > 1) return send(res, 422, { code: "POS_PAYMENT_SPLIT_MISMATCH", detail: "Nakit + kart toplamı fiş tutarına eşit değil." });
+          legs = b.payments.filter((x) => Number(x.amount) > 0).map((x) => ({ method: x.method, amount: Number(x.amount).toFixed(2) }));
+        } else legs = [{ method: b.payment_type, amount: Number(b.total).toFixed(2) }];
+        const cardLeg = legs.some((l) => l.method === "kart");
+        if (cardLeg && state.posAccts === "2" && !b.card_account_id) return send(res, 400, { code: "POS_CARD_ACCOUNT_REQUIRED", detail: "Birden çok POS hesabı var; kart ödemesinin yazılacağı hesabı seçin." });
         for (const it of b.items) { const p = products.find((x) => x.id === it.product_id); if (p) p.stock -= it.quantity; }
-        const resp = { id: "s" + (posSales.length + 1), sale_number: "POS-20261112-" + String(posSales.length + 1).padStart(4, "0"), created_at: new Date().toISOString(), total: b.total, payment_type: b.payment_type, customer_name: b.customer_name, item_count: b.items.length };
+        const cardName = b.card_account_id === "a5" ? "Yapı Kredi POS" : "POS (Kart)";
+        const pending = state.posPending === "1";
+        const resp = { id: "s" + (posSales.length + 1), sale_number: "POS-20261112-" + String(posSales.length + 1).padStart(4, "0"), created_at: new Date().toISOString(), total: b.total, payment_type: b.payment_type, customer_name: b.customer_name, item_count: b.items.length,
+          cash_status: pending ? "pending" : "posted",
+          cash_entries: pending ? [] : legs.map((l, i) => ({ method: l.method, account_id: l.method === "kart" ? (b.card_account_id || "a3") : "a1", account_name: l.method === "kart" ? cardName : "Nakit Kasa", amount: l.amount, entry_id: "ce" + i })),
+          payments: legs };
+        console.log("POS card_account_id=" + (b.card_account_id || "-") + " payments=" + JSON.stringify(b.payments || null));
         posSales.push({ key, fp, resp });
         if (state.posFail === "1") { state.posFail = "0"; return send(res, 500, { detail: `Satış ${resp.sale_number} kaydedildi ancak stok düşülemedi (deneme). Aynı ödemeyi tekrar deneyin; stok yalnız bir kez düşülür.` }); }
         send(res, 200, resp);
@@ -541,7 +560,7 @@ http
         entries.unshift(outgoing, incoming);
         send(res, 200, { transfer_id: tid, outgoing, incoming });
       });
-    if (path === "/finance/accounts") return send(res, 200, { items: accounts });
+    if (path === "/finance/accounts") return send(res, 200, { items: state.posAccts === "2" ? [...accounts, { id: "a5", name: "Yapı Kredi POS", account_type: "pos", currency: "TRY", balance: 0 }] : accounts });
     if (path.startsWith("/finance/accounts/")) {
       const acc = accounts.find((a) => path.endsWith("/" + a.id));
       if (!acc) return send(res, 404, { detail: "Hesap bulunamadı" });
@@ -577,6 +596,7 @@ http
       const party = parties.find((p) => p.id === decodeURIComponent(cm[1]));
       if (!party) return send(res, 404, { detail: "Müşteri bulunamadı" });
       if (req.method === "GET") return send(res, 200, { contact_role: "customer", customer_type: "individual", ...party });
+      if (req.method === "DELETE" && Math.abs(party.balance) > 0.004) return send(res, 409, { detail: { code: "CUSTOMER_HAS_BALANCE", message: "Bu carinin açık bakiyesi var; bakiye kapanmadan silinemez." } });
       if (req.method === "DELETE") { parties.splice(parties.indexOf(party), 1); console.log("WRITE DELETE", path); return send(res, 200, { ok: true }); }
       if (req.method === "PUT") return readBody((b) => { if ("opening_balance" in b) console.log("UYARI: opening_balance gönderildi"); Object.assign(party, b); send(res, 200, party); });
     }
@@ -587,10 +607,19 @@ http
       const party = parties.find((p) => p.id === partyMatch[1]);
       if (!party) return send(res, 404, { detail: "Müşteri bulunamadı" });
       if (partyMatch[2] === "ledger")
-        return send(res, 200, { balance: party.balance, items: [
-          ...party.payments.map((pay, i) => ({ id: "pay" + i, date: today, description: "Tahsilat", credit: pay, balance: party.balance })),
-          { id: "l1", date: "2026-11-02", description: "Satış faturası OBI2026101", debit: 6200, balance: 6200 },
-        ] });
+      {
+        // P3: sayfalı ekstre (en yeni önce). 130 satır → 100 + 30.
+        const all = [
+          ...party.payments.map((pay, i) => ({ id: "pay" + i, date: today, description: "Tahsilat", credit: pay, balance: party.balance, currency: "TRY" })),
+          { id: "l1", date: "2026-11-02", description: "Satış faturası OBI2026101", debit: 6200, balance: 6200, currency: "TRY", reversed: false },
+          { id: "l2", date: "2026-10-30", description: "Satış faturası OBI2026099", debit: 900, balance: 0, currency: "TRY", reversed: true },
+          ...Array.from({ length: 127 }, (_, i) => ({ id: "old" + i, date: "2026-0" + (1 + (i % 9)) + "-15", description: "Satış faturası ESK" + (1000 + i), debit: 100, balance: 0, currency: "TRY" })),
+        ];
+        const pg = Math.max(1, Number(url.searchParams.get("page") || 1)); const pp = Math.min(1000, Number(url.searchParams.get("per_page") || 100));
+        console.log("LEDGER page=" + pg + " per_page=" + pp);
+        const balances = [{ currency: "TRY", balance: party.balance }, ...(party.id === "c1" ? [{ currency: "USD", balance: 350 }] : [])];
+        return send(res, 200, { balance: party.balance, balance_currency: "TRY", balances, total: all.length, page: pg, per_page: pp, items: all.slice((pg - 1) * pp, pg * pp) });
+      }
       return readBody((b) => {
         const pk = req.headers["idempotency-key"];
         console.log("PARTY-PAY key=" + (pk || "-") + " account=" + (b.account_id || "-") + " allocations=" + JSON.stringify(b.allocations));

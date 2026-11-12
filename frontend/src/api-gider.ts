@@ -218,16 +218,19 @@ export type PartyLedgerResult = {
   // Bakiye bilinmiyorsa null (uydurulmaz).
   balance: number | null;
   currency: string | null;
+  // Sıfır olmayan tüm para birimi bakiyeleri (1'den fazlaysa tek sayı gösterilmez).
+  balances?: { currency: string; balance: number }[];
   total: number;
 };
 
 // Ekstre: ObiHub (yeni çekirdek) carisi okuma modelinden, diğerleri eski /customers/{id}/ledger ucundan.
 export async function getPartyLedgerCompat(
   token: string,
-  party: { id: string; origin: string; source?: string }
+  party: { id: string; origin: string; source?: string },
+  page = 1
 ): Promise<PartyLedgerResult> {
   if (party.origin === "read_model" && party.source === "obihub") {
-    const d = await request<any>(`/accounting/read-model/parties/${encodeURIComponent(party.id)}/ledger?per_page=100&page=1`, { method: "GET" }, token);
+    const d = await request<any>(`/accounting/read-model/parties/${encodeURIComponent(party.id)}/ledger?per_page=100&page=${page}`, { method: "GET" }, token);
     const rows: PartyLedgerRow[] = (Array.isArray(d?.items) ? d.items : []).map((x: any) => {
       const amount = decimalOf(x?.amount) ?? 0;
       return {
@@ -248,8 +251,8 @@ export async function getPartyLedgerCompat(
       total: Number(d?.total ?? rows.length),
     };
   }
-  const res = await getPartyLedger(token, legacyIdOf(party.id));
-  return { rows: res.rows, balance: res.balance, currency: null, total: res.rows.length };
+  const res = await getPartyLedger(token, legacyIdOf(party.id), page);
+  return { rows: res.rows, balance: res.balance, currency: res.currency, balances: res.balances, total: res.total };
 }
 
 // Eski carinin para birimi (okuma modelindeki eski cari satırı para birimi taşımaz). Okunamazsa null.

@@ -837,9 +837,22 @@ export async function getParties(
   return { ...res, summary: (d?.summary || {}) as { total_receivable?: number; total_payable?: number; total_contacts?: number; by_currency?: Record<string, { total_receivable?: number; total_payable?: number }> } };
 }
 
-export async function getPartyLedger(token: string, partyId: string) {
-  const d = await request<any>(`/customers/${encodeURIComponent(partyId)}/ledger`, { method: "GET" }, token);
-  return { rows: (Array.isArray(d?.items) ? d.items : []) as PartyLedgerRow[], balance: Number(d?.balance || 0) };
+// Aşama 4 P3: ekstre sayfalı (en yeni önce; varsayılan 100, en çok 1000). `total > yüklenen` ise sonraki sayfa istenir.
+export async function getPartyLedger(token: string, partyId: string, page = 1, perPage = 100) {
+  const qs = new URLSearchParams({ page: String(page), per_page: String(perPage) });
+  const d = await request<any>(`/customers/${encodeURIComponent(partyId)}/ledger?${qs.toString()}`, { method: "GET" }, token);
+  const rows = (Array.isArray(d?.items) ? d.items : []) as PartyLedgerRow[];
+  const balances = (Array.isArray(d?.balances) ? d.balances : [])
+    .map((b: any) => ({ currency: String(b?.currency || "TRY").toUpperCase(), balance: Number(b?.balance) || 0 }))
+    .filter((b: { balance: number }) => Math.abs(b.balance) > 0.004);
+  return {
+    rows,
+    balance: Number(d?.balance || 0),
+    currency: typeof d?.balance_currency === "string" && d.balance_currency ? d.balance_currency.toUpperCase() : null,
+    balances: balances as { currency: string; balance: number }[],
+    // Eski sunucu sayfalamaz, total göndermez: gelen satırlar tümüdür.
+    total: Number.isFinite(Number(d?.total)) && d?.total != null ? Number(d.total) : rows.length,
+  };
 }
 
 export async function collectPartyPayment(token: string, partyId: string, body: { amount: number; payment_method: string; note?: string; payment_date: string }) {

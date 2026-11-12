@@ -59,6 +59,7 @@ const EXCLUDED_LABELS: Record<string, string> = {
   internal_transfers: "hesaplar arası virmanlar",
   manual_cash_income_invoice_collection_category: "\"fatura tahsilatı\" olarak elle girilen kasa gelirleri",
   pos_not_posted_to_cash: "kasaya işlenmemiş POS satışları",
+  pos_sales_before_cash_posting: "kasaya yazım başlamadan önceki POS satışları",
 };
 
 export function excludedText(keys: string[] | undefined) {

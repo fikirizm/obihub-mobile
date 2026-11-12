@@ -3,8 +3,10 @@
 // Sunucu ekranda gösterilen tutarı 0,01'den fazla sapan satışı reddeder (sessiz düzeltme yok).
 // İşlem anahtarı: her satış denemesine bir anahtar; ağ hatası / 5xx sonrası AYNI anahtar ve AYNI sepetle tekrar.
 // Aynı anahtar + farklı sepet → 409. 200 yanıtı = satış ve stok düşümü tamamlandı.
-// Not: sunucu bugün POS satışını kasaya ya da cariye yazmıyor (Aşama 4); "Açık hesap" bu yüzden mobilde gizli.
-import { request } from "./api";
+// Aşama 4 / P4: satışın ödemesi kasaya yazılır (nakit → varsayılan TL kasa, kart → "pos" türü TL hesap, karma → iki bacak).
+// "Açık hesap" sunucuda henüz kapalı (409 POS_OPEN_ACCOUNT_PENDING); mobilde gizli.
+import { getCashAccounts, request } from "./api";
+import type { CashAccount } from "./types";
 
 export type PosProduct = { id: string; name: string; sku: string; barcode: string; price: number; vatRate: number; stock: number; imageUrl: string };
 
@@ -54,10 +56,25 @@ export function cartTotals(lines: CartLine[], discountAmount: number) {
   return { subtotal: r2(subtotal), discount: r2(discount), vat: r2(vat), total: r2(subtotal - discount), itemCount: lines.reduce((s, l) => s + l.quantity, 0) };
 }
 
-export type PaymentType = "nakit" | "kart";
+export type PaymentType = "nakit" | "kart" | "karma";
 
-export function posPayload(lines: CartLine[], discountAmount: number, payment: PaymentType, paid: number) {
+// Kuruş (tamsayı). Sunucu toplamı kuruşa yarım-yukarı yuvarlar; karma bölmesi kuruşla yapılır (float toplamı değil).
+export const toCents = (n: number) => (Number.isFinite(n) ? Math.round(n * 100 + Math.sign(n) * Number.EPSILON * 100) : 0);
+const fromCents = (c: number) => (c / 100).toFixed(2);
+
+// Karma: kart = toplam − nakit (kuruşta), böylece bölme toplamı her zaman fiş tutarına eşittir.
+export function splitCents(totalCents: number, cashCents: number) {
+  const cash = Math.min(Math.max(cashCents, 0), totalCents);
+  return { cash, card: totalCents - cash };
+}
+
+export type PosPayOptions = { cashCents?: number; cardAccountId?: string };
+
+export function posPayload(lines: CartLine[], discountAmount: number, payment: PaymentType, paid: number, opts: PosPayOptions = {}) {
   const t = cartTotals(lines, discountAmount);
+  const totalCents = toCents(t.total);
+  const split = payment === "karma" ? splitCents(totalCents, opts.cashCents ?? 0) : null;
+  const usesCard = payment === "kart" || (split !== null && split.card > 0);
   return {
     items: lines.map((l) => ({
       product_id: l.product.id,
@@ -78,14 +95,62 @@ export function posPayload(lines: CartLine[], discountAmount: number, payment: P
     total: t.total,
     paid_amount: paid,
     change_amount: r2(Math.max(0, paid - t.total)),
-    notes: "",
+    notes: split ? `Karma ödeme: Nakit ₺${fromCents(split.cash)}, Kart ₺${fromCents(split.card)}` : "",
     session_number: 1,
+    ...(split ? { payments: [{ method: "nakit", amount: fromCents(split.cash) }, { method: "kart", amount: fromCents(split.card) }] } : {}),
+    ...(usesCard && opts.cardAccountId ? { card_account_id: opts.cardAccountId } : {}),
   };
 }
 
-export type PosSale = { id: string; saleNumber: string; total: number; paymentType: string; itemCount: number };
+export type PosCashEntry = { method: string; accountName: string; amount: number };
+export type PosSale = {
+  id: string;
+  saleNumber: string;
+  total: number;
+  paymentType: string;
+  itemCount: number;
+  // posted: kasaya yazıldı · pending: birkaç dakika içinde yazılacak (yeniden gönderilmez) · none: kasa kaydı yok (eski sunucu).
+  cashStatus: "posted" | "pending" | "none";
+  cashEntries: PosCashEntry[];
+  rounded: boolean;
+};
 
 export async function createPosSale(token: string, body: ReturnType<typeof posPayload>, idempotencyKey: string): Promise<PosSale> {
   const d = await request<any>("/pos/sales", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": idempotencyKey } }, token);
-  return { id: String(d?.id || ""), saleNumber: String(d?.sale_number || ""), total: Number(d?.total) || 0, paymentType: String(d?.payment_type || ""), itemCount: Number(d?.item_count) || 0 };
+  const cs = String(d?.cash_status || "none");
+  return {
+    id: String(d?.id || ""),
+    saleNumber: String(d?.sale_number || ""),
+    total: Number(d?.total) || 0,
+    paymentType: String(d?.payment_type || ""),
+    itemCount: Number(d?.item_count) || 0,
+    cashStatus: cs === "posted" || cs === "pending" ? cs : "none",
+    cashEntries: (Array.isArray(d?.cash_entries) ? d.cash_entries : []).map((e: any) => ({
+      method: String(e?.method || ""),
+      accountName: String(e?.account_name || ""),
+      amount: Number(e?.amount) || 0,
+    })),
+    rounded: Array.isArray(d?.warnings) && d.warnings.includes("POS_SPLIT_ROUNDED"),
+  };
+}
+
+// Kart ödemesinin yazılabileceği POS (Kart) hesapları: "pos" türü, TL, etkin. Birden çoksa kart ödemesinde seçim zorunlu (400 POS_CARD_ACCOUNT_REQUIRED).
+export async function getPosCardAccounts(token: string): Promise<CashAccount[]> {
+  const isTry = (c?: string) => ["TRY", "TL", "TRL", ""].includes(String(c ?? "").trim().toUpperCase());
+  return (await getCashAccounts(token)).filter(
+    (a) => a.account_type === "pos" && isTry(a.currency) && a.is_active !== false && a.active !== false && a.archived !== true && a.is_deleted !== true
+  );
+}
+
+// Satışın kasaya nasıl işlendiğinin metni (özet ekranı).
+export function cashPostingText(s: PosSale): string {
+  if (s.cashStatus === "pending") return "Satış tamamlandı. Kasa kaydı birkaç dakika içinde kendiliğinden tamamlanacak; satışı yeniden göndermeyin.";
+  if (s.cashStatus !== "posted") return "";
+  const where = (m: string) => {
+    const e = s.cashEntries.find((x) => x.method === m);
+    return e?.accountName || (m === "kart" ? "POS (Kart)" : "Kasa");
+  };
+  const methods = s.cashEntries.length ? Array.from(new Set(s.cashEntries.map((e) => e.method))) : [s.paymentType === "kart" ? "kart" : "nakit"];
+  if (methods.length > 1) return `Satış kaydedildi, kasaya işlendi: nakit ${where("nakit")}, kart ${where("kart")} hesabına.`;
+  return `Satış kaydedildi, kasaya işlendi: ${methods[0] === "kart" ? "kart" : "nakit"} ${where(methods[0])} hesabına.`;
 }

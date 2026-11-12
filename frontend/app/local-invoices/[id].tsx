@@ -5,7 +5,7 @@ import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { addLocalInvoicePayment, checkLocalInvoiceEdocStatus, getCashAccounts, getLocalInvoice, newIdempotencyKey, officializeLocalInvoice } from "../../src/api";
-import { accountsForCurrency, collectErrorText, deleteLocalInvoice, isInvoiceEditable, isUncertainWrite, sendKeyedMoney } from "../../src/api-finans";
+import { accountOptionLabel, accountsForCurrency, collectErrorText, deleteLocalInvoice, isInvoiceEditable, isUncertainWrite, sendKeyedMoney } from "../../src/api-finans";
 import { invoiceStatus, isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
@@ -165,7 +165,8 @@ export default function LocalInvoiceDetailScreen() {
   const canOfficialize =
     mayWrite && parasutConnected === true && !inv.parasut_invoice_id && inv.status !== "resmilesti" && !isCancelled;
   // Aşama 4 P6: e-belge tutarı Paraşüt'le uyuşmadığında (blocked_mismatch) sunucu tahsilatı 409 ile reddeder; düğme gizlenir.
-  const canCollect = mayWrite && !isCancelled && remaining > 0.004 && inv?.edoc_state !== "blocked_mismatch";
+  // İade faturasına tahsilat alınmaz (sunucu 409 INVOICE_IS_REFUND).
+  const canCollect = mayWrite && !isCancelled && inv?.money_state !== "refund" && remaining > 0.004 && inv?.edoc_state !== "blocked_mismatch";
 
   const onOfficialize = async () => {
     if (!token) return;
@@ -225,7 +226,7 @@ export default function LocalInvoiceDetailScreen() {
       decimal: true,
       noteLabel: "Not (isteğe bağlı)",
       methods: [...PAYMENT_METHODS],
-      accounts: usable.map((a) => ({ value: a.id, label: a.is_default && usable.length > 1 ? `${a.name} (varsayılan)` : a.name })),
+      accounts: usable.map((a) => ({ value: a.id, label: accountOptionLabel(a, usable.length > 1) })),
       accountsLabel: usable.length > 0 ? "Hesap" : undefined,
     });
     if (!entry || entry.amount <= 0) return;

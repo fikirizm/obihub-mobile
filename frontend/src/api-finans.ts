@@ -38,6 +38,8 @@ export function collectErrorText(e: any, uncertain: boolean): string {
   const code = String(e?.code || "");
   if (code === "MONEY_PENDING") return "Tahsilat kaydı tamamlanıyor; birkaç dakika içinde kendiliğinden tamamlanır. Yeniden göndermeyin.";
   if (code === "MONEY_PARTIAL") return e?.message || "İşlem yarım kaldı. Yeniden göndermeden önce kasa hareketlerini kontrol edin.";
+  if (code === "ACCOUNT_INACTIVE") return "Seçilen hesap pasif. Başka bir hesap seçin.";
+  if (code === "INVOICE_IS_REFUND") return "İade faturasına tahsilat alınamaz.";
   if (uncertain) return "Tahsilatın kaydedilip kaydedilmediği bilinmiyor. Tekrar eklemeden önce hareketleri yenileyip kontrol edin.";
   if (e?.message) return String(e.message);
   if (code === "ACCOUNT_REQUIRED") return "Bu para biriminde birden çok hesap var; tahsilatın yazılacağı hesabı seçin.";
@@ -45,17 +47,28 @@ export function collectErrorText(e: any, uncertain: boolean): string {
   return "Tahsilat kaydedilemedi.";
 }
 
-// Tahsilatın yazılacağı hesap seçenekleri: işlemin para birimindeki hesaplar, varsayılan önce (sunucu kuralıyla aynı sıra).
+// Pasif hesap (Aşama 4 P3): sunucu otomatik seçmez; açıkça verilirse 409 ACCOUNT_INACTIVE.
+export function isAccountInactive(a: CashAccount) {
+  return a.is_active === false || a.active === false || a.archived === true || a.is_deleted === true;
+}
+export const isPosAccount = (a: CashAccount) => String(a.account_type || "") === "pos";
+
+// Tahsilatın yazılacağı hesap seçenekleri: işlemin para birimindeki etkin hesaplar; varsayılan önce, POS (Kart) en sonda
+// (sunucu POS'u otomatik seçmez, açıkça seçilirse kabul eder).
 export function accountsForCurrency(accounts: CashAccount[], currency: string) {
   const norm = (c?: string | null) => {
     const v = String(c || "TRY").toUpperCase();
     return v === "TRL" || v === "TL" ? "TRY" : v;
   };
   const cur = norm(currency);
-  return accounts
-    // Sunucu (resolve_account) pasif bayrağına bakmaz; aynı kural için süzülmez.
-    .filter((a) => norm(a.currency) === cur)
-    .sort((a, b) => Number(Boolean(b.is_default)) - Number(Boolean(a.is_default)));
+  const rank = (a: CashAccount) => (isPosAccount(a) ? 2 : a.is_default ? 0 : 1);
+  return accounts.filter((a) => norm(a.currency) === cur && !isAccountInactive(a)).sort((a, b) => rank(a) - rank(b));
+}
+
+// Hesap seçicideki etiket: POS hesabı "POS" ile, birden çok seçenekte varsayılan "(varsayılan)" ile işaretlenir.
+export function accountOptionLabel(a: CashAccount, many: boolean) {
+  if (isPosAccount(a)) return /pos/i.test(a.name) ? `${a.name} · kart` : `${a.name} (POS)`;
+  return a.is_default && many ? `${a.name} (varsayılan)` : a.name;
 }
 
 // ---------------------------------------------------------------------------
@@ -304,6 +317,15 @@ export async function updateParty(token: string, id: string, input: Omit<PartyCr
 // Yumuşak silme: cari listeden kalkar, hareketleri korunur.
 export async function deleteParty(token: string, id: string) {
   return request<{ ok?: boolean }>(`/customers/${encodeURIComponent(id)}`, { method: "DELETE" }, token);
+}
+
+// Silme hatasının metni (Aşama 4 P3: bakiyesi olan cari 409 CUSTOMER_HAS_BALANCE). Sunucu metni varsa o gösterilir.
+export function deletePartyErrorText(e: any) {
+  if (e?.code === "CUSTOMER_HAS_BALANCE") {
+    const m = typeof e?.message === "string" && !/^Sunucu hatası/.test(e.message) && e.message !== "CUSTOMER_HAS_BALANCE" ? e.message : "";
+    return m || "Bu carinin bakiyesi var; bakiye kapanmadan silinemez.";
+  }
+  return e?.message || "Cari silinemedi.";
 }
 
 export type PartyOrder = { id: string; channel_order_id: string; channel: string; status: string; total_amount: number; currency: string; order_date: string };

@@ -326,6 +326,10 @@ export type CashAccount = {
   bank_name?: string;
   iban?: string;
   is_default?: boolean;
+  is_active?: boolean;
+  active?: boolean;
+  archived?: boolean;
+  is_deleted?: boolean;
 };
 
 export type CashEntry = {
@@ -354,7 +358,7 @@ export type Party = {
   contact_role?: string;
 };
 
-export type PartyLedgerRow = { id: string; date?: string; description?: string; reference?: string; debit?: number; credit?: number; balance?: number };
+export type PartyLedgerRow = { id: string; date?: string; description?: string; reference?: string; debit?: number; credit?: number; balance?: number; currency?: string; reversed?: boolean; due_date?: string };
 
 export type LocalInvoice = {
   id: string;
