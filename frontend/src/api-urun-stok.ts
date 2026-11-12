@@ -57,7 +57,8 @@ export async function getStockMovements(
   skip = 0,
   limit = STOCK_MOVEMENTS_PAGE
 ): Promise<{ items: StockMovement[]; hasMore: boolean }> {
-  const qs = `product_id=${encodeURIComponent(productId)}&limit=${limit + 1}&skip=${skip}`;
+  // productId boşsa firmanın tüm hareketleri (web Stok sayfası).
+  const qs = `${productId ? `product_id=${encodeURIComponent(productId)}&` : ""}limit=${limit + 1}&skip=${skip}`;
   const rows = await request<any>(`/stock/movements?${qs}`, {}, token);
   const list: StockMovement[] = (Array.isArray(rows) ? rows : []).map((m: any, i: number) => ({
     id: String(m?.id || `${skip + i}`),
@@ -290,4 +291,16 @@ export async function linkProductParasut(token: string, productId: string, paras
 
 export async function unlinkProductParasut(token: string, productId: string) {
   return request<{ success?: boolean; message?: string }>(`/products/${encodeURIComponent(productId)}/unlink-parasut`, { method: "POST" }, token);
+}
+
+
+// ---- Dalga 2 / B2: stok özeti (web StockPage: GET /stock/summary → totals) ----
+export type StockTotals = { products: number; sellable: number; reserved: number; onHand: number };
+
+export async function getStockSummary(token: string): Promise<StockTotals | null> {
+  const r = await request<any>("/stock/summary", {}, token);
+  const t = r?.totals;
+  if (!t || typeof t !== "object") return null;
+  const n = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  return { products: n(t.products), sellable: n(t.sellable), reserved: n(t.reserved), onHand: n(t.on_hand) };
 }

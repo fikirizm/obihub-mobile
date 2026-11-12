@@ -18,6 +18,7 @@ import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatTry } from "../../src/utils";
 import { PackageIcon, Path, SearchIcon, Svg } from "../../src/components/Icons";
 import { AccountingDifferences } from "../../src/components/AccountingDifferences";
+import { StockOverview } from "../../src/components/StockOverview";
 import { EmptyState } from "../../src/components/EmptyState";
 import { PressableScale } from "../../src/components/KPICard";
 import {
@@ -315,6 +316,8 @@ export default function ProductsScreen() {
                   onChanged={() => fetchPage(1, "refresh")}
                 />
               ) : null}
+              {/* Web "Stok" sayfası: toplamlar ve son hareketler, yalnız tüm ürünler görünümünde. */}
+              {!lowOnly && !debounced ? <StockOverview /> : null}
               {lowOnly && products.length > 0 ? (
                 <View style={styles.resultHead}>
                   <SearchIcon size={14} color={colors.textTertiary} />

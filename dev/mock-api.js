@@ -328,10 +328,24 @@ http
       });
       return;
     }
+    if (req.method === "GET" && path === "/stock/summary") {
+      const tot = products.reduce((t, p) => { const r = p.id === "p2" ? 2 : 0; t.products++; t.sellable += p.stock; t.reserved += r; t.on_hand += p.stock + r; return t; }, { products: 0, sellable: 0, reserved: 0, on_hand: 0 });
+      return send(res, 200, { items: [], totals: tot });
+    }
     if (req.method === "GET" && path === "/stock/movements") {
       const pid = url.searchParams.get("product_id") || "";
       const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit") || 100)));
       const skip = Math.max(0, Number(url.searchParams.get("skip") || 0));
+      if (!pid) {
+        // Tüm ürünler (Ürünler ekranındaki "Son stok hareketleri"): ürünler arasında dönen 35 hareket.
+        const kinds = [["in", "Mal kabul"], ["sale", "POS satışı"], ["accounting_sync", "Muhasebe senkronu"], ["out", "Trendyol siparişi"], ["purchase_in", "Alış faturası"]];
+        const rows = Array.from({ length: 35 }, (_, i) => ({
+          id: `sm-all-${i}`, user_id: "u1", product_id: `p${(i % 9) + 1}`, movement_type: kinds[i % 5][0], quantity: kinds[i % 5][0] === "sale" ? -(1 + (i % 3)) : 1 + ((i * 3) % 12),
+          delta: kinds[i % 5][0] === "accounting_sync" ? (i % 2 ? 4 : -2) : null,
+          reason: kinds[i % 5][1], reference_id: null, created_at: new Date(Date.now() - i * 3600000).toISOString(),
+        }));
+        return send(res, 200, rows.slice(skip, skip + limit));
+      }
       const n = Number(pid.replace(/\D/g, "")) || 0;
       // Ürüne göre değişen sayıda satır: p3 → boş, diğerleri 4–45 hareket.
       const count = n % 3 === 0 ? 0 : 4 + ((n * 13) % 42);

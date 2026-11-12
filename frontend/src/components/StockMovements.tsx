@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
-import { getStockMovements, type StockMovement } from "../api-urun-stok";
+import { getProductIdentity, getStockMovements, type StockMovement } from "../api-urun-stok";
+import { recallProduct } from "../catalogCache";
+import { PressableScale } from "./KPICard";
 import { useTheme } from "../theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../theme/tokens";
 import { Button } from "../ui/Button";
@@ -16,8 +18,27 @@ function formatWhen(value: string) {
 }
 
 // Ürün detayındaki "Stok hareketleri" bölümü. `refreshKey` değişince ilk sayfa yeniden okunur.
-export function StockMovements({ token, productId, refreshKey }: { token: string | null | undefined; productId: string; refreshKey: number }) {
+// productId boşsa tüm ürünlerin hareketleri gösterilir (Ürünler ekranı): satırda ürün adı, dokununca ürün detayı.
+export function StockMovements({
+  token,
+  productId,
+  refreshKey,
+  title = "Stok hareketleri",
+  pageSize,
+  onOpenProduct,
+}: {
+  token: string | null | undefined;
+  productId: string;
+  refreshKey: number;
+  title?: string;
+  pageSize?: number;
+  onOpenProduct?: (productId: string) => void;
+}) {
   const { colors } = useTheme();
+  const all = !productId;
+  // Hareket satırları ürün adı taşımaz: önce katalog önbelleği, yoksa ürün ucu (yalnız tüm-ürün görünümünde).
+  const [names, setNames] = useState<Record<string, string>>({});
+  const asked = useRef(new Set<string>());
   const [items, setItems] = useState<StockMovement[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -27,10 +48,10 @@ export function StockMovements({ token, productId, refreshKey }: { token: string
   const seq = useRef(0);
 
   const loadFirst = useCallback(async () => {
-    if (!token || !productId) return;
+    if (!token || (!productId && !all)) return;
     const mine = ++seq.current;
     try {
-      const res = await getStockMovements(token, productId, 0);
+      const res = await getStockMovements(token, productId, 0, pageSize);
       if (mine !== seq.current) return;
       setItems(res.items);
       setHasMore(res.hasMore);
@@ -41,7 +62,7 @@ export function StockMovements({ token, productId, refreshKey }: { token: string
       // Ekranda eski satırlar varsa korunur; yoksa hata durumu gösterilir.
       setState((s) => (s === "ready" ? "ready" : "error"));
     }
-  }, [token, productId]);
+  }, [token, productId, all, pageSize]);
 
   useEffect(() => {
     loadFirst();
@@ -53,7 +74,7 @@ export function StockMovements({ token, productId, refreshKey }: { token: string
     setLoadingMore(true);
     setMoreError(false);
     try {
-      const res = await getStockMovements(token, productId, items.length);
+      const res = await getStockMovements(token, productId, items.length, pageSize);
       if (mine !== seq.current) return;
       setItems((prev) => {
         const seen = new Set(prev.map((m) => m.id));
@@ -66,6 +87,27 @@ export function StockMovements({ token, productId, refreshKey }: { token: string
       setLoadingMore(false);
     }
   };
+
+  useEffect(() => {
+    if (!all || !token) return;
+    const missing = Array.from(new Set(items.map((m) => m.product_id))).filter((pid) => pid && !names[pid] && !asked.current.has(pid));
+    if (missing.length === 0) return;
+    const known: Record<string, string> = {};
+    const fetchIds: string[] = [];
+    for (const pid of missing) {
+      asked.current.add(pid);
+      const cached = recallProduct(pid);
+      if (cached?.name) known[pid] = cached.name;
+      else fetchIds.push(pid);
+    }
+    if (Object.keys(known).length) setNames((prev) => ({ ...prev, ...known }));
+    // Bir sayfada en çok birkaç ürün ucuna gidilir; okunamayan ürün "Ürün" olarak kalır.
+    fetchIds.slice(0, 12).forEach((pid) => {
+      getProductIdentity(token, pid)
+        .then((p) => p.name && setNames((prev) => ({ ...prev, [pid]: p.name })))
+        .catch(() => {});
+    });
+  }, [all, token, items, names]);
 
   // "sale" (POS satışı) sunucuda eksi miktarla yazılır; çıkış olarak gösterilir. "opening" yeni ürünün ilk stoğudur.
   // "accounting_sync" (muhasebe senkronu) ve "reconcile" (Muhasebe farkları'nda "Farkı al") miktarı işaretsiz değişimdir; yön yalnız `delta` gelirse bilinir,
@@ -94,7 +136,7 @@ export function StockMovements({ token, productId, refreshKey }: { token: string
   return (
     <View testID="stock-movements">
       <SectionTitle
-        title="Stok hareketleri"
+        title={title}
         action={
           state === "ready" && items.length > 0 ? (
             <Text style={[type.caption, tabular, { color: colors.textTertiary }]}>{hasMore ? `Son ${items.length} hareket` : `${items.length} hareket`}</Text>
@@ -122,18 +164,24 @@ export function StockMovements({ token, productId, refreshKey }: { token: string
           </View>
         ) : items.length === 0 ? (
           <View style={styles.center} testID="stock-movements-empty">
-            <Text style={[type.footnote, { color: colors.textSecondary, textAlign: "center" }]}>Bu ürün için henüz stok hareketi yok.</Text>
+            <Text style={[type.footnote, { color: colors.textSecondary, textAlign: "center" }]}>
+              {all ? "Henüz stok hareketi yok." : "Bu ürün için henüz stok hareketi yok."}
+            </Text>
           </View>
         ) : (
           <>
             {items.map((m, i) => {
               const k = look(m.movement_type, m.quantity, m.delta);
+              const productName = all ? names[m.product_id] || "Ürün" : "";
+              const Row: any = all && onOpenProduct ? PressableScale : View;
               return (
-                <View
+                <Row
                   key={m.id}
                   testID={`stock-movement-${m.id}`}
                   accessible
-                  accessibilityLabel={`${k.label}, ${k.sign}${shown(m)} adet,${m.reason || "Açıklama yok"}, ${formatWhen(m.created_at)}`}
+                  accessibilityRole={all && onOpenProduct ? "button" : undefined}
+                  onPress={all && onOpenProduct ? () => onOpenProduct(m.product_id) : undefined}
+                  accessibilityLabel={`${all ? `${productName}, ` : ""}${k.label}, ${k.sign}${shown(m)} adet,${m.reason || "Açıklama yok"}, ${formatWhen(m.created_at)}`}
                   style={[styles.row, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
                 >
                   <View style={[styles.stripe, { backgroundColor: k.fg }]} />
@@ -142,10 +190,10 @@ export function StockMovements({ token, productId, refreshKey }: { token: string
                   </View>
                   <View style={styles.body}>
                     <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={2}>
-                      {m.reason || k.label}
+                      {all ? productName : m.reason || k.label}
                     </Text>
                     <Text style={[type.caption, tabular, { color: colors.textTertiary, marginTop: 2 }]} numberOfLines={1}>
-                      {`${k.label} · ${formatWhen(m.created_at)}`}
+                      {all ? [m.reason && m.reason !== k.label ? m.reason : k.label, formatWhen(m.created_at)].join(" · ") : `${k.label} · ${formatWhen(m.created_at)}`}
                     </Text>
                   </View>
                   <View style={[styles.pill, { backgroundColor: k.bg }]}>
@@ -153,7 +201,7 @@ export function StockMovements({ token, productId, refreshKey }: { token: string
                       {`${k.sign}${shown(m)}`}
                     </Text>
                   </View>
-                </View>
+                </Row>
               );
             })}
             {hasMore ? (
