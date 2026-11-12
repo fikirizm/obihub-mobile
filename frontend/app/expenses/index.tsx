@@ -12,15 +12,17 @@ import {
   NO_CAPS,
   type ExpensePaymentFilter,
 } from "../../src/api-gider";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { usePagedList } from "../../src/hooks/usePagedList";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney } from "../../src/utils";
-import { AlertIcon, DownloadIcon } from "../../src/components/Icons";
+import { AlertIcon, DownloadIcon, PlusIcon } from "../../src/components/Icons";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { Chip, ChipRow } from "../../src/ui/Chip";
 import { StackHeader } from "../../src/ui/Header";
+import { Button } from "../../src/ui/Button";
+import { canManage } from "../../src/auth/permissions";
 import { ListBody } from "../../src/ui/ListBody";
 import { IconTile } from "../../src/ui/ListRow";
 import { RowCard, StatCard } from "../../src/ui/RowCard";
@@ -43,7 +45,7 @@ const FILTERS: [ExpensePaymentFilter, string][] = [
 // Web ExpenseInvoiceDetail.jsx PAY tablosu.
 
 export default function ExpensesScreen() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { colors } = useTheme();
   const [tab, setTab] = useState<Tab>("obihub");
   const [payment, setPayment] = useState<ExpensePaymentFilter>("");
@@ -68,6 +70,18 @@ export default function ExpensesScreen() {
     [token, payment]
   );
   const ledger = usePagedList<ExpenseLedgerRow>(token && tab === "obihub" ? fetchLedger : null);
+  // Detay/ödeme ya da yeni kayıt ekranından dönüldüğünde yüklü sayfalar ve özet sessizce tazelenir.
+  const focusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (focusedOnce.current && tab === "obihub") {
+        ledger.refreshLoaded();
+        if (token) getExpenseSummary(token).then(setSummary).catch(() => undefined);
+      }
+      focusedOnce.current = true;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tab, token])
+  );
 
   // Yetenekler ve ayar: ilk başarılı listeden sonra bir kez (web ile aynı); okunamazsa kapalı / varsayılan açık.
   useEffect(() => {
@@ -146,6 +160,8 @@ export default function ExpensesScreen() {
     );
   }
 
+  // Web ExpenseInvoicesPage canWrite: modül açık ve elle giriş yeteneği; mobilde fatura yönetme izni de aranır.
+  const canAdd = moduleOn && caps.manualEntry === true && canManage(user, "billing");
   const header = (
     <View>
       {!moduleOn ? note("ObiHub ön muhasebesi kapalı. Mevcut kayıtlar yalnız görüntülenir; Ayarlar'dan yeniden açabilirsiniz.", "warning") : null}
@@ -155,7 +171,12 @@ export default function ExpensesScreen() {
           <StatCard label={`Gecikmiş · ${c.currency}`} value={formatMoney(c.overdue, c.currency)} tone={c.overdue > 0 ? "error" : undefined} />
         </View>
       ))}
-      {note("Gider eklemek, ödeme kaydetmek ve kategorileri yönetmek için web panelini kullanın.")}
+      {canAdd ? (
+        <View style={{ marginBottom: spacing.sm }}>
+          <Button testID="expenses-new" label="Gider / alış faturası ekle" icon={<PlusIcon size={18} color="#FFFFFF" />} onPress={() => router.push("/expenses/new")} />
+        </View>
+      ) : null}
+      {note("Satıra dokunarak ayrıntıyı açın ve ödeme ekleyin. Gider kategorilerini web panelinden yönetin.")}
     </View>
   );
 

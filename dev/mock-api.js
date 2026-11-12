@@ -508,7 +508,7 @@ http
     }
     // Web eşitleme (src/api-gider.ts): yetenekler, gider ayarı, ObiHub gider defteri. Okuma modeli ve gelen kutusu 404 → eski uçlara düşüş.
     if (path === "/ui-capabilities")
-      return send(res, 200, { version: 1, capabilities: { obihub_os: false, inbox_read: false, payable_payment: true, expense_ledger: true, expense_manual_entry: true, manual_entry_reason: null, parasut_connected: true, parasut_expense_view: true }, workspace_scope: null });
+      return send(res, 200, { version: 1, capabilities: { obihub_os: false, inbox_read: false, payable_payment: true, expense_ledger: true, expense_manual_entry: true, manual_entry_reason: null, parasut_connected: true, parasut_expense_view: true, inventory_owner: { owner: "obihub", program: "bizimhesap" } }, workspace_scope: null });
     if (path === "/accounting/expense-settings") return send(res, 200, { expense_module_enabled: true, parasut_expense_view_enabled: true, parasut_connected: true });
     if (path === "/accounting/expense-invoices/summary") return send(res, 200, { currencies: [{ currency: "TRY", payable: "9400.00", overdue: "1250.50" }] });
     // --- Dalga 3 / C2: gider detayı ve borç ödeme. e1 ödenebilir, e2'de ikinci ödeme 409 PAYMENT_EXCEEDS_OUTSTANDING denenir.
@@ -549,6 +549,41 @@ http
         const acc = accounts.find((x) => x.id === b.account_id);
         ex.payments.push({ id: "pp" + ex.payments.length, date: b.date, amount: Number(b.amount).toFixed(2), currency: "TRY", account_name: acc ? acc.name : "", status: "completed" });
         send(res, 201, view());
+      });
+      return;
+    }
+    // --- Dalga 3 / C3: elle alış/gider faturası
+    if (path === "/accounting/expense-categories") return send(res, 200, { items: [{ id: "c1", name: "Kargo giderleri" }, { id: "c2", name: "Ofis giderleri" }, { id: "c3", name: "Arşiv", active: false }] });
+    if (req.method === "GET" && path === "/products" && url.searchParams.get("search")) {
+      const q = url.searchParams.get("search").toLocaleLowerCase("tr-TR");
+      return send(res, 200, products.filter((p) => [p.name, p.sku, p.barcode].some((v) => v.toLocaleLowerCase("tr-TR").includes(q))).slice(0, Number(url.searchParams.get("limit") || 8)).map((p) => ({ id: p.id, name: p.name, sku: p.sku })));
+    }
+    if (req.method === "POST" && path === "/accounting/manual-purchases/preview") {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        const b = JSON.parse(raw || "{}");
+        let taxable = 0, vat = 0;
+        for (const l of b.lines || []) { const net = Number(l.quantity) * Number(l.unit_price) - Number(l.discount || 0); taxable += net; vat += net * Number(l.vat_rate) / 100; }
+        const hasProduct = (b.lines || []).some((l) => l.kind === "product");
+        const dup = String(b.document_number || "").toUpperCase() === "DUP-1";
+        send(res, 200, {
+          draft_id: b.draft_id || "d1", can_confirm: !dup, decision_digest: "dg-" + Math.round(taxable * 100),
+          totals: { taxable: taxable.toFixed(2), vat: vat.toFixed(2), withholding: "0.00", other_taxes: "0.00", payable: (taxable + vat).toFixed(2) },
+          blocker_items: dup ? [{ key: "DUPLICATE_MANUAL_DOCUMENT", detail: "Bu belge numarasıyla kayıtlı bir gider faturası var." }] : [],
+          review_items: [],
+          ...(hasProduct ? { stock: { owner: "obihub", entry: true, warehouse_id: "w1", warehouses: [{ id: "w1", name: "Ana depo" }, { id: "w2", name: "Mağaza" }] } } : {}),
+        });
+      });
+      return;
+    }
+    if (req.method === "POST" && /^\/accounting\/manual-purchases\/[^/]+\/confirm$/.test(path)) {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        console.log("WRITE", path, raw);
+        expenseState["obihub:m1"] = { supplier: "Elle girilen tedarikçi", doc: "M-1", kind: "manual", total: "120.00", remaining: 120, levies: "0", status: "pending", payments: [], seenKeys: [] };
+        send(res, 200, { status: "APPLIED", result: { invoice_id: "m1", payable_ref: "obihub:m1" } });
       });
       return;
     }

@@ -447,6 +447,8 @@ export type UiCapabilities = {
   parasutView: boolean;
   parasutConnected: boolean;
   payablePayment: boolean;
+  // Aşama 3 P3: stok sahibi (obihub | accounting) ve program; okunamazsa null.
+  inventoryOwner: { owner: "obihub" | "accounting"; program: string | null } | null;
 };
 
 // GET /accounting/expense-invoices satırı (backend domain/accounting/read_model.py PurchaseInvoiceItem.to_dict).

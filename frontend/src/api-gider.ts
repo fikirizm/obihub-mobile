@@ -37,6 +37,7 @@ export const NO_CAPS: UiCapabilities = {
   parasutView: false,
   parasutConnected: false,
   payablePayment: false,
+  inventoryOwner: null,
 };
 
 export function parseUiCapabilities(raw: unknown): UiCapabilities {
@@ -51,6 +52,11 @@ export function parseUiCapabilities(raw: unknown): UiCapabilities {
     parasutView: on("parasut_expense_view"),
     parasutConnected: on("parasut_connected"),
     payablePayment: on("payable_payment"),
+    inventoryOwner: (() => {
+      const io = c.inventory_owner as { owner?: unknown; program?: unknown } | null | undefined;
+      if (!io || (io.owner !== "obihub" && io.owner !== "accounting")) return null;
+      return { owner: io.owner, program: typeof io.program === "string" ? io.program : null };
+    })(),
   };
 }
 
@@ -442,3 +448,178 @@ export const EXPENSE_PAY: Record<string, { label: string; kind: "info" | "error"
   reversed: { label: "Geri alındı", kind: "neutral" },
 };
 export const EXPENSE_SOURCE: Record<string, string> = { import: "İçeri alınan", manual: "Elle girilen", legacy: "Eski kayıt" };
+
+// ---- Dalga 3 / C3: elle alış/gider faturası (web: components/expenses/ManualExpenseForm.jsx) ----
+
+export type ManualLineInput = {
+  kind: "service" | "product";
+  productId: string;
+  productName: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  vatRate: string;
+  discount: string;
+};
+
+export type ManualForm = {
+  supplierMode: "existing" | "new";
+  partyId: string;
+  name: string;
+  taxId: string;
+  documentNumber: string;
+  issueDate: string;
+  dueDate: string;
+  categoryId: string;
+  lines: ManualLineInput[];
+  warehouseId: string;
+};
+
+// "1.250,50" / "1250.5" → "1250.50" benzeri düz ondalık dize (en çok `maxDecimals` hane); geçersizse null. Float'a çevrilmez.
+export function decimalText(text: string, maxDecimals: number): string | null {
+  const raw = String(text || "").trim();
+  if (!raw) return null;
+  let n = raw;
+  if (n.includes(",")) n = n.replace(/\./g, "").replace(",", ".");
+  else if (!new RegExp(`^\\d+\\.\\d{1,${maxDecimals}}$`).test(n)) n = n.replace(/\./g, "");
+  if (!new RegExp(`^\\d+(\\.\\d{1,${maxDecimals}})?$`).test(n)) return null;
+  const [w, f = ""] = n.split(".");
+  return f ? `${String(Number(w))}.${f}` : String(Number(w));
+}
+
+// Form → sunucu gövdesi; eksik ya da bozuksa { body: null, problems }. Web buildPayload ile aynı kurallar
+// (mobilde tevkifat ve KDV dışı vergi girişi yok; bu faturalar web'den girilir).
+export function buildManualPayload(f: ManualForm): { body: Record<string, unknown> | null; problems: string[] } {
+  const problems: string[] = [];
+  const supplier =
+    f.supplierMode === "existing"
+      ? f.partyId
+        ? { party_id: f.partyId }
+        : null
+      : f.name.trim() && (!f.taxId.trim() || /^(\d{10}|\d{11})$/.test(f.taxId.trim()))
+        ? { name: f.name.trim(), ...(f.taxId.trim() ? { tax_id: f.taxId.trim() } : {}) }
+        : null;
+  if (!supplier) problems.push("supplier");
+  if (!f.documentNumber.trim()) problems.push("documentNumber");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f.issueDate)) problems.push("issueDate");
+  if (f.dueDate && (!/^\d{4}-\d{2}-\d{2}$/.test(f.dueDate) || f.dueDate < f.issueDate)) problems.push("dueDate");
+  const lines = f.lines.map((l) => {
+    const quantity = decimalText(l.quantity, 4);
+    const unit_price = decimalText(l.unitPrice, 2);
+    const discount = l.discount.trim() ? decimalText(l.discount, 2) : undefined;
+    if (!l.description.trim() || !quantity || Number(quantity) <= 0 || unit_price === null || discount === null) return null;
+    const product = l.kind === "product";
+    if (product && !l.productId) {
+      problems.push("product");
+      return undefined;
+    }
+    if (product && !/^\d+$/.test(quantity)) {
+      problems.push("productQuantity");
+      return undefined;
+    }
+    return {
+      description: l.description.trim(),
+      quantity,
+      unit_price,
+      vat_rate: l.vatRate,
+      ...(discount ? { discount } : {}),
+      ...(product ? { kind: "product", product_id: l.productId } : {}),
+    };
+  });
+  if (!lines.length || lines.some((l) => l === null)) problems.push("lines");
+  if (problems.length) return { body: null, problems };
+  const hasProduct = lines.some((l) => (l as { kind?: string })?.kind === "product");
+  return {
+    body: {
+      supplier,
+      document_number: f.documentNumber.trim(),
+      issue_date: f.issueDate,
+      ...(f.dueDate ? { due_date: f.dueDate } : {}),
+      currency: "TRY",
+      ...(f.categoryId ? { expense_category_id: f.categoryId } : {}),
+      lines,
+      other_taxes: [],
+      ...(hasProduct && f.warehouseId ? { warehouse_id: f.warehouseId } : {}),
+    },
+    problems,
+  };
+}
+
+export type ManualPreview = {
+  draftId: string;
+  canConfirm: boolean;
+  decisionDigest: string;
+  totals: { taxable: string; vat: string; withholding: string; other_taxes: string; payable: string } | null;
+  blockers: string[];
+  reviews: string[];
+  stock: { entry: boolean; warehouseId: string; warehouses: { id: string; name: string }[] } | null;
+};
+
+const itemText = (it: any) => String(it?.detail || it?.text || it?.message || "Bu madde kontrol edilmeli.");
+
+export async function previewManualPurchase(token: string, body: Record<string, unknown>, draftId: string | null): Promise<ManualPreview> {
+  const d = await request<any>(
+    "/accounting/manual-purchases/preview",
+    { method: "POST", body: JSON.stringify({ ...body, ...(draftId ? { draft_id: draftId } : {}) }) },
+    token
+  );
+  const t = d?.totals;
+  const st = d?.stock && typeof d.stock === "object" ? d.stock : null;
+  return {
+    draftId: String(d?.draft_id || draftId || ""),
+    canConfirm: d?.can_confirm === true,
+    decisionDigest: String(d?.decision_digest || ""),
+    totals: t
+      ? { taxable: String(t.taxable ?? "0"), vat: String(t.vat ?? "0"), withholding: String(t.withholding ?? "0"), other_taxes: String(t.other_taxes ?? "0"), payable: String(t.payable ?? "0") }
+      : null,
+    blockers: (Array.isArray(d?.blocker_items) ? d.blocker_items : []).map(itemText),
+    reviews: (Array.isArray(d?.review_items) ? d.review_items : []).map(itemText),
+    stock: st
+      ? {
+          entry: st.entry === true,
+          warehouseId: String(st.warehouse_id || ""),
+          warehouses: (Array.isArray(st.warehouses) ? st.warehouses : []).map((w: any) => ({ id: String(w?.id || ""), name: String(w?.name || "Depo") })).filter((w: any) => w.id),
+        }
+      : null,
+  };
+}
+
+// → {status: APPLIED | IN_PROGRESS | NEEDS_REVIEW | REJECTED, result?: {payable_ref, invoice_id}, detail?}
+export async function confirmManualPurchase(token: string, draftId: string, decisionDigest: string, idempotencyKey: string) {
+  return request<any>(
+    `/accounting/manual-purchases/${encodeURIComponent(draftId)}/confirm`,
+    { method: "POST", body: JSON.stringify({ decision_digest: decisionDigest, idempotency_key: idempotencyKey }) },
+    token
+  );
+}
+
+export async function getExpenseCategories(token: string): Promise<{ id: string; name: string }[]> {
+  const d = await request<any>("/accounting/expense-categories", { method: "GET" }, token);
+  return (Array.isArray(d?.items) ? d.items : []).filter((c: any) => c?.id && c.active !== false).map((c: any) => ({ id: String(c.id), name: String(c.name || "Kategori") }));
+}
+
+// Yalnız ObiHub tedarikçileri (web useLookups). Okuma servisi yoksa boş liste: "Yeni tedarikçi" ile devam edilir.
+export async function getSupplierParties(token: string): Promise<{ id: string; name: string }[]> {
+  try {
+    const d = await request<any>("/accounting/read-model/parties?role=supplier&per_page=100", { method: "GET" }, token);
+    return (Array.isArray(d?.items) ? d.items : [])
+      .filter((p: any) => p?.id && p.name && (p.source === undefined || p.source === "obihub"))
+      .map((p: any) => ({ id: String(p.id).replace(/^obihub:/, ""), name: String(p.name) }));
+  } catch {
+    return [];
+  }
+}
+
+// GET /products?search&limit → düz dizi (ad / SKU / barkod; silinmiş hariç).
+export async function searchProducts(token: string, term: string, limit = 8): Promise<{ id: string; name: string; sku: string }[]> {
+  const qs = new URLSearchParams({ search: term.trim(), limit: String(limit) });
+  const d = await request<any>(`/products?${qs.toString()}`, { method: "GET" }, token);
+  return (Array.isArray(d) ? d : []).filter((p: any) => p?.id && p.name && p.deleted !== true).slice(0, limit).map((p: any) => ({ id: String(p.id), name: String(p.name), sku: String(p.sku || "") }));
+}
+
+// Web expenseText.errorText: Türkçe cümleyse sunucu metni, değilse yedek metin.
+export function manualErrorText(e: any, fallback = "İşlem tamamlanamadı. Lütfen tekrar deneyin."): string {
+  if (Number(e?.status) === 429) return "Çok sık deneme yapıldı; biraz bekleyip yeniden deneyin.";
+  const m = typeof e?.message === "string" ? e.message.trim() : "";
+  return /[ığüşöçİĞÜŞÖÇ]|[.!?]$/.test(m) && m.length < 240 && !/^Request failed|^Network|status code/i.test(m) ? m : fallback;
+}
