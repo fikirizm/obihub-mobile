@@ -83,9 +83,11 @@ const parties = [
   { id: "e:ayse@example.test", name: "Ayşe Yılmaz", source: "orders", balance: 0, payments: [] },
 ];
 const localInvoices = [
-  { id: "li1", invoice_number: "OBI2026101", status: "gecikti", display_status: "gecikti", customer_name: "Elif Kaya", issue_date: "2026-10-20", due_date: "2026-11-05", currency: "TRY", subtotal: 5166.67, discount_amount: 0, vat_amount: 1033.33, total: 6200, paid_amount: 0, remaining_amount: 6200, payments: [], parasut_invoice_id: "ps0", items: [{ name: "Deneme Ürün 3", quantity: 4, unit_price: 1291.67, vat_rate: 20, total: 6200 }] },
-  { id: "li2", invoice_number: "", status: "taslak", display_status: "taslak", customer_name: "Can Öztürk", issue_date: "2026-11-10", due_date: "2026-11-22", currency: "TRY", subtotal: 10708.75, discount_amount: 0, vat_amount: 2141.75, total: 12850.5, paid_amount: 0, remaining_amount: 12850.5, payments: [], items: [{ name: "Deneme Ürün 9", quantity: 10, unit_price: 1070.88, vat_rate: 20, total: 12850.5 }], notes: "Teslimat 15 Kasım." },
+  { id: "li1", invoice_number: "OBI2026101", status: "gecikti", display_status: "gecikti", money_state: "overdue", customer_name: "Elif Kaya", issue_date: "2026-10-20", due_date: "2026-11-05", currency: "TRY", subtotal: 5166.67, discount_amount: 0, vat_amount: 1033.33, total: 6200, paid_amount: 0, remaining_amount: 6200, payments: [], parasut_invoice_id: "ps0", items: [{ name: "Deneme Ürün 3", quantity: 4, unit_price: 1291.67, vat_rate: 20, total: 6200 }] },
+  { id: "li2", invoice_number: "", status: "taslak", display_status: "taslak", money_state: "not_issued", customer_name: "Can Öztürk", issue_date: "2026-11-10", due_date: "2026-11-22", currency: "TRY", subtotal: 10708.75, discount_amount: 0, vat_amount: 2141.75, total: 12850.5, paid_amount: 0, remaining_amount: 12850.5, payments: [], items: [{ name: "Deneme Ürün 9", quantity: 10, unit_price: 1070.88, vat_rate: 20, total: 12850.5 }], notes: "Teslimat 15 Kasım." },
+  { id: "li3", invoice_number: "OBI2026102", status: "gecikti", display_status: "gonderildi", money_state: "pending", customer_name: "Acme GmbH", issue_date: "2026-11-08", due_date: "2026-12-08", currency: "USD", subtotal: 1000, discount_amount: 0, vat_amount: 200, total: 1200, paid_amount: 0, remaining_amount: 1200, payments: [], items: [{ name: "İhracat", quantity: 1, unit_price: 1000, vat_rate: 20, total: 1200 }] },
 ];
+const payKeys = new Map(); // Aşama 4 P2: tahsilat işlem anahtarları (anahtar → ilk yanıt)
 const tickets = [
   { id: "t1", ticket_code: "DST-00001234", topic: "Entegrasyon", subject: "Trendyol siparişleri gecikiyor", status: "waiting_customer", last_message_preview: "Mağaza kimliğinizi paylaşır mısınız?", last_message_at: new Date().toISOString(), unread_from_support: true,
     messages: [
@@ -114,7 +116,7 @@ http
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -568,7 +570,7 @@ http
         send(res, 200, { ...party, balance: 0, pos_sales_count: 0, pos_sales_total: 0 });
       });
     if (path === "/customers")
-      return send(res, 200, { items: parties.filter((p) => { const q = (url.searchParams.get("search") || "").toLowerCase(); const bs = url.searchParams.get("balance_status"); const rl = url.searchParams.get("role"); return (!q || p.name.toLowerCase().includes(q)) && (!bs || (bs === "receivable" ? p.balance > 0 : p.balance < 0)) && (!rl || (rl === "supplier" ? p.balance < 0 : p.balance >= 0)); }), total: parties.length, page: 1, per_page: 30, total_pages: 1, summary: { total_receivable: 19050.5, total_payable: 9400 } });
+      return send(res, 200, { items: parties.filter((p) => { const q = (url.searchParams.get("search") || "").toLowerCase(); const bs = url.searchParams.get("balance_status"); const rl = url.searchParams.get("role"); return (!q || p.name.toLowerCase().includes(q)) && (!bs || (bs === "receivable" ? p.balance > 0 : p.balance < 0)) && (!rl || (rl === "supplier" ? p.balance < 0 : p.balance >= 0)); }), total: parties.length, page: 1, per_page: 30, total_pages: 1, summary: { total_receivable: 19050.5, total_payable: 9400, by_currency: { TRY: { total_receivable: 19050.5, total_payable: 9400 }, USD: { total_receivable: 1200, total_payable: 0 } } } });
     // C5: cari oku / düzenle / sil / siparişleri
     let cm; // c5
     if ((cm = path.match(/^\/customers\/([^/]+)$/))) {
@@ -589,9 +591,45 @@ http
           ...party.payments.map((pay, i) => ({ id: "pay" + i, date: today, description: "Tahsilat", credit: pay, balance: party.balance })),
           { id: "l1", date: "2026-11-02", description: "Satış faturası OBI2026101", debit: 6200, balance: 6200 },
         ] });
-      return readBody((b) => { party.balance -= b.amount; party.payments.unshift(b.amount); send(res, 200, { id: "pm" + Date.now(), amount: b.amount }); });
+      return readBody((b) => {
+        const pk = req.headers["idempotency-key"];
+        console.log("PARTY-PAY key=" + (pk || "-") + " account=" + (b.account_id || "-") + " allocations=" + JSON.stringify(b.allocations));
+        if (pk && payKeys.has(pk)) return send(res, 200, { ...payKeys.get(pk), replayed: true });
+        party.balance -= b.amount; party.payments.unshift(b.amount);
+        // Dağıtım verilmezse açık faturalara (en eski vade) işlenir; burada en çok 6200 dağıtılır, artan avans.
+        const allocated = Math.min(b.amount, 6200);
+        const out = { id: "pm" + Date.now(), amount: b.amount, currency: party.currency || "TRY", allocated_amount: allocated.toFixed(2), advance_amount: (b.amount - allocated).toFixed(2), allocations: allocated > 0 ? [{ invoice_id: "li1", invoice_number: "OBI2026101", amount: allocated.toFixed(2) }] : [], skipped: [], replayed: false };
+        if (pk) payKeys.set(pk, out);
+        if (state.payFail === "1") { state.payFail = "0"; return send(res, 500, { code: "INTERNAL", detail: "Sunucu hatası" }); }
+        send(res, 200, out);
+      });
     }
-    if (path === "/local-invoices/summary") return send(res, 200, { total_remaining: localInvoices.reduce((n, i) => n + i.remaining_amount, 0), overdue_amount: 6200, overdue_count: 1 });
+    if (path === "/finance/income-expense-summary") {
+      const basis = url.searchParams.get("basis") || "accrual";
+      const from = url.searchParams.get("date_from"), to = url.searchParams.get("date_to");
+      console.log("IE-SUMMARY", from, to, basis);
+      if (from && to && from > to) return send(res, 422, { code: "SUMMARY_PARAMS_INVALID", detail: "Başlangıç tarihi bitişten sonra olamaz." });
+      if (state.ieEmpty === "1") return send(res, 200, { period: { from, to }, basis, currencies: [], scope: { excluded: [] } });
+      const cash = basis === "cash";
+      const src = (net, vat, count, origin = "obihub") => ({ net, vat: cash ? null : vat, gross: cash ? net : (Number(net) + Number(vat)).toFixed(2), count, origin });
+      const tr = cash
+        ? { currency: "TRY", income: { net: "21480.00", vat: null, gross: "21480.00", sources: { invoice_collections: src("12400.00", null, 3), customer_collections: src("4580.00", null, 2), pos: src("3800.00", null, 14), manual: src("700.00", null, 1) } },
+            expense: { net: "9310.40", vat: null, gross: "9310.40", vat_unknown: "0.00", sources: { payable_payments: src("7810.40", null, 4), manual: src("1500.00", null, 2) } }, result: "12169.60", categories: [] }
+        : { currency: "TRY", income: { net: "28250.00", vat: "5430.00", gross: "33680.00", sources: { sales_invoices: src("18500.00", "3700.00", 6), parasut_imported_invoices: src("6450.00", "1290.00", 4, "parasut"), pos: src("3166.67", "633.33", 14), manual: src("133.33", "0.00", 1) } },
+            expense: { net: "13898.06", vat: "2180.00", gross: "16078.06", vat_unknown: "600.00", sources: { expense_records: src("12398.06", "2180.00", 9), manual: src("1500.00", "0.00", 2) } }, result: "14351.94",
+            categories: [
+              { kind: "income", category_id: "sales_invoices", name: "Satış faturaları", source: "sales_invoices", net: "18500.00" },
+              { kind: "expense", category_id: "kira", name: "Kira", source: "expense_records", net: "6000.00" },
+              { kind: "expense", category_id: "kargo", name: "Kargo giderleri", source: "expense_records", net: "3898.06" },
+              { kind: "expense", category_id: "malzeme", name: "Ambalaj malzemesi", source: "expense_records", net: "2500.00" },
+              { kind: "expense", category_id: "manual:other", name: "Diğer (kasa)", source: "manual", net: "1500.00" },
+            ] };
+      const usd = { currency: "USD", income: { net: "1000.00", vat: cash ? null : "200.00", gross: cash ? "1000.00" : "1200.00", sources: { sales_invoices: src("1000.00", "200.00", 1) } }, expense: { net: "0.00", vat: cash ? null : "0.00", gross: "0.00", vat_unknown: "0.00", sources: {} }, result: "1000.00", categories: [] };
+      return send(res, 200, { period: { from, to }, basis, currencies: [tr, usd],
+        scope: { source: "obihub_ledger", as_of: new Date().toISOString().slice(0, 10), parasut_last_import: cash ? null : "2026-11-01T10:00:00+00:00", unsplit_pos_mixed: 1, refund_split_unknown: cash ? 0 : 2,
+          excluded: cash ? ["internal_transfers", "pos_not_posted_to_cash"] : ["uninvoiced_orders", "purchase_invoices_in_parasut", "draft_quote_cancelled_invoices", "internal_transfers"] } });
+    }
+    if (path === "/local-invoices/summary") return send(res, 200, { total_remaining: localInvoices.filter((i) => i.currency === "TRY" && i.status !== "taslak").reduce((n, i) => n + i.remaining_amount, 0), overdue_amount: 6200, overdue_count: 1, scalar_currency: "TRY", by_currency: { USD: { total_remaining: localInvoices.filter((i) => i.currency === "USD").reduce((n, i) => n + i.remaining_amount, 0), overdue_amount: 0 } } });
     // Yeni satış faturası: her zaman taslak açılır, tutarlar kalemlerden hesaplanır (backend/routers/local_invoices.py create_invoice)
     if (path === "/local-invoices" && req.method === "POST")
       return readBody((b) => {
@@ -629,10 +667,18 @@ http
       if (!invMatch[2]) return send(res, 200, inv);
       if (invMatch[2] === "resmilestir") { inv.status = inv.display_status = "resmilesti"; inv.parasut_invoice_id = "ps1"; return send(res, 200, { ok: true, message: "Fatura resmileşti", edoc_state: "done" }); }
       return readBody((b) => {
-        if (b.amount > inv.remaining_amount + 0.004) return send(res, 400, { detail: "Tutar kalan borçtan büyük olamaz" });
+        // Aşama 4 P2: anahtar (aynı anahtar → ilk sonuç + replayed); /__mode?payFail=1 → işlenir ama 500 (bir kez).
+        const pk = req.headers["idempotency-key"];
+        console.log("INV-PAY key=" + (pk || "-") + " account=" + (b.account_id || "-"));
+        if (pk && payKeys.has(pk)) return send(res, 200, { ...payKeys.get(pk), replayed: true });
+        if (inv.status === "taslak") return send(res, 409, { code: "INVOICE_NOT_ISSUED", detail: "Taslak faturaya tahsilat eklenemez; önce faturayı kesin." });
+        if (b.amount > inv.remaining_amount + 0.004) return send(res, 409, { code: "PAYMENT_EXCEEDS_REMAINING", detail: "Tahsilat tutarı faturanın kalanını aşıyor." });
         inv.paid_amount += b.amount; inv.remaining_amount -= b.amount; inv.payments.push({ id: "p" + Date.now(), amount: b.amount, date: b.date, method: b.method });
-        if (inv.remaining_amount < 0.005) inv.status = inv.display_status = "odendi";
-        send(res, 200, { ok: true, remaining_amount: inv.remaining_amount, status: inv.status });
+        if (inv.remaining_amount < 0.005) { inv.status = inv.display_status = "odendi"; inv.money_state = "settled"; }
+        const out = { ok: true, remaining_amount: inv.remaining_amount, status: inv.status, replayed: false };
+        if (pk) payKeys.set(pk, out);
+        if (state.payFail === "1") { state.payFail = "0"; return send(res, 500, { code: "INTERNAL", detail: "Sunucu hatası" }); }
+        send(res, 200, out);
       });
     }
     // Web eşitleme (src/api-gider.ts): yetenekler, gider ayarı, ObiHub gider defteri. Okuma modeli ve gelen kutusu 404 → eski uçlara düşüş.

@@ -9,7 +9,7 @@ import { todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing, tabular, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney, formatTry } from "../../src/utils";
-import { AlertIcon, DownloadIcon, FileTextIcon, InboxIcon, ReceiptIcon, TagIcon, UserIcon, WalletIcon } from "../../src/components/Icons";
+import { AlertIcon, ChartIcon, DownloadIcon, FileTextIcon, InboxIcon, ReceiptIcon, TagIcon, UserIcon, WalletIcon } from "../../src/components/Icons";
 import { EmptyState } from "../../src/components/EmptyState";
 import { useFocusLoad } from "../../src/hooks/useFocusLoad";
 import { TabHeader } from "../../src/ui/Header";
@@ -224,6 +224,17 @@ export default function FinanceScreen() {
               subtitle="Hesap bakiyeleri ve hareketler"
               chevron
               onPress={() => router.push("/cash")}
+            />
+          ) : null}
+          {financeRead ? (
+            <ListRow
+              testID="finance-income-expense"
+              divider
+              leading={<IconTile tint={colors.successBg}><ChartIcon size={18} color={colors.success} /></IconTile>}
+              title="Gelir-gider özeti"
+              subtitle="Dönem sonucu, kaynaklar ve gider kategorileri"
+              chevron
+              onPress={() => router.push("/income-expense")}
             />
           ) : null}
         </Card>

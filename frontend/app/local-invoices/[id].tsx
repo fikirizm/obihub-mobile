@@ -4,8 +4,8 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { addLocalInvoicePayment, checkLocalInvoiceEdocStatus, getCashAccounts, getLocalInvoice, officializeLocalInvoice } from "../../src/api";
-import { deleteLocalInvoice, isInvoiceEditable, isUncertainWrite } from "../../src/api-finans";
+import { addLocalInvoicePayment, checkLocalInvoiceEdocStatus, getCashAccounts, getLocalInvoice, newIdempotencyKey, officializeLocalInvoice } from "../../src/api";
+import { accountsForCurrency, collectErrorText, deleteLocalInvoice, isInvoiceEditable, isUncertainWrite, sendKeyedMoney } from "../../src/api-finans";
 import { invoiceStatus, isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
@@ -128,7 +128,7 @@ export default function LocalInvoiceDetailScreen() {
   }
 
   const isOverdue = isInvoiceOverdue(inv);
-  const st = invoiceStatus(isOverdue ? "gecikti" : inv.display_status || inv.status);
+  const st = invoiceStatus(isOverdue ? "gecikti" : inv.money_state === "refund" ? "iade" : inv.display_status === "gecikti" && inv.money_state ? "gonderildi" : inv.display_status || inv.status);
   const cur = inv.currency;
   const remaining = Number(inv.remaining_amount ?? Number(inv.total || 0) - Number(inv.paid_amount || 0));
   const isCancelled = inv.status === "iptal";
@@ -199,7 +199,8 @@ export default function LocalInvoiceDetailScreen() {
       return;
     }
     const invCur = String(cur || "TRY").toUpperCase();
-    const usable = accounts.filter((a) => String(a.currency || "TRY").toUpperCase() === invCur);
+    const usable = accountsForCurrency(accounts, invCur);
+    // Aşama 4 P2: o para biriminde hesap yoksa sunucu ACCOUNT_NONE_FOR_CURRENCY döner (firmanın hiç hesabı yoksa TRY'de Nakit Kasa açılır).
     if (accounts.length > 0 && usable.length === 0) {
       toast(`${invCur} para biriminde kasa/banka hesabı yok. Önce Kasa ve Bankalar'dan hesap ekleyin.`, "error");
       return;
@@ -211,7 +212,7 @@ export default function LocalInvoiceDetailScreen() {
       decimal: true,
       noteLabel: "Not (isteğe bağlı)",
       methods: [...PAYMENT_METHODS],
-      accounts: usable.map((a) => ({ value: a.id, label: a.name })),
+      accounts: usable.map((a) => ({ value: a.id, label: a.is_default && usable.length > 1 ? `${a.name} (varsayılan)` : a.name })),
       accountsLabel: usable.length > 0 ? "Hesap" : undefined,
     });
     if (!entry || entry.amount <= 0) return;
@@ -219,26 +220,22 @@ export default function LocalInvoiceDetailScreen() {
       toast("Tutar kalan borçtan büyük olamaz.", "error");
       return;
     }
-    const method = entry.method || "nakit";
     setBusy("payment");
+    // İşlem başına bir anahtar; belirsiz sonuçta aynı anahtar ve gövdeyle yeniden gönderilir (ikinci tahsilat açılmaz).
+    const key = newIdempotencyKey("inv-pay");
+    const body = { amount: entry.amount, date: todayIso(), method: entry.method || "nakit", notes: entry.note || undefined, account_id: entry.account || null };
     try {
-      await addLocalInvoicePayment(token, inv.id, {
-        amount: entry.amount,
-        date: todayIso(),
-        method,
-        notes: entry.note || undefined,
-        account_id: entry.account || null,
-      });
-      toast("Tahsilat kaydedildi", "success");
-      await load();
-    } catch (e: any) {
-      // Bağlantı koptuysa ya da sunucu hatasıysa tahsilat işlenmiş olabilir; yeniden göndermeden önce kontrol edilmeli.
-      toast(
-        isUncertainWrite(e)
-          ? "Tahsilatın kaydedilip kaydedilmediği bilinmiyor. Tekrar eklemeden önce faturayı yenileyip kontrol edin."
-          : e?.message || "Tahsilat kaydedilemedi.",
-        "error"
+      const out = await sendKeyedMoney(
+        () => addLocalInvoicePayment(token, inv.id, body, key),
+        () =>
+          confirm({
+            title: "Sonuç alınamadı",
+            message: `${formatMoney(entry.amount, cur)} tahsilat kaydedilmiş olabilir. Aynı işlemi yeniden gönderebilirsiniz; ikinci kez kaydedilmez.`,
+            confirmLabel: "Yeniden gönder",
+          })
       );
+      if (out.ok) toast(out.result?.replayed ? "Tahsilat zaten kaydedilmişti." : "Tahsilat kaydedildi", "success");
+      else toast(collectErrorText(out.error, out.uncertain), "error");
       await load();
     } finally {
       setBusy(null);

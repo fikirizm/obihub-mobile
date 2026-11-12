@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
@@ -8,7 +8,7 @@ import { invoiceStatus, isInvoiceOverdue } from "../../src/finance";
 import { useDebounce } from "../../src/hooks/useDebounce";
 import { usePagedList } from "../../src/hooks/usePagedList";
 import { useTheme } from "../../src/theme/ThemeProvider";
-import { spacing } from "../../src/theme/tokens";
+import { spacing, tabular, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney, formatTry } from "../../src/utils";
 import { AlertIcon, CheckIcon, FileTextIcon, PlusIcon, ReceiptIcon } from "../../src/components/Icons";
 import { FadeInDown, SafeAnimatedView } from "../../src/components/SafeAnimatedView";
@@ -32,6 +32,25 @@ const FILTERS = [
   { key: "odendi", label: "Ödendi" },
 ];
 
+// Aşama 4 P5a: tekil özet yalnız TRY; dövizli faturalar `by_currency`'den ayrı satırda (toplanmaz).
+function OtherCurrencies({ byCurrency }: { byCurrency?: Record<string, { total_remaining?: number; overdue_amount?: number }> }) {
+  const { colors } = useTheme();
+  const rows = Object.entries(byCurrency || {}).filter(
+    ([c, v]) => c !== "TRY" && c !== "TRL" && (Number(v?.total_remaining || 0) !== 0 || Number(v?.overdue_amount || 0) !== 0)
+  );
+  if (!rows.length) return null;
+  return (
+    <View testID="local-invoices-other-currencies" style={{ marginHorizontal: spacing.lg, marginBottom: spacing.sm, gap: 2 }}>
+      {rows.map(([c, v]) => (
+        <Text key={c} style={[type.caption, tabular, { color: colors.textSecondary }]} numberOfLines={1}>
+          {`${c}: tahsil edilecek ${formatMoney(Number(v?.total_remaining || 0), c)}`}
+          {Number(v?.overdue_amount || 0) > 0 ? ` · vadesi geçen ${formatMoney(Number(v?.overdue_amount || 0), c)}` : ""}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
 export default function LocalInvoicesScreen() {
   const { token, user } = useAuth();
   const { colors } = useTheme();
@@ -39,7 +58,7 @@ export default function LocalInvoicesScreen() {
   const [search, setSearch] = useState("");
   const debounced = useDebounce(search.trim(), 350);
   const [status, setStatus] = useState("");
-  const [summary, setSummary] = useState<{ total_remaining?: number; overdue_amount?: number } | null>(null);
+  const [summary, setSummary] = useState<{ total_remaining?: number; overdue_amount?: number; by_currency?: Record<string, { total_remaining?: number; overdue_amount?: number }> } | null>(null);
 
   const fetchPage = useCallback(
     (page: number) => getLocalInvoices(token as string, { page, search: debounced || undefined, status: status || undefined }),
@@ -74,6 +93,7 @@ export default function LocalInvoicesScreen() {
           <StatCard label="Vadesi geçen" value={formatTry(summary.overdue_amount || 0)} tone={(summary.overdue_amount || 0) > 0 ? "error" : undefined} />
         </SafeAnimatedView>
       ) : null}
+      {summary ? <OtherCurrencies byCurrency={summary.by_currency} /> : null}
       {mayCreate ? (
         <View style={styles.actions}>
           <Button
@@ -100,7 +120,20 @@ export default function LocalInvoicesScreen() {
           // "Gönderildi" ve "Resmileşti" süzgeçlerinde sunucu gecikmişleri kendi gününe göre ayıklar; rozet de sunucunun
           // durumunu gösterir. Aksi halde gece yarısından sonra satır bu süzgeçte "Gecikti" rozetiyle çıkar.
           const serverKey = String(inv.display_status || inv.status || "");
-          const key = status === "gonderildi" || status === "resmilesti" ? serverKey : isInvoiceOverdue(inv) ? "gecikti" : serverKey;
+          // Aşama 4 P5a: `money_state` geldiyse rozet doğrudan ondan (sunucu tek tanım; iade belgesi alacak sayılmaz).
+          const key = inv.money_state
+            ? inv.money_state === "overdue"
+              ? "gecikti"
+              : inv.money_state === "refund"
+                ? "iade"
+                : serverKey === "gecikti"
+                  ? "gonderildi"
+                  : serverKey
+            : status === "gonderildi" || status === "resmilesti"
+              ? serverKey
+              : isInvoiceOverdue(inv)
+                ? "gecikti"
+                : serverKey;
           const st = invoiceStatus(key);
           // Durum rengi: gecikti kırmızı, taslak sarı, ödendi yeşil; diğerleri nötr mavi simge.
           const look =

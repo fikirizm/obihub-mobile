@@ -166,7 +166,7 @@ function partyFromReadModel(item: any): PartyView {
 
 export type PartiesPage = Paged<PartyView> & {
   // Yalnız eski uçta gelir; okuma modelinde web de genel toplam göstermez.
-  summary: { total_receivable?: number; total_payable?: number; total_contacts?: number } | null;
+  summary: { total_receivable?: number; total_payable?: number; total_contacts?: number; by_currency?: Record<string, { total_receivable?: number; total_payable?: number }> } | null;
   origin: "read_model" | "customers";
 };
 
@@ -192,11 +192,13 @@ export async function getPartiesCompat(
   }
   const res = await getParties(token, { page, search: options.search, balanceStatus: options.balanceStatus, role: options.role });
   const items: PartyView[] = res.items.map((p) => {
-    const raw = p as typeof p & { actions?: Partial<PartyActions>; balance_available?: boolean };
+    const raw = p as typeof p & { actions?: Partial<PartyActions>; balance_available?: boolean; balance_currency?: string };
     const actions = raw.actions
       ? (Object.fromEntries(ACTION_NAMES.map((n) => [n, raw.actions?.[n] === true])) as PartyActions)
       : LEGACY_ACTIONS;
-    return { ...p, origin: "customers", actions, balanceAvailable: raw.balance_available !== false };
+    // Aşama 4 P5a: `balance` carinin kendi para birimindedir; birimi `balance_currency`.
+    const currency = raw.balance_currency || p.currency;
+    return { ...p, currency, origin: "customers", actions, balanceAvailable: raw.balance_available !== false };
   });
   return { items, total: res.total, hasMore: res.hasMore, summary: res.summary ?? null, origin: "customers" };
 }
@@ -311,18 +313,32 @@ export async function hasNonBizimhesapIncomingSource(token: string): Promise<boo
 }
 
 // ---------------------------------------------------------------------------
-// Cari tahsilatı — POST /customers/{id}/payments (routers/customers.py add_customer_payment).
-// `account_id` isteğe bağlıdır (sunucuya ekleniyor; para birimi uyumu sunucuda denetlenecek). Eski sunucu bilinmeyen alanı yok sayar.
-// Okuma modelindeki eski cari kimliği ("legacy:<id>") eski uca çıplak kimlikle gider.
+// Cari tahsilatı — POST /customers/{id}/payments (Aşama 4 P2).
+// Hesap kuralı fatura tahsilatıyla aynı (carinin para birimi). `allocations` gönderilmez: sunucu en eski vadeli açık faturalara
+// dağıtır, artan avans olur (web varsayılanı). İşlem anahtarı başlıkta. Okuma modelindeki "legacy:<id>" eski uca çıplak kimlikle gider.
 // ---------------------------------------------------------------------------
+export type PartyPaymentResult = {
+  id?: string;
+  currency?: string;
+  allocated_amount?: number | string;
+  advance_amount?: number | string;
+  allocations?: { invoice_id: string; invoice_number?: string; amount: number | string }[];
+  replayed?: boolean;
+};
+
 export async function collectPartyPaymentCompat(
   token: string,
   partyId: string,
-  body: { amount: number; payment_method: string; note?: string; payment_date: string; account_id?: string | null }
+  body: { amount: number; payment_method: string; note?: string; payment_date: string; account_id?: string | null },
+  idempotencyKey?: string
 ) {
-  const payload = { ...body, ...(body.account_id ? { account_id: body.account_id } : {}) };
-  if (!body.account_id) delete (payload as { account_id?: unknown }).account_id;
-  return request<any>(`/customers/${encodeURIComponent(legacyIdOf(partyId))}/payments`, { method: "POST", body: JSON.stringify(payload) }, token);
+  const payload: Record<string, unknown> = { ...body };
+  if (!body.account_id) delete payload.account_id;
+  return request<PartyPaymentResult>(
+    `/customers/${encodeURIComponent(legacyIdOf(partyId))}/payments`,
+    { method: "POST", body: JSON.stringify(payload), headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined },
+    token
+  );
 }
 
 // ---- Dalga 3 / C2: gider detayı ve borç ödeme (web: ExpenseInvoiceDetail.jsx, PayablePaymentDialog.jsx) ----

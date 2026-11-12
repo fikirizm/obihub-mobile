@@ -46,6 +46,45 @@ export function moneyRetryable(e: unknown): boolean {
   return isUncertainWrite(e) && code !== "MONEY_PARTIAL";
 }
 
+// Aşama 4 P2: anahtarlı para yazımı. Sonuç belirsizse (ağ / 5xx, MONEY_INCOMPLETE dahil) kullanıcıya sorulur ve AYNI anahtar +
+// AYNI gövdeyle yeniden gönderilir; sunucu ikinci kayıt açmaz. Kesin hata (4xx, MONEY_PARTIAL, MONEY_PENDING) yeniden denenmez.
+export type KeyedMoneyOutcome<T> = { ok: true; result: T } | { ok: false; error: any; uncertain: boolean };
+
+export async function sendKeyedMoney<T>(send: () => Promise<T>, askRetry: () => Promise<boolean>): Promise<KeyedMoneyOutcome<T>> {
+  for (;;) {
+    try {
+      return { ok: true, result: await send() };
+    } catch (e: any) {
+      if (!moneyRetryable(e) || e?.code === "MONEY_PENDING") return { ok: false, error: e, uncertain: isUncertainWrite(e) };
+      if (!(await askRetry())) return { ok: false, error: e, uncertain: true };
+    }
+  }
+}
+
+// Tahsilat hatasının gösterilecek metni. Sunucunun Türkçe `detail` metni önceliklidir; kod yalnız metin yoksa ya da belirsiz sonuçta kullanılır.
+export function collectErrorText(e: any, uncertain: boolean): string {
+  const code = String(e?.code || "");
+  if (code === "MONEY_PENDING") return "Tahsilat kaydı tamamlanıyor; birkaç dakika içinde kendiliğinden tamamlanır. Yeniden göndermeyin.";
+  if (code === "MONEY_PARTIAL") return e?.message || "İşlem yarım kaldı. Yeniden göndermeden önce kasa hareketlerini kontrol edin.";
+  if (uncertain) return "Tahsilatın kaydedilip kaydedilmediği bilinmiyor. Tekrar eklemeden önce hareketleri yenileyip kontrol edin.";
+  if (e?.message) return String(e.message);
+  if (code === "ACCOUNT_REQUIRED") return "Bu para biriminde birden çok hesap var; tahsilatın yazılacağı hesabı seçin.";
+  if (code === "PAYMENT_EXCEEDS_REMAINING") return "Tutar faturanın kalanından büyük olamaz.";
+  return "Tahsilat kaydedilemedi.";
+}
+
+// Tahsilatın yazılacağı hesap seçenekleri: işlemin para birimindeki hesaplar, varsayılan önce (sunucu kuralıyla aynı sıra).
+export function accountsForCurrency(accounts: CashAccount[], currency: string) {
+  const norm = (c?: string | null) => {
+    const v = String(c || "TRY").toUpperCase();
+    return v === "TRL" || v === "TL" ? "TRY" : v;
+  };
+  const cur = norm(currency);
+  return accounts
+    .filter((a) => norm(a.currency) === cur && (a as { is_active?: boolean }).is_active !== false)
+    .sort((a, b) => Number(Boolean(b.is_default)) - Number(Boolean(a.is_default)));
+}
+
 // ---------------------------------------------------------------------------
 // Yeni kasa/banka hesabı — POST /finance/accounts (backend/routers/finance.py:138)
 // Web gövdesi: frontend/src/components/cash/KasaOS.jsx:34-40 ve pages/KasaPage.js:30-32

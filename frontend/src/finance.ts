@@ -18,6 +18,7 @@ const INVOICE_STATUS: Record<string, { label: string; kind: StatusKind }> = {
   gecikti: { label: "Gecikti", kind: "error" },
   odendi: { label: "Ödendi", kind: "success" },
   iptal: { label: "İptal", kind: "neutral" },
+  iade: { label: "İade", kind: "neutral" },
 };
 
 export function invoiceStatus(status?: string) {
@@ -29,6 +30,7 @@ export function invoiceStatus(status?: string) {
 const OVERDUE_STATUSES = ["gonderildi", "resmilesti", "gecikti"];
 
 export function isInvoiceOverdue(inv: {
+  money_state?: string;
   status?: string;
   display_status?: string;
   is_overdue?: boolean;
@@ -36,6 +38,8 @@ export function isInvoiceOverdue(inv: {
   due_date?: string;
   remaining_amount?: number | null;
 }) {
+  // Aşama 4 P5a: tek durum tanımı sunucuda (`money_state`); varsa istemci yeniden hesaplamaz.
+  if (inv.money_state) return inv.money_state === "overdue";
   if (inv.is_overdue || (inv.display_status || inv.status) === "gecikti") return true;
   if (!OVERDUE_STATUSES.includes(String(inv.status || "")) || inv.invoice_type === "teklif") return false;
   const due = String(inv.due_date || "").slice(0, 10);

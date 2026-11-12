@@ -22,7 +22,7 @@ import type { Party, PartyView } from "../../src/types";
 
 type Filter = "" | "receivable" | "payable";
 
-type Summary = { total_receivable?: number; total_payable?: number; total_contacts?: number };
+type Summary = { total_receivable?: number; total_payable?: number; total_contacts?: number; by_currency?: Record<string, { total_receivable?: number; total_payable?: number }> };
 
 function partyName(p: Party) {
   return p.company_name || p.name || p.full_name || "Cari";
@@ -56,6 +56,10 @@ function isForeign(currency?: string) {
 type ForeignState = "yes" | "no" | "unknown";
 
 function SummaryHero({ summary, foreign }: { summary: Summary; foreign: ForeignState }) {
+  // Aşama 4 P5a: tekil toplamlar yalnız TRY; diğer birimler `by_currency`'de ayrı gelir (toplanmaz).
+  const others = Object.entries(summary.by_currency || {}).filter(
+    ([c, v]) => c !== "TRY" && c !== "TRL" && (Number(v?.total_receivable || 0) !== 0 || Number(v?.total_payable || 0) !== 0)
+  );
   return (
     <HeroCard tone="emerald" style={styles.hero}>
       {summary.total_contacts != null ? (
@@ -82,7 +86,16 @@ function SummaryHero({ summary, foreign }: { summary: Summary; foreign: ForeignS
           </Text>
         </View>
       </View>
-      {foreign !== "no" ? (
+      {others.length > 0 ? (
+        <View style={{ marginTop: spacing.sm, gap: 2 }} testID="customers-summary-other-currencies">
+          {others.map(([c, v]) => (
+            <Text key={c} style={[type.caption, tabular, { color: ON_HERO.text }]} numberOfLines={1}>
+              {`${c}: alacak ${formatMoney(Number(v?.total_receivable || 0), c)} · borç ${formatMoney(Number(v?.total_payable || 0), c)}`}
+            </Text>
+          ))}
+          <Text style={[type.caption, { color: ON_HERO.soft }]}>Toplamlar yalnız TL bakiyeleri kapsar; dövizler ayrı gösterilir.</Text>
+        </View>
+      ) : summary.by_currency ? null : foreign !== "no" ? (
         <Text style={[type.caption, { color: ON_HERO.soft, marginTop: spacing.sm }]}>
           {foreign === "yes"
             ? "Toplamlara dövizli carilerin bakiyeleri çevrilmeden dahildir."

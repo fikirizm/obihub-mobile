@@ -363,6 +363,7 @@ export type LocalInvoice = {
   status?: string;
   display_status?: string;
   is_overdue?: boolean;
+  money_state?: "overdue" | "pending" | "settled" | "not_issued" | "refund";
   customer_name?: string;
   issue_date?: string;
   due_date?: string;

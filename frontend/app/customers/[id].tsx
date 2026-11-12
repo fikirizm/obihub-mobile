@@ -5,9 +5,9 @@ import { FadeInDown } from "react-native-reanimated";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { getCashAccounts } from "../../src/api";
+import { getCashAccounts, newIdempotencyKey } from "../../src/api";
 import { collectPartyPaymentCompat, getLegacyPartyCurrency, getPartyLedgerCompat, legacyIdOf } from "../../src/api-gider";
-import { deleteParty, getParty, getPartyOrders, isUncertainWrite, type PartyOrder } from "../../src/api-finans";
+import { accountsForCurrency, collectErrorText, deleteParty, getParty, getPartyOrders, isUncertainWrite, sendKeyedMoney, type PartyOrder } from "../../src/api-finans";
 import { PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
@@ -168,7 +168,7 @@ export default function CustomerDetailScreen() {
       toast(e?.message || "Kasa/banka hesapları okunamadı.", "error");
       return;
     }
-    const usable = accounts.filter((a) => String(a.currency || "TRY").toUpperCase().replace("TRL", "TRY") === cur);
+    const usable = accountsForCurrency(accounts, cur);
     if (accounts.length > 0 && usable.length === 0) {
       toast(`${cur} para biriminde kasa/banka hesabı yok. Önce Kasa ve Bankalar'dan hesap ekleyin.`, "error");
       return;
@@ -180,31 +180,41 @@ export default function CustomerDetailScreen() {
       decimal: true,
       noteLabel: "Not (isteğe bağlı)",
       methods: [...PAYMENT_METHODS],
-      accounts: usable.map((a) => ({ value: a.id, label: a.name })),
+      accounts: usable.map((a) => ({ value: a.id, label: a.is_default && usable.length > 1 ? `${a.name} (varsayılan)` : a.name })),
       accountsLabel: usable.length > 0 ? "Hesap" : undefined,
     });
     if (!entry || entry.amount <= 0) return;
-    const method = entry.method || "nakit";
     setBusy(true);
+    // Aşama 4 P2: işlem başına bir anahtar; belirsiz sonuçta aynı anahtar ve gövdeyle yeniden gönderilir.
+    // Dağıtım gönderilmez: sunucu en eski vadeli açık faturalara işler, artan kısım avans kalır.
+    const key = newIdempotencyKey("party-pay");
+    const body = { amount: entry.amount, payment_method: entry.method || "nakit", note: entry.note || undefined, payment_date: todayIso(), account_id: entry.account || null };
     try {
-      await collectPartyPaymentCompat(token, id, {
-        amount: entry.amount,
-        payment_method: method,
-        note: entry.note || undefined,
-        payment_date: todayIso(),
-        account_id: entry.account || null,
-      });
-      toast("Tahsilat kaydedildi", "success");
-      await load();
-    } catch (e: any) {
-      // Bağlantı koptuysa ya da sunucu hatasıysa tahsilat işlenmiş olabilir; tekrar eklemeden önce ekstre kontrol edilmeli.
-      toast(
-        isUncertainWrite(e)
-          ? "Tahsilat işlenmiş olabilir. Tekrar eklemeden önce ekstreyi yenileyip kontrol edin."
-          : e?.message || "Tahsilat kaydedilemedi.",
-        "error"
+      const out = await sendKeyedMoney(
+        () => collectPartyPaymentCompat(token, id, body, key),
+        () =>
+          confirm({
+            title: "Sonuç alınamadı",
+            message: `${formatMoney(entry.amount, curLabel)} tahsilat kaydedilmiş olabilir. Aynı işlemi yeniden gönderebilirsiniz; ikinci kez kaydedilmez.`,
+            confirmLabel: "Yeniden gönder",
+          })
       );
-      if (isUncertainWrite(e)) await load();
+      if (out.ok) {
+        const r = out.result;
+        const allocated = Number(r?.allocated_amount || 0);
+        const advance = Number(r?.advance_amount || 0);
+        const rc = r?.currency || curLabel;
+        if (r?.replayed) toast("Tahsilat zaten kaydedilmişti.", "success");
+        else if (allocated > 0)
+          toast(
+            advance > 0
+              ? `Tahsilat kaydedildi: ${formatMoney(allocated, rc)} açık faturalara işlendi, ${formatMoney(advance, rc)} avans kaldı.`
+              : `Tahsilat kaydedildi: ${formatMoney(allocated, rc)} açık faturalara işlendi.`,
+            "success"
+          );
+        else toast(advance > 0 ? `Tahsilat avans olarak kaydedildi (${formatMoney(advance, rc)}).` : "Tahsilat kaydedildi", "success");
+      } else toast(collectErrorText(out.error, out.uncertain), "error");
+      await load();
     } finally {
       setBusy(false);
     }

@@ -834,7 +834,7 @@ export async function getParties(
   if (options.balanceStatus) qs.set("balance_status", options.balanceStatus);
   const d = await request<any>(`/customers?${qs.toString()}`, { method: "GET" }, token);
   const res = paged<Party>(d, "items", page, perPage);
-  return { ...res, summary: (d?.summary || {}) as { total_receivable?: number; total_payable?: number; total_contacts?: number } };
+  return { ...res, summary: (d?.summary || {}) as { total_receivable?: number; total_payable?: number; total_contacts?: number; by_currency?: Record<string, { total_receivable?: number; total_payable?: number }> } };
 }
 
 export async function getPartyLedger(token: string, partyId: string) {
@@ -884,15 +884,19 @@ export async function checkLocalInvoiceEdocStatus(token: string, id: string) {
   );
 }
 
-// `account_id` verilmezse sunucu para birimine bakmadan ilk hesabı seçer; web gibi hesap her zaman gönderilir.
+// Aşama 4 P2: hesap verilirse katı (404 / 422 CURRENCY_MISMATCH); verilmezse faturanın para birimindeki varsayılan/tek hesap.
+// İşlem anahtarı başlıkta: aynı anahtar + aynı gövde → ilk sonuç (`replayed`), ikinci tahsilat açılmaz.
 export async function addLocalInvoicePayment(
   token: string,
   id: string,
-  body: { amount: number; date: string; method: string; notes?: string; account_id?: string | null }
+  body: { amount: number; date: string; method: string; notes?: string; account_id?: string | null },
+  idempotencyKey?: string
 ) {
-  return request<{ ok?: boolean; remaining_amount?: number; status?: string }>(
+  const payload: Record<string, unknown> = { ...body };
+  if (!body.account_id) delete payload.account_id;
+  return request<{ ok?: boolean; remaining_amount?: number; status?: string; replayed?: boolean }>(
     `/local-invoices/${encodeURIComponent(id)}/payment`,
-    { method: "POST", body: JSON.stringify(body) },
+    { method: "POST", body: JSON.stringify(payload), headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined },
     token
   );
 }
