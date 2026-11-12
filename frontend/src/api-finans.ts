@@ -339,3 +339,28 @@ export async function voidCollection(token: string, c: Collection, idempotencyKe
 export async function editCollection(token: string, c: Collection, body: Record<string, string>, idempotencyKey: string) {
   return request<any>(collectionPath(c), { method: "PATCH", body: JSON.stringify(body), headers: { "Idempotency-Key": idempotencyKey } }, token);
 }
+
+// ---------------------------------------------------------------------------
+// C4 eki: fatura tahsilatının Paraşüt senkronu (web lib/parasutCapabilities.js, SalesInvoiceFormOS ParasutPayState).
+let capsCache: { token: string; value: { payment_sync: boolean } } | null = null;
+export async function getParasutPaymentCaps(token: string): Promise<{ payment_sync: boolean }> {
+  if (capsCache?.token === token) return capsCache.value;
+  try {
+    const r = await request<any>("/local-invoices/import/parasut/capabilities", { method: "GET" }, token);
+    const value = { payment_sync: r?.payment_sync === true };
+    capsCache = { token, value };
+    return value;
+  } catch {
+    return { payment_sync: false }; // okunamazsa kapalı; sunucu her uçta ayrıca denetler
+  }
+}
+
+export type ParasutAccount = { id: string; name: string };
+export async function getParasutAccounts(token: string): Promise<ParasutAccount[]> {
+  const r = await request<any>("/parasut/accounts", { method: "GET" }, token);
+  return (Array.isArray(r) ? r : []).map((a: any) => ({ id: String(a?.id ?? ""), name: String(a?.name || `Hesap ${a?.id}`) })).filter((a: ParasutAccount) => a.id);
+}
+
+export async function postParasutPaymentAction(token: string, path: string, body: Record<string, unknown>) {
+  return request<any>(path, { method: "POST", body: JSON.stringify(body) }, token);
+}

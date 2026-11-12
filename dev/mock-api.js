@@ -79,7 +79,7 @@ const entries = [
   { id: "e2", account_id: "a1", entry_type: "expense", amount: 380.5, entry_date: "2026-11-09", description: "Kargo malzemesi" },
 ];
 const parties = [
-  { id: "c1", name: "Elif Kaya", phone: "0555 111 22 33", source: "registered", balance: 4300, payments: [],
+  { id: "c1", name: "Elif Kaya", phone: "0555 111 22 33", source: "registered", balance: 4075, payments: [],
     // P11: cari tahsilatı (faturaya dağıtılmış) — ekstrede düzenle / sil
     collections: [{ id: "cp1", type: "customer", amount: "1500.00", currency: "TRY", date: "2026-11-05", method: "havale", note: "Kasım ödemesi", account_id: "a2", invoices: [{ invoice_id: "li1", invoice_number: "OBI2026101", amount: "1500.00" }], parasut: false }] },
   { id: "c2", name: "Can Öztürk", email: "can@example.test", source: "registered", balance: 12850.5, payments: [] },
@@ -87,8 +87,11 @@ const parties = [
   { id: "e:ayse@example.test", name: "Ayşe Yılmaz", source: "orders", balance: 0, payments: [] },
 ];
 const localInvoices = [
-  { id: "li1", invoice_number: "OBI2026101", status: "gecikti", display_status: "gecikti", money_state: "overdue", customer_id: "c1", customer_name: "Elif Kaya", issue_date: "2026-10-20", due_date: "2026-11-05", currency: "TRY", subtotal: 5166.67, discount_amount: 0, vat_amount: 1033.33, total: 6200, paid_amount: 1900, remaining_amount: 4300,
-    payments: [{ id: "ip1", amount: 400, date: "2026-11-06", method: "nakit", notes: "Elden", account_id: "a1", parasut_synced: true }, { id: "cp1", amount: 1500, date: "2026-11-05", method: "havale", source: "customer_payment" }], voided_payments: [], parasut_invoice_id: "ps0", items: [{ name: "Deneme Ürün 3", quantity: 4, unit_price: 1291.67, vat_rate: 20, total: 6200 }] },
+  { id: "li1", invoice_number: "OBI2026101", status: "gecikti", display_status: "gecikti", money_state: "overdue", customer_id: "c1", customer_name: "Elif Kaya", issue_date: "2026-10-20", due_date: "2026-11-05", currency: "TRY", subtotal: 5166.67, discount_amount: 0, vat_amount: 1033.33, total: 6200, paid_amount: 2125, remaining_amount: 4075,
+    payments: [{ id: "ip1", amount: 400, date: "2026-11-06", method: "nakit", notes: "Elden", account_id: "a1", parasut_synced: true }, { id: "cp1", amount: 1500, date: "2026-11-05", method: "havale", source: "customer_payment" },
+      { id: "ip2", amount: 100, date: "2026-11-07", method: "havale", account_id: "a2", parasut_sync_state: "failed", parasut_sync_error: "Paraşüt hesabı kapalı" },
+      { id: "ip3", amount: 50, date: "2026-11-08", method: "nakit", account_id: "a1", parasut_synced: false },
+      { id: "ip4", amount: 75, date: "2026-10-25", method: "nakit", account_id: "a1", parasut_sync_state: "not_sent" }], voided_payments: [], parasut_invoice_id: "ps0", items: [{ name: "Deneme Ürün 3", quantity: 4, unit_price: 1291.67, vat_rate: 20, total: 6200 }] },
   { id: "li2", invoice_number: "", status: "taslak", display_status: "taslak", money_state: "not_issued", customer_name: "Can Öztürk", issue_date: "2026-11-10", due_date: "2026-11-22", currency: "TRY", subtotal: 10708.75, discount_amount: 0, vat_amount: 2141.75, total: 12850.5, paid_amount: 0, remaining_amount: 12850.5, payments: [], items: [{ name: "Deneme Ürün 9", quantity: 10, unit_price: 1070.88, vat_rate: 20, total: 12850.5 }], notes: "Teslimat 15 Kasım." },
   { id: "li3", invoice_number: "OBI2026102", status: "gecikti", display_status: "gonderildi", money_state: "pending", customer_name: "Acme GmbH", issue_date: "2026-11-08", due_date: "2026-12-08", currency: "USD", subtotal: 1000, discount_amount: 0, vat_amount: 200, total: 1200, paid_amount: 0, remaining_amount: 1200, payments: [], items: [{ name: "İhracat", quantity: 1, unit_price: 1000, vat_rate: 20, total: 1200 }] },
 ];
@@ -141,7 +144,7 @@ http
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -773,6 +776,22 @@ http
       const rows = localInvoices.filter((i) => !st || i.status === st);
       return send(res, 200, { items: rows, total: rows.length, page: 1, per_page: 30, total_pages: 1 });
     }
+    // C4 eki: Paraşüt tahsilat senkronu
+    if (path === "/local-invoices/import/parasut/capabilities") return send(res, 200, { import_sales: true, import_purchases: false, payment_sync: state.psCaps !== "0" });
+    if (path === "/parasut/accounts") return send(res, 200, [{ id: 11, name: "Paraşüt Kasa" }, { id: 12, name: "Paraşüt Akbank" }]);
+    let pz;
+    if (req.method === "POST" && (pz = path.match(/^\/local-invoices\/([^/]+)\/payments\/([^/]+)\/(parasut-sync|parasut-resolve)$/))) {
+      const inv = localInvoices.find((i) => i.id === pz[1]);
+      const p = inv && inv.payments.find((x) => x.id === pz[2]);
+      if (!p) return send(res, 404, { detail: "Tahsilat bulunamadı" });
+      return readBody((b) => {
+        console.log(`PARASUT ${pz[3]} ${pz[2]} body=${JSON.stringify(b)}`);
+        if (pz[3] === "parasut-resolve") { delete p.parasut_synced; p.parasut_sync_state = b.outcome === "synced" ? "synced" : "failed"; p.parasut_sync_error = b.outcome === "synced" ? undefined : "Paraşüt'te yok olarak işaretlendi"; return send(res, 200, { ok: true }); }
+        if (p.parasut_sync_state === "not_sent" && !b.parasut_account_id) return send(res, 200, { ok: false, error: "Paraşüt hesabı seçin." });
+        p.parasut_sync_state = "synced"; p.parasut_sync_error = undefined;
+        send(res, 200, { ok: true });
+      });
+    }
     const invMatch = path.match(/^\/local-invoices\/([^/]+)(?:\/(payment|resmilestir))?$/);
     if (invMatch) {
       const inv = localInvoices.find((i) => i.id === invMatch[1]);
@@ -799,9 +818,11 @@ http
         if (pk && payKeys.has(pk)) return send(res, 200, { ...payKeys.get(pk), replayed: true });
         if (inv.status === "taslak") return send(res, 409, { code: "INVOICE_NOT_ISSUED", detail: "Taslak faturaya tahsilat eklenemez; önce faturayı kesin." });
         if (b.amount > inv.remaining_amount + 0.004) return send(res, 409, { code: "PAYMENT_EXCEEDS_REMAINING", detail: "Tahsilat tutarı faturanın kalanını aşıyor." });
-        inv.paid_amount += b.amount; inv.remaining_amount -= b.amount; inv.payments.push({ id: "p" + Date.now(), amount: b.amount, date: b.date, method: b.method });
+        console.log("INV-PAY parasut_sync=" + (b.parasut_sync ?? "-") + " parasut_account_id=" + (b.parasut_account_id ?? "-"));
+        const ps = b.parasut_sync ? (state.psFail === "1" ? { ok: false, error: "Paraşüt hesabı kapalı" } : { ok: true }) : null;
+        inv.paid_amount += b.amount; inv.remaining_amount -= b.amount; inv.payments.push({ id: "p" + Date.now(), amount: b.amount, date: b.date, method: b.method, ...(ps ? { parasut_sync_state: ps.ok ? "synced" : "failed", parasut_sync_error: ps.error } : inv.parasut_invoice_id ? { parasut_sync_state: "not_sent" } : {}) });
         if (inv.remaining_amount < 0.005) { inv.status = inv.display_status = "odendi"; inv.money_state = "settled"; }
-        const out = { ok: true, remaining_amount: inv.remaining_amount, status: inv.status, replayed: false };
+        const out = { ok: true, remaining_amount: inv.remaining_amount, status: inv.status, replayed: false, ...(ps ? { parasut: ps } : {}) };
         if (pk) payKeys.set(pk, out);
         if (state.payFail === "1") { state.payFail = "0"; return send(res, 500, { code: "INTERNAL", detail: "Sunucu hatası" }); }
         send(res, 200, out);

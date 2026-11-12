@@ -390,7 +390,7 @@ export type LocalInvoice = {
   items?: { name?: string; description?: string; product_id?: string | null; product_name?: string; quantity?: number; unit_price?: number; vat_rate?: number; total?: number; line_total?: number }[];
   payments?: {
     id?: string; amount?: number; date?: string; method?: string; notes?: string; account_id?: string;
-    source?: string; void_op?: unknown; parasut_sync_state?: string; parasut_synced?: boolean;
+    source?: string; void_op?: unknown; parasut_sync_state?: string; parasut_synced?: boolean; parasut_sync_error?: string; parasut_out_of_sync?: boolean;
   }[];
   parasut_item_type?: string;
   parasut_invoice_id?: string;

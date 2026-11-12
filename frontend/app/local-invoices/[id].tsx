@@ -5,7 +5,8 @@ import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { addLocalInvoicePayment, checkLocalInvoiceEdocStatus, getCashAccounts, getLocalInvoice, newIdempotencyKey, officializeLocalInvoice } from "../../src/api";
-import { accountOptionLabel, accountsForCurrency, collectErrorText, deleteLocalInvoice, isInvoiceEditable, isUncertainWrite, sendKeyedMoney } from "../../src/api-finans";
+import { accountOptionLabel, accountsForCurrency, collectErrorText, deleteLocalInvoice, getParasutAccounts, getParasutPaymentCaps, isInvoiceEditable, isUncertainWrite, postParasutPaymentAction, sendKeyedMoney } from "../../src/api-finans";
+import { canOfferParasutSync, collectResultText, parasutActionFailText, parasutActionRequest, parasutActionResult, parasutCollectFields, parasutPayView, PARASUT_ACTION_LABELS, type ParasutAction } from "../../src/parasut-pay";
 import { invoiceStatus, isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { invoicePaymentActions, invoicePaymentCollection } from "../../src/collection-actions";
 import { runVoidCollection } from "../../src/collection-flow";
@@ -78,12 +79,23 @@ export default function LocalInvoiceDetailScreen() {
   const id = String(params.id || "");
   const { token, user, parasutConnected } = useAuth();
   const { colors } = useTheme();
-  const { toast, confirm, promptEntry } = useFeedback();
+  const { toast, confirm, promptEntry, choose } = useFeedback();
   const [inv, setInv] = useState<LocalInvoice | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState<"official" | "payment" | "edoc" | "delete" | "void" | null>(null);
   const [voidingId, setVoidingId] = useState<string | null>(null);
+  // C4 eki: firmada tahsilatı Paraşüt'e yazma açık mı (okunamazsa kapalı).
+  const [caps, setCaps] = useState<{ payment_sync: boolean }>({ payment_sync: false });
+  const [psBusy, setPsBusy] = useState<string | null>(null);
+  useEffect(() => {
+    if (!token) return;
+    let on = true;
+    getParasutPaymentCaps(token).then((c) => on && setCaps(c));
+    return () => {
+      on = false;
+    };
+  }, [token]);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
@@ -237,10 +249,27 @@ export default function LocalInvoiceDetailScreen() {
       toast("Tutar kalan borçtan büyük olamaz.", "error");
       return;
     }
+    // Web "Paraşüt'e de işle": Paraşüt'teki faturada tahsilat isteğe bağlı olarak Paraşüt hesabına da yazılır.
+    let psAccount: string | null = null;
+    if (canOfferParasutSync(inv, caps)) {
+      let psAccounts: { id: string; name: string }[] = [];
+      try {
+        psAccounts = await getParasutAccounts(token);
+      } catch {
+        toast("Paraşüt hesapları yüklenemedi; tahsilat yalnız ObiHub'a kaydedilebilir.", "info");
+      }
+      const pick = await choose<string>({
+        title: "Paraşüt'e de işlensin mi?",
+        message: "Bu fatura Paraşüt'te. Tahsilatı Paraşüt'teki bir kasa/banka hesabına da yazabilirsiniz.",
+        options: [{ value: "__none", label: "Yalnız ObiHub'a kaydet" }, ...psAccounts.map((a) => ({ value: a.id, label: `Paraşüt: ${a.name}` }))],
+      });
+      if (pick === null) return;
+      psAccount = pick === "__none" ? null : pick;
+    }
     setBusy("payment");
     // İşlem başına bir anahtar; belirsiz sonuçta aynı anahtar ve gövdeyle yeniden gönderilir (ikinci tahsilat açılmaz).
     const key = newIdempotencyKey("inv-pay");
-    const body = { amount: entry.amount, date: todayIso(), method: entry.method || "nakit", notes: entry.note || undefined, account_id: entry.account || null };
+    const body = { amount: entry.amount, date: todayIso(), method: entry.method || "nakit", notes: entry.note || undefined, account_id: entry.account || null, ...parasutCollectFields(psAccount) };
     try {
       const out = await sendKeyedMoney(
         () => addLocalInvoicePayment(token, inv.id, body, key),
@@ -251,7 +280,10 @@ export default function LocalInvoiceDetailScreen() {
             confirmLabel: "Yeniden gönder",
           })
       );
-      if (out.ok) toast(out.result?.replayed ? "Tahsilat zaten kaydedilmişti." : "Tahsilat kaydedildi", "success");
+      if (out.ok) {
+        const r = collectResultText(out.result);
+        toast(r.text, r.kind);
+      }
       else toast(collectErrorText(out.error, out.uncertain), "error");
       await load();
     } finally {
@@ -293,6 +325,39 @@ export default function LocalInvoiceDetailScreen() {
     } finally {
       setBusy(null);
       setVoidingId(null);
+    }
+  };
+
+  // C4 eki: tahsilatın Paraşüt eylemi.  "Gönder" Paraşüt hesabı seçtirir; belirsizde yalnız işaretleme.
+  const onParasutAction = async (p: Pay, action: ParasutAction) => {
+    if (!token || !p.id || psBusy) return;
+    let account: string | undefined;
+    if (action === "send") {
+      let accounts: { id: string; name: string }[] = [];
+      try {
+        accounts = await getParasutAccounts(token);
+      } catch {
+        toast("Paraşüt hesapları yüklenemedi; bağlantıyı kontrol edip yeniden deneyin.", "error");
+        return;
+      }
+      if (!accounts.length) {
+        toast("Paraşüt'te kasa/banka hesabı bulunamadı.", "error");
+        return;
+      }
+      const pick = await choose<string>({ title: "Paraşüt kasa / banka hesabı", message: "Tahsilat bu hesaba bir kez yazılır.", options: accounts.map((a) => ({ value: a.id, label: a.name })) });
+      if (!pick) return;
+      account = pick;
+    }
+    const req = parasutActionRequest(inv.id, p.id, action, account);
+    setPsBusy(p.id);
+    try {
+      const r = parasutActionResult(action, await postParasutPaymentAction(token, req.path, req.body));
+      toast(r.text, r.ok ? "success" : "error");
+    } catch (e: any) {
+      toast(e?.message || parasutActionFailText(action), "error");
+    } finally {
+      setPsBusy(null);
+      load();
     }
   };
 
@@ -461,6 +526,8 @@ export default function LocalInvoiceDetailScreen() {
             <Card style={styles.block}>
               {payments.map((p, i) => {
                 const acts = mayWrite ? invoicePaymentActions(inv, p) : null;
+                const ps = parasutPayView(p, { linked: Boolean(inv.parasut_invoice_id), locked: !mayWrite || Boolean(inv.officialize_lock), canSend: caps.payment_sync });
+                const psColor = ps ? { good: colors.success, muted: colors.textTertiary, warn: colors.amber, bad: colors.error }[ps.tone] : undefined;
                 return (
                 <View key={p.id || i}>
                 <ListRow
@@ -475,6 +542,16 @@ export default function LocalInvoiceDetailScreen() {
                   meta={acts?.customerPayment ? "Cari tahsilatından · cariden düzenlenir" : p.notes || undefined}
                   trailing={<Text style={amount(colors.success)}>{formatMoney(p.amount, cur)}</Text>}
                 />
+                {ps ? (
+                  <View testID={`invoice-pay-parasut-${p.id}`} style={styles.psRow}>
+                    <Text style={[type.caption, { color: psColor, flexShrink: 1 }]}>
+                      {[ps.label, ps.note, ps.detail].filter(Boolean).join(" · ")}
+                    </Text>
+                    {ps.actions.map((a) => (
+                      <Button key={a} testID={`invoice-pay-parasut-${a}-${p.id}`} size="sm" variant="secondary" label={PARASUT_ACTION_LABELS[a]} busy={psBusy === p.id} disabled={Boolean(psBusy) || Boolean(busy)} onPress={() => onParasutAction(p, a)} />
+                    ))}
+                  </View>
+                ) : null}
                 {acts && (acts.edit || acts.void) ? (
                   <View style={styles.rowActs}>
                     {acts.edit ? (
@@ -514,6 +591,7 @@ const styles = StyleSheet.create({
   progressFill: { height: 6, borderRadius: 3, backgroundColor: ON_HERO.live },
   progressText: { color: ON_HERO.soft, fontSize: 12, fontWeight: "500" },
   alert: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, marginHorizontal: spacing.lg, marginTop: spacing.md, padding: spacing.md, borderRadius: radius.md },
+  psRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, marginTop: -spacing.xs },
   rowActs: { flexDirection: "row", justifyContent: "flex-end", gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, marginTop: -spacing.xs },
   actions: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginTop: spacing.md },
   skeleton: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, gap: spacing.md },

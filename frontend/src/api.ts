@@ -904,12 +904,13 @@ export async function checkLocalInvoiceEdocStatus(token: string, id: string) {
 export async function addLocalInvoicePayment(
   token: string,
   id: string,
-  body: { amount: number; date: string; method: string; notes?: string; account_id?: string | null },
+  body: { amount: number; date: string; method: string; notes?: string; account_id?: string | null; parasut_sync?: boolean; parasut_account_id?: string | null },
   idempotencyKey?: string
 ) {
   const payload: Record<string, unknown> = { ...body };
   if (!body.account_id) delete payload.account_id;
-  return request<{ ok?: boolean; remaining_amount?: number; status?: string; replayed?: boolean }>(
+  if (!body.parasut_sync) { delete payload.parasut_sync; delete payload.parasut_account_id; }
+  return request<{ ok?: boolean; remaining_amount?: number; status?: string; replayed?: boolean; parasut?: { ok?: boolean; error?: string } }>(
     `/local-invoices/${encodeURIComponent(id)}/payment`,
     { method: "POST", body: JSON.stringify(payload), headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined },
     token
