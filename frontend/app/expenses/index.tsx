@@ -7,14 +7,16 @@ import {
   getExpenseModuleEnabled,
   getExpenseSummary,
   getUiCapabilities,
+  EXPENSE_PAY,
+  EXPENSE_SOURCE,
   NO_CAPS,
   type ExpensePaymentFilter,
 } from "../../src/api-gider";
+import { router } from "expo-router";
 import { usePagedList } from "../../src/hooks/usePagedList";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney } from "../../src/utils";
-import type { StatusKind } from "../../src/utils";
 import { AlertIcon, DownloadIcon } from "../../src/components/Icons";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { Chip, ChipRow } from "../../src/ui/Chip";
@@ -39,16 +41,6 @@ const FILTERS: [ExpensePaymentFilter, string][] = [
 ];
 
 // Web ExpenseInvoiceDetail.jsx PAY tablosu.
-const PAY: Record<string, { label: string; kind: StatusKind }> = {
-  pending: { label: "Ödenecek", kind: "info" },
-  partial: { label: "Kısmi ödendi", kind: "info" },
-  overdue: { label: "Gecikti", kind: "error" },
-  paid: { label: "Ödendi", kind: "success" },
-  unknown: { label: "Bilinmiyor", kind: "neutral" },
-  reversed: { label: "Geri alındı", kind: "neutral" },
-};
-
-const SOURCE: Record<string, string> = { import: "İçeri alınan", manual: "Elle girilen", legacy: "Eski kayıt" };
 
 export default function ExpensesScreen() {
   const { token } = useAuth();
@@ -183,16 +175,17 @@ export default function ExpensesScreen() {
         emptyDescription={payment ? "Süzgeci değiştirin." : "Gelen e-faturaları içeri aldığınızda ya da web panelinden gider eklediğinizde burada listelenir."}
         header={header}
         renderItem={(x) => {
-          const st = PAY[x.reversed ? "reversed" : String(x.payment_status || "unknown")] || PAY.unknown;
+          const st = EXPENSE_PAY[x.reversed ? "reversed" : String(x.payment_status || "unknown")] || EXPENSE_PAY.unknown;
           const cur = x.currency || "TRY";
           const metaParts = [
             x.due_date ? `Vade ${formatDate(x.due_date)}` : null,
             x.remaining !== null && !x.reversed && x.payment_status !== "paid" ? `Kalan ${formatMoney(x.remaining, cur)}` : null,
-            x.source_kind ? SOURCE[x.source_kind] : null,
+            x.source_kind ? EXPENSE_SOURCE[x.source_kind] : null,
           ].filter(Boolean);
           return (
             <RowCard
               testID={`expense-${x.id}`}
+              onPress={() => router.push({ pathname: "/expenses/[id]", params: { id: x.id } })}
               accent={x.payment_status === "overdue" && !x.reversed ? colors.error : undefined}
               leading={
                 <IconTile tint={colors.errorBg}>

@@ -314,3 +314,131 @@ export async function collectPartyPaymentCompat(
   if (!body.account_id) delete (payload as { account_id?: unknown }).account_id;
   return request<any>(`/customers/${encodeURIComponent(legacyIdOf(partyId))}/payments`, { method: "POST", body: JSON.stringify(payload) }, token);
 }
+
+// ---- Dalga 3 / C2: gider detayı ve borç ödeme (web: ExpenseInvoiceDetail.jsx, PayablePaymentDialog.jsx) ----
+
+export type ExpenseLine = { description: string; quantity: number | null; unit_price: number | null; vat_rate: number | null; discount: number | null; total: number | null };
+export type ExpenseDetail = {
+  id: string;
+  supplier: { name: string; tax_id: string };
+  document_number: string;
+  issue_date: string | null;
+  due_date: string | null;
+  currency: string;
+  lines: ExpenseLine[];
+  totals: { payable: number | null; taxable: number | null; vat: number | null; withholding: number | null; other_levies: number | null };
+  categoryName: string;
+  payable: { ref: string; paid: number | null; remaining: number | null; payment_status: string } | null;
+  reversed: boolean;
+  canPay: boolean;
+  sourceKind: string;
+};
+
+export async function getExpenseDetail(token: string, ref: string): Promise<ExpenseDetail> {
+  const d = await request<any>(`/accounting/expense-invoices/${encodeURIComponent(ref)}`, { method: "GET" }, token);
+  const t = d?.totals || {};
+  const p = d?.payable;
+  return {
+    id: String(d?.id || ref),
+    supplier: { name: String(d?.supplier?.name || ""), tax_id: String(d?.supplier?.tax_id || "") },
+    document_number: String(d?.document_number || ""),
+    issue_date: d?.issue_date ?? null,
+    due_date: d?.due_date ?? null,
+    currency: String(d?.currency || "TRY"),
+    lines: (Array.isArray(d?.lines) ? d.lines : []).map((l: any) => ({
+      description: String(l?.description || ""),
+      quantity: decimalOf(l?.quantity),
+      unit_price: decimalOf(l?.unit_price),
+      vat_rate: decimalOf(l?.vat_rate),
+      discount: decimalOf(l?.discount),
+      total: decimalOf(l?.total),
+    })),
+    totals: {
+      payable: decimalOf(t.payable),
+      taxable: decimalOf(t.taxable),
+      vat: decimalOf(t.vat),
+      withholding: decimalOf(t.withholding),
+      other_levies: decimalOf(t.other_levies),
+    },
+    categoryName: String(d?.expense?.category_name || ""),
+    payable: p && p.ref ? { ref: String(p.ref), paid: decimalOf(p.paid), remaining: decimalOf(p.remaining), payment_status: String(p.payment_status || "unknown") } : null,
+    reversed: d?.reversed === true,
+    canPay: d?.actions?.can_pay === true,
+    sourceKind: String(d?.source_kind || ""),
+  };
+}
+
+// GET /accounting/payables/{ref}/payments → {payable:{total, paid, remaining (dize), currency, status}, can_pay, items[]}
+export type PayableInfo = {
+  total: string;
+  paid: string;
+  remaining: string;
+  currency: string;
+  status: string;
+  canPay: boolean;
+  items: { id: string; date: string; amount: string; currency: string; account_name: string; completed: boolean }[];
+};
+
+const curOf = (c: unknown) => {
+  const v = String(c || "").trim().toUpperCase() || "TRY";
+  return v === "TRL" ? "TRY" : v;
+};
+
+export async function getPayableInfo(token: string, ref: string): Promise<PayableInfo> {
+  const d = await request<any>(`/accounting/payables/${encodeURIComponent(ref)}/payments`, { method: "GET" }, token);
+  const p = d?.payable || {};
+  return {
+    total: String(p.total ?? "0"),
+    paid: String(p.paid ?? "0"),
+    remaining: String(p.remaining ?? "0"),
+    currency: curOf(p.currency),
+    status: String(p.status || ""),
+    canPay: d?.can_pay === true,
+    items: (Array.isArray(d?.items) ? d.items : []).map((x: any) => ({
+      id: String(x?.id || ""),
+      date: String(x?.date || ""),
+      amount: String(x?.amount ?? "0"),
+      currency: curOf(x?.currency),
+      account_name: String(x?.account_name || ""),
+      completed: x?.status === "completed",
+    })),
+  };
+}
+
+// Tutar "1250.50" biçiminde dize gider (float'a çevrilmez). Ağ hatası/5xx sonrası AYNI anahtarla yeniden gönderilir;
+// kesin ret (4xx, 429 hariç) sonrası çağıran anahtarı yeniler. PAYMENT_LEDGER_CONFLICT'te yeniden gönderilmez.
+export async function addPayablePayment(
+  token: string,
+  ref: string,
+  body: { amount: string; date: string; account_id: string; idempotency_key: string; note?: string }
+) {
+  const payload: Record<string, string> = { amount: body.amount, date: body.date, account_id: body.account_id, idempotency_key: body.idempotency_key };
+  if (body.note && body.note.trim()) payload.note = body.note.trim();
+  return request<any>(`/accounting/payables/${encodeURIComponent(ref)}/payments`, { method: "POST", body: JSON.stringify(payload) }, token);
+}
+
+// Kuruş cinsinden tam sayı ("271.5" → 27150); geçersizse null. Ondalık karşılaştırma float hatasına düşmesin.
+export function toMinor(text: string): number | null {
+  const m = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(text ?? "").trim());
+  return m ? Number(m[1]) * 100 + Number((m[2] || "").padEnd(2, "0") || "0") : null;
+}
+
+// İşletme günü (Europe/Istanbul). Saat dilimi desteklenmezse cihaz günü.
+export function istanbulToday(now = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+  } catch {
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  }
+}
+
+// Ödeme durumu ve kaynak etiketleri (liste ve detay ortak; web ExpenseInvoiceDetail PAY).
+export const EXPENSE_PAY: Record<string, { label: string; kind: "info" | "error" | "success" | "neutral" }> = {
+  pending: { label: "Ödenecek", kind: "info" },
+  partial: { label: "Kısmi ödendi", kind: "info" },
+  overdue: { label: "Gecikti", kind: "error" },
+  paid: { label: "Ödendi", kind: "success" },
+  unknown: { label: "Bilinmiyor", kind: "neutral" },
+  reversed: { label: "Geri alındı", kind: "neutral" },
+};
+export const EXPENSE_SOURCE: Record<string, string> = { import: "İçeri alınan", manual: "Elle girilen", legacy: "Eski kayıt" };

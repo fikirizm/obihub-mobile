@@ -59,6 +59,11 @@ const accounts = [
   { id: "a1", name: "Nakit Kasa", account_type: "cash", currency: "TRY", balance: 12450.75, is_default: true },
   { id: "a2", name: "Garanti Ticari", account_type: "bank", currency: "TRY", balance: 86320.1, bank_name: "Garanti BBVA" },
 ];
+// Dalga 3 / C2 gider durumları (detay + ödeme).
+const expenseState = {
+  "obihub:e1": { supplier: "Kargo Lojistik A.Ş.", doc: "ABC2026000123", kind: "import", total: "1840.60", remaining: 1840.6, levies: "0", status: "pending", payments: [], seenKeys: [] },
+  "obihub:e2": { supplier: "Ofis Kırtasiye", doc: "OK-77", kind: "manual", total: "1250.50", remaining: 1250.5, levies: "50.00", status: "overdue", payments: [{ id: "pp-old", date: "2026-10-25", amount: "0.00", currency: "TRY", account_name: "Nakit Kasa", status: "completed" }].slice(1), seenKeys: [] },
+};
 const entries = [
   { id: "e1", account_id: "a1", entry_type: "income", amount: 1250, entry_date: "2026-11-10", description: "Nakit satış" },
   { id: "e2", account_id: "a1", entry_type: "expense", amount: 380.5, entry_date: "2026-11-09", description: "Kargo malzemesi" },
@@ -506,6 +511,47 @@ http
       return send(res, 200, { version: 1, capabilities: { obihub_os: false, inbox_read: false, payable_payment: true, expense_ledger: true, expense_manual_entry: true, manual_entry_reason: null, parasut_connected: true, parasut_expense_view: true }, workspace_scope: null });
     if (path === "/accounting/expense-settings") return send(res, 200, { expense_module_enabled: true, parasut_expense_view_enabled: true, parasut_connected: true });
     if (path === "/accounting/expense-invoices/summary") return send(res, 200, { currencies: [{ currency: "TRY", payable: "9400.00", overdue: "1250.50" }] });
+    // --- Dalga 3 / C2: gider detayı ve borç ödeme. e1 ödenebilir, e2'de ikinci ödeme 409 PAYMENT_EXCEEDS_OUTSTANDING denenir.
+    let gm; // c2
+    if (req.method === "GET" && (gm = path.match(/^\/accounting\/expense-invoices\/(.+)$/)) && gm[1] !== "summary") {
+      const ref = decodeURIComponent(gm[1]);
+      const ex = expenseState[ref];
+      if (!ex) return send(res, 404, { code: "NOT_FOUND", detail: "Bulunamadı" });
+      return send(res, 200, {
+        id: ref, source: ref.startsWith("obihub:") ? "obihub" : "legacy", source_kind: ex.kind, supplier: { id: "s1", name: ex.supplier, tax_id: "1234567890" },
+        document_number: ex.doc, issue_date: "2026-11-09", due_date: "2026-11-24", currency: "TRY",
+        lines: [
+          { description: "Kargo hizmet bedeli", quantity: "10", unit_price: "120.00", vat_rate: "20", discount: "0", total: "1200.00" },
+          { description: "Ambalaj malzemesi", quantity: "2", unit_price: "150.50", vat_rate: "20", discount: "0", total: "301.00" },
+        ],
+        totals: { taxable: "1501.00", vat: "300.20", withholding: "0", other_levies: ex.levies, payable: ex.total },
+        expense: { category_id: "c1", category_name: "Kargo giderleri", amount: "1501.00" },
+        payable: { ref, paid: (Number(ex.total) - ex.remaining).toFixed(2), remaining: ex.remaining.toFixed(2), payment_status: ex.remaining <= 0 ? "paid" : ex.remaining < Number(ex.total) ? "partial" : ex.status },
+        reversed: false, actions: { can_pay: ex.remaining > 0, can_reverse: false },
+      });
+    }
+    if ((gm = path.match(/^\/accounting\/payables\/(.+)\/payments$/))) {
+      const ref = decodeURIComponent(gm[1]);
+      const ex = expenseState[ref];
+      if (!ex) return send(res, 404, { code: "NOT_FOUND", detail: "Bulunamadı" });
+      const view = () => ({ payable: { total: ex.total, paid: (Number(ex.total) - ex.remaining).toFixed(2), remaining: ex.remaining.toFixed(2), currency: "TRY", status: ex.remaining <= 0 ? "paid" : "open" }, can_pay: ex.remaining > 0, items: ex.payments });
+      if (req.method === "GET") return send(res, 200, view());
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        console.log("WRITE", path, raw);
+        const b = JSON.parse(raw || "{}");
+        if (ex.seenKeys.includes(b.idempotency_key)) return send(res, 200, view());
+        const amt = Number(b.amount);
+        if (amt > ex.remaining + 1e-9) return send(res, 409, { code: "PAYMENT_EXCEEDS_OUTSTANDING", detail: "Tutar kalan borçtan büyük." });
+        ex.seenKeys.push(b.idempotency_key);
+        ex.remaining = Math.round((ex.remaining - amt) * 100) / 100;
+        const acc = accounts.find((x) => x.id === b.account_id);
+        ex.payments.push({ id: "pp" + ex.payments.length, date: b.date, amount: Number(b.amount).toFixed(2), currency: "TRY", account_name: acc ? acc.name : "", status: "completed" });
+        send(res, 201, view());
+      });
+      return;
+    }
     if (path === "/accounting/expense-invoices") {
       const rows = [
         { id: "obihub:e1", source: "obihub", supplier_name: "Kargo Lojistik A.Ş.", document_number: "ABC2026000123", issue_date: "2026-11-09", due_date: "2026-11-24", total: "1840.60", currency: "TRY", payment_status: "pending", reversed: false, other_levies: null, remaining: "1840.60", source_kind: "import" },

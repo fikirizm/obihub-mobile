@@ -10,50 +10,17 @@ import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing, tabular, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney } from "../../src/utils";
 import { EmptyState } from "../../src/components/EmptyState";
-import { ArrowRightIcon, CheckIcon, WalletIcon } from "../../src/components/Icons";
-import { PressableScale } from "../../src/components/KPICard";
+import { ArrowRightIcon, WalletIcon } from "../../src/components/Icons";
 import { Button } from "../../src/ui/Button";
 import { parseAmount, useFeedback } from "../../src/ui/Feedback";
 import { FormField } from "../../src/ui/FormField";
 import { StackHeader } from "../../src/ui/Header";
 import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
-import { Card, IconTile, SectionTitle } from "../../src/ui/ListRow";
+import { Card, SectionTitle } from "../../src/ui/ListRow";
 import type { CashAccount } from "../../src/types";
+import { AccountOption } from "../../src/components/AccountOption";
 
 const cur = (a?: CashAccount | null) => String(a?.currency || "TRY").toUpperCase();
-
-// Seçilebilir hesap satırı: seçili olan renkli çerçeve ve onay simgesiyle ayrılır.
-function AccountOption({ account, selected, onPress, testID, divider }: { account: CashAccount; selected: boolean; onPress: () => void; testID: string; divider: boolean }) {
-  const { colors } = useTheme();
-  return (
-    <PressableScale
-      testID={testID}
-      onPress={onPress}
-      accessibilityRole="radio"
-      accessibilityLabel={`${account.name}, bakiye ${formatMoney(account.balance, account.currency)}`}
-      accessibilityState={{ selected }}
-    >
-      <View style={[styles.option, divider && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
-        <IconTile tint={selected ? colors.emerald : colors.surfaceMuted}>
-          {selected ? <CheckIcon size={18} color={colors.surface} /> : <WalletIcon size={18} color={colors.textSecondary} />}
-        </IconTile>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={1}>
-            {account.name}
-          </Text>
-          {account.bank_name ? (
-            <Text style={[type.footnote, { color: colors.textSecondary }]} numberOfLines={1}>
-              {account.bank_name}
-            </Text>
-          ) : null}
-        </View>
-        <Text style={[type.callout, tabular, { color: Number(account.balance) < 0 ? colors.error : colors.textPrimary, fontWeight: "600" }]} numberOfLines={1}>
-          {formatMoney(account.balance, account.currency)}
-        </Text>
-      </View>
-    </PressableScale>
-  );
-}
 
 export default function TransferScreen() {
   const params = useLocalSearchParams<{ from?: string }>();
