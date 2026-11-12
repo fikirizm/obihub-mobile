@@ -168,3 +168,126 @@ export async function dismissReconciliation(token: string, itemIds: string[]) {
     token
   );
 }
+
+// ---- Dalga 2 / B1: ürün eşleştirme (web: ProductDetailPage.js fetchSourceMatchProducts, handleSourceMatchSave,
+// handleSourceMatchUnlink, fetchParasutProducts, handleParasutSaveMatch, handleParasutUnlink) ----
+
+export type ProductLinks = {
+  name: string;
+  barcode: string;
+  sku: string;
+  // channel_links.<sağlayıcı> = mağazadaki ürün kimliği; channel_details.<sağlayıcı>.integration_id = bağlı mağaza.
+  channelLinks: Record<string, string>;
+  channelDetails: Record<string, { integration_id?: string; barcode?: string; source_product_id?: string }>;
+  parasutProductId: string;
+  parasutProductName: string;
+  push: Record<string, ChannelPush>;
+};
+
+export async function getProductLinks(token: string, productId: string): Promise<ProductLinks> {
+  const p = await request<any>(`/products/${encodeURIComponent(productId)}`, {}, token);
+  const obj = (v: any) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
+  const links: Record<string, string> = {};
+  for (const [k, v] of Object.entries(obj(p?.channel_links))) if (v != null && String(v).trim()) links[k.toLowerCase()] = String(v);
+  return {
+    name: String(p?.name || ""),
+    barcode: String(p?.barcode || ""),
+    sku: String(p?.sku || ""),
+    channelLinks: links,
+    channelDetails: obj(p?.channel_details),
+    parasutProductId: String(p?.parasut_product_id || links.parasut || ""),
+    parasutProductName: String(p?.parasut_product_name || ""),
+    push: obj(p?.channel_push),
+  };
+}
+
+// Bu mağaza için eşleşme: sağlayıcı bağlantısı var ve (kayıtlı mağaza yoksa ya da) kayıtlı mağaza bu mağaza.
+export function channelLinkFor(links: ProductLinks | null, ch: { id: string; platform: string }) {
+  if (!links) return null;
+  const provider = ch.platform.toLowerCase();
+  const ext = links.channelLinks[provider];
+  if (!ext) return null;
+  const detail = links.channelDetails[provider] || {};
+  const store = String(detail.integration_id || "");
+  if (store && store !== ch.id) return { externalId: ext, otherStore: store, barcode: String(detail.barcode || "") };
+  return { externalId: ext, otherStore: "", barcode: String(detail.barcode || "") };
+}
+
+export type SourceProduct = { externalId: string; name: string; sku: string; barcode: string };
+
+// GET /integrations/{id}/source-products?search&page&per_page (per_page en çok 100). Sunucu tarafı arama ve
+// sayfalama PM sırasında; `hasMore` toplamdan ya da dolu sayfadan tahmin edilir.
+export async function getSourceProducts(token: string, integrationId: string, search: string, page = 1, perPage = 50) {
+  const qs = new URLSearchParams({ search: search.trim(), page: String(page), per_page: String(perPage) });
+  const r = await request<any>(`/integrations/${encodeURIComponent(integrationId)}/source-products?${qs.toString()}`, {}, token);
+  const rows: any[] = Array.isArray(r?.items) ? r.items : [];
+  const items: SourceProduct[] = rows
+    .map((x) => ({
+      externalId: String(x?.external_id ?? x?.id ?? ""),
+      name: String(x?.name || x?.title || ""),
+      sku: String(x?.sku || ""),
+      barcode: String(x?.barcode || ""),
+    }))
+    .filter((x) => x.externalId);
+  const total = Number(r?.total);
+  const hasMore = Number.isFinite(total) && total > page * perPage ? true : rows.length >= perPage;
+  return { items, hasMore };
+}
+
+export async function linkProductChannel(
+  token: string,
+  productId: string,
+  input: { provider: string; externalId: string; integrationId: string; barcode?: string }
+) {
+  const body: Record<string, string> = {
+    provider: input.provider.toLowerCase(),
+    external_id: input.externalId,
+    source_product_id: input.externalId,
+    // Mobil web'den bir adım ileride: bağlantının mağazası ve (Trendyol) gönderim barkodu da kaydedilir.
+    integration_id: input.integrationId,
+  };
+  if (input.barcode && input.provider.toLowerCase() === "trendyol") body.barcode = input.barcode;
+  return request<{ success?: boolean; message?: string }>(
+    `/products/${encodeURIComponent(productId)}/link-channel`,
+    { method: "POST", body: JSON.stringify(body) },
+    token
+  );
+}
+
+export async function unlinkProductChannel(token: string, productId: string, provider: string) {
+  return request<{ success?: boolean; message?: string }>(
+    `/products/${encodeURIComponent(productId)}/unlink-channel`,
+    { method: "POST", body: JSON.stringify({ provider: provider.toLowerCase() }) },
+    token
+  );
+}
+
+export async function getParasutProductsForMatch(token: string, search: string) {
+  const qs = new URLSearchParams({ search: search.trim(), page: "1", per_page: "25" });
+  const r = await request<any>(`/parasut/products?${qs.toString()}`, {}, token);
+  const rows: any[] = Array.isArray(r?.items) ? r.items : [];
+  return rows
+    .map((x) => {
+      const a = x?.attributes || {};
+      return {
+        externalId: String(x?.id ?? ""),
+        name: String(x?.name || a.name || ""),
+        sku: String(x?.code || a.code || x?.sku || ""),
+        barcode: String(x?.barcode || a.barcode || ""),
+      } as SourceProduct;
+    })
+    .filter((x) => x.externalId);
+}
+
+export async function linkProductParasut(token: string, productId: string, parasutId: string, name: string) {
+  const qs = new URLSearchParams({ parasut_product_id: parasutId, parasut_product_name: name });
+  return request<{ success?: boolean; message?: string }>(
+    `/products/${encodeURIComponent(productId)}/link-parasut?${qs.toString()}`,
+    { method: "POST" },
+    token
+  );
+}
+
+export async function unlinkProductParasut(token: string, productId: string) {
+  return request<{ success?: boolean; message?: string }>(`/products/${encodeURIComponent(productId)}/unlink-parasut`, { method: "POST" }, token);
+}

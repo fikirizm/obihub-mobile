@@ -44,7 +44,16 @@ const products = Array.from({ length: 48 }, (_, i) => ({
   id: `p${i + 1}`, name: `Deneme Ürün ${i + 1}`, sku: `SKU-${i + 1}`, barcode: `86900000${String(i + 1).padStart(5, "0")}`,
   stock: (i * 7) % 40, price: 99.9 + i * 12.5,
   ch: { i1: { stock: (i * 7) % 40, price: 109.9 + i * 12.5 }, i2: { stock: (i * 5) % 30, price: 119.9 + i * 12.5 } },
+  // Dalga 2 / B1: p6 Trendyol'la eşleşmemiş; diğerleri iki mağazaya bağlı.
+  links: i === 5 ? { woocommerce: `wc-${i + 1}` } : { woocommerce: `wc-${i + 1}`, trendyol: `ty-${i + 1}` },
+  details: i === 5 ? { woocommerce: { integration_id: "i1" } } : { woocommerce: { integration_id: "i1" }, trendyol: { integration_id: "i2", barcode: `86900000${String(i + 1).padStart(5, "0")}` } },
 }));
+// Trendyol mağaza ürünleri (source-products): p6 için barkodu aynı olan aday ve barkodu farklı bir aday.
+const tySource = [
+  { id: "ty-6", name: "Deneme Ürün 6 (Trendyol)", sku: "SKU-6", barcode: "8690000000006" },
+  { id: "ty-6b", name: "Deneme Ürün 6 – Kırmızı", sku: "SKU-6-K", barcode: "8690000099906" },
+  ...Array.from({ length: 30 }, (_, i) => ({ id: `ty-x${i}`, name: `Trendyol Ürünü ${i + 1}`, sku: `TY-${i + 1}`, barcode: `86999${String(i).padStart(8, "0")}` })),
+];
 
 const accounts = [
   { id: "a1", name: "Nakit Kasa", account_type: "cash", currency: "TRY", balance: 12450.75, is_default: true },
@@ -265,10 +274,36 @@ http
       const slice = rows.slice((page - 1) * per, page * per);
       const integrations = [{ id: "i1", name: "Deneme Mağaza", platform: "woocommerce" }, { id: "i2", name: "Trendyol", platform: "trendyol" }];
       if (path.endsWith("stock"))
-        return send(res, 200, { products: slice.map((p) => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, reserved: p.id === "p2" ? 2 : 0, on_hand: p.stock + (p.id === "p2" ? 2 : 0), image_url: "", integration_stocks: [{ integration_id: "i1", stock: p.ch.i1.stock, active: true, ...(p.id === "p3" ? { pending: true, pending_stock: p.ch.i1.stock + 4, pending_at: new Date().toISOString() } : {}) }, { integration_id: "i2", stock: p.ch.i2.stock, active: true }] })), integrations, total: rows.length, page, per_page: per });
-      return send(res, 200, { products: slice.map((p) => ({ id: p.id, price: p.price.toFixed(2), integration_prices: [{ integration_id: "i1", price: p.ch.i1.price.toFixed(2), active: true, ...(p.id === "p3" ? { pending: true, pending_price: (p.ch.i1.price + 10).toFixed(2), pending_at: new Date().toISOString() } : {}) }, { integration_id: "i2", price: p.ch.i2.price.toFixed(2), active: true }] })), integrations, total: rows.length, page, per_page: per });
+        return send(res, 200, { products: slice.map((p) => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, reserved: p.id === "p2" ? 2 : 0, on_hand: p.stock + (p.id === "p2" ? 2 : 0), image_url: "", integration_stocks: [{ integration_id: "i1", stock: p.ch.i1.stock, active: true, ...(p.id === "p3" ? { pending: true, pending_stock: p.ch.i1.stock + 4, pending_at: new Date().toISOString() } : {}) }, { integration_id: "i2", stock: p.ch.i2.stock, active: true }].filter((r) => r.integration_id !== "i2" || p.links.trendyol) })), integrations, total: rows.length, page, per_page: per });
+      return send(res, 200, { products: slice.map((p) => ({ id: p.id, price: p.price.toFixed(2), integration_prices: [{ integration_id: "i1", price: p.ch.i1.price.toFixed(2), active: true, ...(p.id === "p3" ? { pending: true, pending_price: (p.ch.i1.price + 10).toFixed(2), pending_at: new Date().toISOString() } : {}) }, { integration_id: "i2", price: p.ch.i2.price.toFixed(2), active: true }].filter((r) => r.integration_id !== "i2" || p.links.trendyol) })), integrations, total: rows.length, page, per_page: per });
     }
     // Ürün kimliği (ad / SKU / barkod) ve stok hareketleri — gerçek uçlar: GET|PATCH /products/{id}, GET /stock/movements.
+    // --- Dalga 2 / B1 eşleştirme
+    let lm; // b1
+    if (req.method === "GET" && (lm = path.match(/^\/integrations\/([^/]+)\/source-products$/))) {
+      const q = (url.searchParams.get("search") || "").toLocaleLowerCase("tr-TR");
+      const pg = Number(url.searchParams.get("page") || 1), per = Number(url.searchParams.get("per_page") || 25);
+      const rows = tySource.filter((x) => !q || [x.name, x.sku, x.barcode].some((v) => v.toLocaleLowerCase("tr-TR").includes(q)));
+      return send(res, 200, { items: rows.slice((pg - 1) * per, pg * per).map((x) => ({ ...x, external_id: x.id })), page: pg, per_page: per, total: rows.length });
+    }
+    if (req.method === "POST" && (lm = path.match(/^\/products\/([^/]+)\/(link|unlink)-channel$/))) {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        console.log("WRITE", path, raw);
+        const b = JSON.parse(raw || "{}");
+        const p = products.find((x) => x.id === lm[1]);
+        if (lm[2] === "link") {
+          p.links[b.provider] = b.external_id;
+          p.details[b.provider] = { integration_id: b.integration_id, ...(b.barcode ? { barcode: b.barcode } : {}) };
+        } else {
+          delete p.links[b.provider];
+          delete p.details[b.provider];
+        }
+        send(res, 200, { success: true, message: "Entegrasyon eşleştirmesi kaydedildi" });
+      });
+      return;
+    }
     const prodMatch = path.match(/^\/products\/([^/]+)$/);
     if (prodMatch && (req.method === "GET" || req.method === "PATCH")) {
       const p = products.find((x) => x.id === decodeURIComponent(prodMatch[1]));
@@ -281,7 +316,7 @@ http
           : x.id === "p3"
           ? { i2: { provider: "trendyol", ok: null, state: "pending", at: new Date().toISOString(), code: null, detail: null } }
           : {};
-      const view = () => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, price: p.price, channel_push: pushFor(p) });
+      const view = () => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, price: p.price, channel_push: pushFor(p), channel_links: p.links, channel_details: p.details });
       if (req.method === "GET") return send(res, 200, view());
       let raw = "";
       req.on("data", (c) => (raw += c));

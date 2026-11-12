@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -6,13 +6,13 @@ import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { isUncertainWrite } from "../../src/api-finans";
-import { channelPushBadge, getProductChannelPush, type ChannelPush, type PushBadge } from "../../src/api-urun-stok";
+import { channelLinkFor, channelPushBadge, getProductLinks, type ChannelPush, type ProductLinks, type PushBadge } from "../../src/api-urun-stok";
 import { getCatalog, setChannelPrice, setChannelStock, setProductPrice, setProductStock, SYNC_NONE } from "../../src/api";
 import { recallChannels, recallProduct, rememberCatalog } from "../../src/catalogCache";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { palette, radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatTry } from "../../src/utils";
-import { ArrowRightIcon, LinkIcon, PackageIcon, TagIcon, ZapIcon } from "../../src/components/Icons";
+import { ArrowRightIcon, LinkIcon, PackageIcon, ReceiptIcon, TagIcon, ZapIcon } from "../../src/components/Icons";
 import { EmptyState } from "../../src/components/EmptyState";
 import { PressableScale } from "../../src/components/KPICard";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
@@ -203,11 +203,17 @@ export default function ProductDetailScreen() {
   // Kanal başına son gönderim sonucu; liste uçları taşımadığı için ürün ucundan ayrıca okunur.
   const [pushMap, setPushMap] = useState<Record<string, ChannelPush>>({});
   const [pushKey, setPushKey] = useState(0);
+  // Ürün belgesindeki eşleşmeler (channel_links / channel_details / Paraşüt); "Eşleştirmeler" bölümü bunu gösterir.
+  const [links, setLinks] = useState<ProductLinks | null>(null);
   useEffect(() => {
     if (!token || !id) return;
     let alive = true;
-    getProductChannelPush(token, id)
-      .then((m) => alive && setPushMap(m))
+    getProductLinks(token, id)
+      .then((l) => {
+        if (!alive) return;
+        setLinks(l);
+        setPushMap(l.push as Record<string, ChannelPush>);
+      })
       .catch(() => {});
     return () => {
       alive = false;
@@ -225,9 +231,23 @@ export default function ProductDetailScreen() {
   // Değişince "Stok hareketleri" bölümü yeniden okunur.
   const [movementsKey, setMovementsKey] = useState(0);
 
+  // Eşleştirme ekranından dönüldüğünde kanal satırları ve eşleşmeler sunucudan yeniden okunur.
+  const backFromMatch = useRef(false);
+  const reloadRef = useRef<((notify: boolean) => Promise<unknown>) | null>(null);
+  const openMatch = (target: string) => {
+    if (!product) return;
+    backFromMatch.current = true;
+    router.push({ pathname: "/products/match", params: { id: product.id, target } } as any);
+  };
+
   // Bilgi düzenleme ekranından dönüldüğünde yeni ad ve kodlar önbellekten alınır.
   useFocusEffect(
     useCallback(() => {
+      if (backFromMatch.current) {
+        backFromMatch.current = false;
+        setPushKey((k) => k + 1);
+        reloadRef.current?.(false);
+      }
       const cached = recallProduct(id);
       if (!cached) return;
       setProduct((prev) =>
@@ -473,6 +493,33 @@ export default function ProductDetailScreen() {
   };
 
   const hasImage = Boolean(product.image_url && /^https?:\/\//i.test(product.image_url));
+  reloadRef.current = reload;
+  // Eşleştirme hedefleri: her mağaza ve (Paraşüt bağlıysa) muhasebe ürünü. BizimHesap/BenimPOS eşleştirmesi web'de toplu yapılır.
+  const matchTargets = [
+    ...channels.map((ch) => {
+      const l = channelLinkFor(links, ch);
+      const matchedRow = product.channelStocks.some((x) => x.integration_id === ch.id) || product.channelPrices.some((x) => x.integration_id === ch.id);
+      const linked = Boolean(l && !l.otherStore) || (!links && matchedRow);
+      const state = l?.otherStore
+        ? "Aynı pazaryerinin başka mağazasıyla eşleşik"
+        : linked
+          ? ["Eşleşik", l?.externalId ? `Kimlik ${l.externalId}` : null, l?.barcode ? `Barkod ${l.barcode}` : null].filter(Boolean).join(" · ")
+          : "Eşleştirilmemiş";
+      return { key: ch.id, name: ch.name, platform: ch.platform, linked, state, warn: Boolean(l?.otherStore) };
+    }),
+    ...(accountingProgram === "parasut"
+      ? [
+          {
+            key: "parasut",
+            name: "Paraşüt",
+            platform: "parasut",
+            linked: Boolean(links?.parasutProductId),
+            state: links?.parasutProductId ? `Eşleşik · ${links.parasutProductName || `Kimlik ${links.parasutProductId}`}` : "Eşleştirilmemiş",
+            warn: false,
+          },
+        ]
+      : []),
+  ];
   const lowStock = product.stock <= 5;
   const reserved = Number(product.reserved || 0);
   const onHand = typeof product.onHand === "number" ? product.onHand : product.stock + reserved;
@@ -608,7 +655,7 @@ export default function ProductDetailScreen() {
                       push={row ? pushOf(ch) : null}
                       busy={busyKey === `cs-${ch.id}`}
                       editable={canEdit && Boolean(row)}
-                      onPress={canEdit && row && !busyKey ? () => editChannelStock(ch, row.stock) : undefined}
+                      onPress={canEdit && row && !busyKey ? () => editChannelStock(ch, row.stock) : !row && canEditInfo ? () => openMatch(ch.id) : undefined}
                     />
                   );
                 })}
@@ -639,10 +686,52 @@ export default function ProductDetailScreen() {
                       push={row ? pushOf(ch) : null}
                       busy={busyKey === `cp-${ch.id}`}
                       editable={canEdit && Boolean(row)}
-                      onPress={canEdit && row && !busyKey ? () => editChannelPrice(ch, row.price) : undefined}
+                      onPress={canEdit && row && !busyKey ? () => editChannelPrice(ch, row.price) : !row && canEditInfo ? () => openMatch(ch.id) : undefined}
                     />
                   );
                 })}
+              </Card>
+            </SafeAnimatedView>
+
+            <SafeAnimatedView entering={FadeInDown.delay(190).duration(380)}>
+              <SectionTitle title="Eşleştirmeler" />
+              <Card style={styles.block}>
+                {matchTargets.map((t, i) => (
+                  <PressableScale
+                    key={t.key}
+                    testID={`match-row-${t.key}`}
+                    disabled={!canEditInfo}
+                    onPress={canEditInfo ? () => openMatch(t.key) : undefined}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${t.name}, ${t.state}${canEditInfo ? ", eşleştirmeyi aç" : ""}`}
+                    style={[styles.row, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+                  >
+                    <View style={!t.linked && styles.dim}>
+                      {t.platform === "parasut" ? (
+                        <IconTile tint={colors.primarySoft}>
+                          <ReceiptIcon size={18} color={colors.primary} />
+                        </IconTile>
+                      ) : (
+                        <PlatformLogo provider={t.platform} size="sm" />
+                      )}
+                    </View>
+                    <View style={styles.rowBody}>
+                      <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={1}>
+                        {t.name}
+                      </Text>
+                      <Text style={[type.caption, { color: t.warn ? colors.amber : colors.textTertiary, marginTop: 2 }]} numberOfLines={1}>
+                        {t.state}
+                      </Text>
+                    </View>
+                    {canEditInfo ? (
+                      <View style={[styles.matchPill, { backgroundColor: t.linked ? colors.surfaceMuted : colors.primarySoft }]}>
+                        <Text style={[type.caption, { color: t.linked ? colors.textSecondary : colors.primary, fontWeight: "600" }]}>
+                          {t.linked ? "Değiştir" : "Eşleştir"}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </PressableScale>
+                ))}
               </Card>
             </SafeAnimatedView>
 
@@ -651,7 +740,7 @@ export default function ProductDetailScreen() {
                 <ZapIcon size={18} color={colors.primary} />
               </IconTile>
               <Text style={[type.caption, styles.noteText, { color: colors.textSecondary }]}>
-                Kanal değeri değiştiğinde ilgili pazaryerine hemen gönderilir. Kanala özel değer girilmemişse satır ana stoğu ve ana fiyatı gösterir; ana değerde yapılan değişiklik pazaryerine kendiliğinden gönderilmez. Ürün eşleştirme web panelinden yapılır.
+                Kanal değeri değiştiğinde ilgili pazaryerine hemen gönderilir. Kanala özel değer girilmemişse satır ana stoğu ve ana fiyatı gösterir; ana değerde yapılan değişiklik pazaryerine kendiliğinden gönderilmez.
               </Text>
             </SafeAnimatedView>
           </>
@@ -711,5 +800,6 @@ const styles = StyleSheet.create({
   noteDot: { width: 6, height: 6, borderRadius: 3 },
   note: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginHorizontal: spacing.lg, marginTop: spacing.md },
   noteText: { flex: 1, minWidth: 0 },
+  matchPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill },
   emptyCard: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.lg },
 });
