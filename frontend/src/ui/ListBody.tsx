@@ -7,6 +7,7 @@ import { EmptyState } from "../components/EmptyState";
 import { OrderCardSkeleton } from "../components/Skeleton";
 import { SafeAnimatedView } from "../components/SafeAnimatedView";
 import { FadeInDown } from "react-native-reanimated";
+import { haptic } from "../haptics";
 
 type ListState<T> = {
   items: T[];
@@ -27,6 +28,7 @@ export function ListBody<T extends { id: string }>({
   emptyDescription,
   header,
   icon,
+  emptyAction,
 }: {
   state: ListState<T>;
   renderItem: (item: T, index: number) => React.ReactElement;
@@ -34,6 +36,8 @@ export function ListBody<T extends { id: string }>({
   emptyDescription: string;
   header?: React.ReactElement | null;
   icon?: React.ReactNode;
+  // G4: boş listede yönlendiren eylem (ör. "Cari ekle"); hata durumunda yerine "Tekrar dene" çıkar.
+  emptyAction?: { label: string; onPress: () => void } | null;
 }) {
   const { colors } = useTheme();
   if (state.loading) {
@@ -55,7 +59,7 @@ export function ListBody<T extends { id: string }>({
       onEndReached={state.loadMore}
       ListHeaderComponent={header}
       ItemSeparatorComponent={() => <View style={{ height: spacing.xs }} />}
-      refreshControl={<RefreshControl refreshing={state.refreshing} onRefresh={state.refresh} tintColor={colors.primary} />}
+      refreshControl={<RefreshControl refreshing={state.refreshing} onRefresh={() => { haptic.select(); state.refresh(); }} tintColor={colors.primary} />}
       renderItem={({ item, index }) =>
         // İlk ekrandaki satırlar sırayla kayarak gelir; sonradan yüklenenler beklemeden görünür.
         index < 10 ? (
@@ -69,8 +73,8 @@ export function ListBody<T extends { id: string }>({
           icon={icon || <InboxIcon size={30} color={colors.textTertiary} />}
           title={state.error ? "Yüklenemedi" : emptyTitle}
           description={state.error || emptyDescription}
-          actionLabel={state.error ? "Tekrar dene" : undefined}
-          onAction={state.error ? state.reload : undefined}
+          actionLabel={state.error ? "Tekrar dene" : emptyAction?.label}
+          onAction={state.error ? state.reload : emptyAction?.onPress}
         />
       }
       ListFooterComponent={state.loadingMore ? <ActivityIndicator color={colors.primary} style={{ marginVertical: spacing.lg }} /> : null}

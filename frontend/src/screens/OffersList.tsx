@@ -3,6 +3,8 @@ import { FlatList, RefreshControl, ScrollView, StyleSheet, Text, View } from "re
 import { router } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../auth/AuthProvider";
+import { canManage } from "../auth/permissions";
+import { haptic } from "../haptics";
 import { useTheme } from "../theme/ThemeProvider";
 import { radius, spacing, type } from "../theme/tokens";
 import { getSalesOffers } from "../api";
@@ -128,7 +130,8 @@ async function fetchAllOffers(token: string): Promise<{ offers: SalesOffer[]; to
 
 // Teklifler ekranına gömülen Paraşüt teklif listesi.
 export function OffersList() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const canCreate = canManage(user, "billing");
   const { colors } = useTheme();
   const [list, setList] = useState<SalesOffer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -251,6 +254,7 @@ export function OffersList() {
     <RefreshControl
       refreshing={refreshing}
       onRefresh={() => {
+        haptic.select();
         setRefreshing(true);
         load(true);
       }}
@@ -330,8 +334,8 @@ export function OffersList() {
               description={
                 query ? `"${query}" için eşleşen teklif bulunamadı.` : "Paraşüt'te oluşturulmuş teklif bulunmuyor."
               }
-              actionLabel={query ? "Aramayı temizle" : undefined}
-              onAction={query ? () => setSearch("") : undefined}
+              actionLabel={query ? "Aramayı temizle" : canCreate ? "Yeni teklif" : undefined}
+              onAction={query ? () => setSearch("") : canCreate ? () => router.push("/offers/new") : undefined}
             />
           }
           renderItem={({ item, index }) => {

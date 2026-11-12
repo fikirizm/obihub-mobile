@@ -201,8 +201,9 @@ export default function CustomersScreen() {
       <ListBody
         state={list}
         icon={<UserIcon size={30} color={colors.emerald} />}
-        emptyTitle="Cari yok"
-        emptyDescription="Bu süzgece uyan cari hesap bulunmuyor."
+        emptyTitle={debounced || filter || role ? "Cari yok" : "Henüz cari yok"}
+        emptyDescription={debounced || filter || role ? "Bu süzgece uyan cari hesap bulunmuyor." : "Müşteri ve tedarikçilerinizi ekleyin; fatura, tahsilat ve ekstre buradan izlenir."}
+        emptyAction={mayAdd && !debounced && !filter && !role ? { label: "Cari ekle", onPress: () => router.push("/customers/new") } : null}
         renderItem={(p) => {
           const bal = p.balanceAvailable ? Number(p.balance || 0) : 0;
           const name = partyName(p);

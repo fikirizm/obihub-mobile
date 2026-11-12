@@ -115,6 +115,7 @@ export default function LocalInvoicesScreen() {
         state={{ ...list, refresh: () => { loadSummary(); list.refresh(); } }}
         icon={<ReceiptIcon size={30} color={colors.emerald} />}
         emptyTitle="Fatura yok"
+        emptyAction={mayCreate && !debounced && !status ? { label: "Fatura oluştur", onPress: () => router.push("/local-invoices/new") } : null}
         emptyDescription={mayCreate ? "Bu süzgece uyan satış faturası bulunmuyor. Yukarıdaki düğmeyle yeni fatura oluşturabilirsiniz." : "Bu süzgece uyan satış faturası bulunmuyor."}
         renderItem={(inv) => {
           // "Gönderildi" ve "Resmileşti" süzgeçlerinde sunucu gecikmişleri kendi gününe göre ayıklar; rozet de sunucunun

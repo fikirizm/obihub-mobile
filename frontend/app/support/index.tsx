@@ -111,6 +111,7 @@ export default function SupportScreen() {
         state={list}
         icon={<MailIcon size={30} color={colors.emerald} />}
         emptyTitle="Destek talebiniz yok"
+        emptyAction={{ label: "Destek talebi aç", onPress: () => router.push("/support/new") }}
         emptyDescription="Bir sorun yaşarsanız yeni talep oluşturun; yanıtlar burada görünür."
         renderItem={(t) => <TicketCard ticket={t} onPress={() => router.push({ pathname: "/support/[id]", params: { id: t.id } })} />}
       />

@@ -193,6 +193,7 @@ export default function ExpensesScreen() {
         state={ledger}
         icon={<DownloadIcon size={30} color={colors.error} />}
         emptyTitle={payment ? "Bu görünümde gider faturası yok" : "Henüz gider faturası yok"}
+        emptyAction={payment ? { label: "Süzgeci temizle", onPress: () => setPayment("") } : canAdd ? { label: "Gider / alış ekle", onPress: () => router.push("/expenses/new") } : null}
         emptyDescription={payment ? "Süzgeci değiştirin." : "Gelen e-faturaları içeri aldığınızda ya da web panelinden gider eklediğinizde burada listelenir."}
         header={header}
         renderItem={(x) => {
