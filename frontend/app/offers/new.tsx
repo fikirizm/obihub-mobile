@@ -1,16 +1,16 @@
 // C8 — yeni satış teklifi (Paraşüt).  Web: pages/TekliflerPage.js OfferForm + CreateModal.  POST /parasut/sales-offers.
 // Müşteri Paraşüt kişilerinden aranır (en az 2 harf), satırlarda Paraşüt ürünleri önerilir ya da serbest metin yazılır.
-// Toplam yalnız önizlemedir; teklifi Paraşüt hesaplar.  Uçta işlem anahtarı yok: ağ hatası / 5xx sonrası teklif oluşmuş olabilir,
-// bu yüzden form kendiliğinden yeniden göndermez; kullanıcı önce listeyi kontrol eder (çift teklif riski).
+// Toplam yalnız önizlemedir; teklifi Paraşüt hesaplar.  İşlem anahtarlı gönderim (13 Kas 2026 sözleşmesi, src/offer-form.ts offerWriteKind):
+// belirsiz sonuçta aynı anahtarla yeniden gönderilir; Paraşüt sonucu belirsizse yeniden gönderilmez, liste kontrol ettirilir.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { createSalesOffer, getContacts, getProducts } from "../../src/api";
+import { createSalesOffer, getContacts, getProducts, newIdempotencyKey } from "../../src/api";
 import { istanbulToday } from "../../src/api-gider";
 import { formatMinor } from "../../src/allocation";
-import { addDays, blankLine, lineFromProduct, OFFER_CURRENCIES, offerPayload, offerResultUncertain, offerTotals, validateOffer, VAT_RATES, type OfferLine } from "../../src/offer-form";
+import { addDays, blankLine, lineFromProduct, OFFER_CURRENCIES, offerDoneText, offerErrorText, offerPayload, offerTotals, offerWriteKind, validateOffer, VAT_RATES, type OfferLine } from "../../src/offer-form";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { EmptyState } from "../../src/components/EmptyState";
@@ -43,7 +43,7 @@ const curCode = (c: string) => (c === "TRL" ? "TRY" : c);
 export default function NewOfferScreen() {
   const { token, user } = useAuth();
   const { colors } = useTheme();
-  const { toast, confirm } = useFeedback();
+  const { toast } = useFeedback();
   const mayWrite = canManage(user, "billing");
   const today = istanbulToday();
 
@@ -63,8 +63,17 @@ export default function NewOfferScreen() {
   const [tried, setTried] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [uncertain, setUncertain] = useState(false);
+  // idle: düzenlenebilir · retry: kilitli, aynı anahtarla "Yeniden gönder" · pending: kilitli, aynı anahtarla otomatik yeniden
+  // deneme · check: kilitli, yeniden gönderim yok ("Teklifleri kontrol et").
+  const [phase, setPhase] = useState<"idle" | "retry" | "pending" | "check">("idle");
+  const uncertain = phase !== "idle";
   const busy = useRef(false);
+  const keyRef = useRef<string | null>(null);
+  const pendingTries = useRef(0);
+  const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (pendingTimer.current) clearTimeout(pendingTimer.current);
+  }, []);
 
   // Kişi arama: en az 2 harf, 350 ms bekleme; geç gelen eski yanıt yenisinin üstüne yazmaz.
   useEffect(() => {
@@ -112,19 +121,40 @@ export default function NewOfferScreen() {
     return (q ? products.filter((p) => p.name.toLocaleLowerCase("tr-TR").includes(q)) : products).slice(0, 5);
   };
 
-  const send = async () => {
+  // Form başına bir anahtar; başarı ya da kesin retten sonra yenilenir. Belirsiz / bekleyen sonuçta aynı anahtar korunur
+  // (sunucu ikinci teklif açmaz). Gövde kilitli kaldığı için aynı anahtar her zaman aynı gövdeyle gider.
+  const send = async (): Promise<void> => {
     if (!token || busy.current) return;
     busy.current = true;
     setSaving(true);
     setError("");
+    if (!keyRef.current) keyRef.current = newIdempotencyKey("ofr");
     try {
-      const r = await createSalesOffer(token, offerPayload(form));
-      toast("Teklif oluşturuldu", "success");
+      const r = await createSalesOffer(token, offerPayload(form), keyRef.current);
+      keyRef.current = null;
+      toast(offerDoneText(r), "success");
       if (r?.id) router.replace({ pathname: "/offers/[id]", params: { id: String(r.id) } });
       else if (router.canGoBack()) router.back();
     } catch (e: any) {
-      if (offerResultUncertain(e)) setUncertain(true);
-      setError(e?.message || "Teklif oluşturulamadı.");
+      const kind = offerWriteKind(e);
+      setError(offerErrorText(e));
+      if (kind === "rejected") {
+        keyRef.current = null;
+        pendingTries.current = 0;
+        setPhase("idle");
+      } else if (kind === "check") setPhase("check");
+      else if (kind === "retry-same") setPhase("retry");
+      else {
+        // OPERATION_PENDING: ilk istek sürüyor; aynı anahtarla 3 sn sonra (en çok 3 kez) kendiliğinden yeniden denenir.
+        setPhase("pending");
+        if (pendingTries.current < 3) {
+          pendingTries.current += 1;
+          pendingTimer.current = setTimeout(() => {
+            pendingTimer.current = null;
+            send();
+          }, 3000);
+        }
+      }
     } finally {
       busy.current = false;
       setSaving(false);
@@ -137,14 +167,12 @@ export default function NewOfferScreen() {
     await send();
   };
 
-  // Sonuç belirsizken yeniden gönderim yalnız açık onayla (teklif ikinci kez oluşabilir).
-  const resendAnyway = async () => {
-    const ok = await confirm({
-      title: "Yine de gönderilsin mi?",
-      message: "Önceki gönderim Paraşüt'te teklif oluşturmuş olabilir. Teklifler listesinde görünmüyorsa gönderin; görünüyorsa ikinci bir teklif oluşur.",
-      confirmLabel: "Yine de gönder",
-    });
-    if (ok) await send();
+  const resendSameKey = () => {
+    if (pendingTimer.current) {
+      clearTimeout(pendingTimer.current);
+      pendingTimer.current = null;
+    }
+    send();
   };
 
   const body = () => {
@@ -327,7 +355,9 @@ export default function NewOfferScreen() {
               <View testID="offer-uncertain" style={[styles.box, { backgroundColor: colors.warningBg }]}>
                 <AlertIcon size={16} color={colors.amber} />
                 <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>
-                  Sonuç alınamadı; teklif Paraşüt'te oluşmuş olabilir. Yeniden göndermeden önce Teklifler listesini kontrol edin.
+                  {phase === "check"
+                    ? "Bilgiler kilitlendi. Teklif Paraşüt'te oluşmuş olabilir; bu form yeniden gönderilmez."
+                    : "Bilgiler kilitlendi; aynı teklif aynı işlem anahtarıyla yeniden gönderilir, ikinci kez oluşturulmaz."}
                 </Text>
               </View>
             ) : null}
@@ -337,11 +367,10 @@ export default function NewOfferScreen() {
                 <Text style={[type.footnote, { color: colors.error, flex: 1 }]}>{error}</Text>
               </View>
             ) : null}
-            {uncertain ? (
-              <>
-                <Button testID="offer-check-list" label="Teklifleri kontrol et" onPress={() => (router.canGoBack() ? router.back() : router.replace("/offers"))} />
-                <Button testID="offer-resend" variant="secondary" label="Yine de gönder" busy={saving} onPress={resendAnyway} />
-              </>
+            {phase === "check" ? (
+              <Button testID="offer-check-list" label="Teklifleri kontrol et" onPress={() => (router.canGoBack() ? router.back() : router.replace("/offers"))} />
+            ) : phase === "retry" || phase === "pending" ? (
+              <Button testID="offer-resend" label={saving ? "Gönderiliyor…" : "Yeniden gönder"} busy={saving} onPress={resendSameKey} />
             ) : (
               <Button testID="offer-submit" label={saving ? "Oluşturuluyor…" : "Teklif oluştur"} icon={<ReceiptIcon size={18} color="#FFFFFF" />} busy={saving} onPress={submit} />
             )}

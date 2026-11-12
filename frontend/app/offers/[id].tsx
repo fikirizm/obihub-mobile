@@ -4,6 +4,7 @@ import { useLocalSearchParams } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { createOfferPayment, getOfferPayment, getSalesOfferDetail, getWooIntegrations, updateSalesOffer } from "../../src/api";
+import { offerErrorText, offerWriteKind } from "../../src/offer-form";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney } from "../../src/utils";
@@ -185,12 +186,19 @@ export default function OfferDetail() {
       await updateSalesOffer(token, offerId, { status: newStatus });
       setOffer((prev) => prev ? { ...prev, status: newStatus } : prev);
       toast(accepting ? "Teklif onaylandı." : "Teklif reddedildi.", "success");
-    } catch {
-      toast("Durum güncellenirken sorun oluştu.", "error");
+    } catch (e: any) {
+      // 13 Kas 2026: PATCH, POST ile aynı hata eşlemesini kullanır (anahtar yok). Sonuç belirsizse durum değişmiş olabilir:
+      // teklif yeniden okunur; kesin retlerde Paraşüt'ün metni gösterilir.
+      const kind = offerWriteKind(e);
+      if (kind === "rejected") toast(offerErrorText(e), "error");
+      else {
+        toast("Sonuç alınamadı; teklif durumu güncellenmiş olabilir. Teklif yeniden okunuyor.", "info");
+        load();
+      }
     } finally {
       setStatusUpdating(null);
     }
-  }, [token, offerId, offer, confirm, toast]);
+  }, [token, offerId, offer, confirm, toast, load]);
 
   const handleCopyLink = useCallback((url: string) => {
     Clipboard.setString(url);

@@ -524,10 +524,11 @@ export async function updateSalesOffer(token: string, offerId: string, data: Rec
   );
 }
 
-export async function createSalesOffer(token: string, data: Record<string, any>) {
+// 13 Kas 2026: işlem anahtarlı (aynı anahtar + aynı gövde → ilk sonuç, replayed:true). Kurallar src/offer-form.ts offerWriteKind.
+export async function createSalesOffer(token: string, data: Record<string, any>, idempotencyKey?: string) {
   return request<any>(
     "/parasut/sales-offers",
-    { method: "POST", body: JSON.stringify(data) },
+    { method: "POST", body: JSON.stringify(data), headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined },
     token
   );
 }

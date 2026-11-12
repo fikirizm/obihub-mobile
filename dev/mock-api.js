@@ -113,6 +113,7 @@ const recon = [
 ];
 const colKeys = new Map();
 const offers = [];
+const offerKeys = new Map();
 // P11: c1'in tahsilat satırları (cari tahsilatı + li1'in kendi tahsilatı); silinenler ters kayıtla.
 function colLedgerRows(party) {
   const today = new Date().toISOString().slice(0, 10);
@@ -665,16 +666,32 @@ http
     if (path === "/parasut/products") return send(res, 200, { items: [{ id: "pp1", name: "Danışmanlık (saat)", list_price: "1250.50", vat_rate: "20", currency: "TRL" }, { id: "pp2", name: "Kurulum hizmeti", sales_price: 800, vat_rate: "18" }, { id: "pp3", name: "Kitap", list_price: "95", vat_rate: "0" }], total: 3 });
     if (path === "/parasut/sales-offers" && req.method === "POST")
       return readBody((b) => {
-        console.log("OFFER-CREATE " + JSON.stringify(b));
+        const key = req.headers["idempotency-key"];
+        const bodyText = JSON.stringify(b);
+        console.log("OFFER-CREATE key=" + (key || "-") + " " + bodyText);
+        if (key && offerKeys.has(key)) {
+          const prev = offerKeys.get(key);
+          if (prev.body !== bodyText) return send(res, 409, { code: "IDEMPOTENCY_CONFLICT", detail: "Farklı gövde." });
+          if (!prev.out) return send(res, 409, { code: "PARASUT_RESULT_UNCERTAIN", detail: "Sonuç belirsiz." });
+          return send(res, 200, { ...prev.out, replayed: true });
+        }
         if (!b.contact_id) return send(res, 422, { detail: "contact_id zorunlu" });
         const r2 = (n) => Math.round(n * 100) / 100;
         let sub = 0, disc = 0, vat = 0;
         const line_items = b.items.map((it, i) => { const g = it.quantity * it.unit_price; const d = it.discount_type === "amount" ? it.discount_value : g * it.discount_value / 100; sub += g; disc += d; vat += (g - d) * it.vat_rate / 100; return { id: "ol" + i, description: it.description, quantity: it.quantity, unit_price: it.unit_price, vat_rate: it.vat_rate, discount_type: it.discount_type, discount_value: it.discount_value }; });
         const c = { k1: "Acme Ticaret A.Ş.", k2: "Elif Kaya", k3: "Acar Lojistik" }[b.contact_id] || "Müşteri";
         const offer = { id: "of" + Date.now(), description: b.description, issue_date: b.issue_date, due_date: b.due_date, currency: b.currency, status: "waiting", contact_id: b.contact_id, contact_name: c, net_total: r2(sub - disc + vat).toFixed(2), gross_total: r2(sub - disc + vat).toFixed(2), subtotal: r2(sub).toFixed(2), total_vat: r2(vat).toFixed(2), total_discount: r2(disc).toFixed(2), computed_total_discount: r2(disc).toFixed(2), line_items };
+        const out = { id: offer.id, description: offer.description, status: offer.status, gross_total: offer.gross_total, currency: offer.currency, parasut_url: null, replayed: false };
+        // 13 Kas sözleşmesi: /__mode?offerFail=codeless|pending|timeout|validation|presend (bir kez)
+        const mode = state.offerFail; state.offerFail = "0";
+        if (mode === "validation") return send(res, 422, { code: "PARASUT_VALIDATION", detail: "Vergi numarası geçersiz" });
+        if (mode === "presend") return send(res, 503, { code: "PARASUT_PRESEND_UNAVAILABLE", detail: "Paraşüt'e bağlanılamadı, teklif gönderilmedi. Tekrar deneyin." });
+        if (mode === "pending") { console.log("OFFER pending"); return send(res, 409, { code: "OPERATION_PENDING", detail: "İşlem sürüyor." }); }
         offers.unshift(offer);
-        if (state.offerFail === "1") { state.offerFail = "0"; return send(res, 502, { detail: "Bad gateway" }); }
-        send(res, 200, { id: offer.id, description: offer.description, status: offer.status, gross_total: offer.gross_total, currency: offer.currency, parasut_url: null });
+        if (key) offerKeys.set(key, { body: bodyText, out: mode === "timeout" ? null : out });
+        if (mode === "timeout") return send(res, 504, { code: "PARASUT_TIMEOUT", detail: "Paraşüt zamanında yanıt vermedi." });
+        if (mode === "codeless") return send(res, 502, { detail: "Bad gateway" });
+        send(res, 200, out);
       });
     let om;
     if ((om = path.match(/^\/parasut\/sales-offers\/([^/]+)$/)) && req.method === "GET") {

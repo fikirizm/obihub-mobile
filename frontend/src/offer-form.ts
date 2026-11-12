@@ -2,7 +2,7 @@
 // Web: frontend/src/pages/TekliflerPage.js OfferForm + CreateModal.  Sunucu: POST /parasut/sales-offers
 //   {contact_id, description, issue_date?, due_date?, currency, note?, items: [{description, quantity, unit_price, vat_rate, discount_type, discount_value, product_id?}]}
 // Teklif Paraşüt'te oluşturulur; toplamları Paraşüt hesaplar.  Buradaki toplam yalnız ÖNİZLEMEDİR (kuruş, yarım yukarı).
-// Uçta işlem anahtarı yok: ağ hatası / 5xx sonrası teklif oluşmuş olabilir → yeniden gönderilmez, kullanıcı listeyi kontrol eder.
+// İşlem anahtarlı (13 Kas 2026): belirsiz sonuçta aynı anahtarla güvenli yeniden gönderim; kurallar offerWriteKind.
 
 export const OFFER_CURRENCIES = ["TRL", "USD", "EUR", "GBP"] as const;
 export const VAT_RATES = [0, 1, 8, 10, 18, 20] as const;
@@ -133,10 +133,46 @@ export function offerPayload(f: OfferForm) {
   };
 }
 
-// İşlem anahtarı olmadığı için ağ hatası / 5xx sonrası teklif oluşmuş olabilir.
-export function offerResultUncertain(e: any): boolean {
+// 13 Kas 2026 sözleşmesi (docs/mobil-oturum-icin-notlar.md): POST /parasut/sales-offers Idempotency-Key alır.
+//  • retry-same: ağ hatası / kodsuz 5xx — AYNI anahtarla yeniden gönderilir (sunucu ikinci teklif açmaz).
+//  • pending: 409 OPERATION_PENDING — form kilitli, aynı anahtarla birkaç saniye sonra yeniden gönderilir.
+//  • check: PARASUT_RESULT_UNCERTAIN / PARASUT_UNAVAILABLE / PARASUT_TIMEOUT / IDEMPOTENCY_CONFLICT — teklif oluşmuş olabilir;
+//    yeniden gönderim YOK, "Teklifleri kontrol et".
+//  • rejected: kesin ret (PARASUT_VALIDATION, PARASUT_AUTH, PARASUT_RATE_LIMITED, PARASUT_PRESEND_UNAVAILABLE, PARASUT_NOT_FOUND, 400…) — yeni anahtar.
+export type OfferWriteKind = "retry-same" | "pending" | "check" | "rejected";
+const CHECK_CODES = new Set(["PARASUT_RESULT_UNCERTAIN", "PARASUT_UNAVAILABLE", "PARASUT_TIMEOUT", "IDEMPOTENCY_CONFLICT"]);
+
+export function offerWriteKind(e: any): OfferWriteKind {
+  const code = typeof e?.code === "string" ? e.code : "";
+  if (code === "OPERATION_PENDING") return "pending";
+  if (CHECK_CODES.has(code)) return "check";
   const s = Number(e?.status);
-  return !Number.isFinite(s) || s === 0 || s >= 500;
+  if (!code && (!Number.isFinite(s) || s === 0 || s >= 500)) return "retry-same";
+  return "rejected";
+}
+
+const OFFER_TEXTS: Record<string, string> = {
+  PARASUT_RATE_LIMITED: "Paraşüt şu anda çok fazla istek alıyor. Birkaç dakika sonra yeniden deneyin.",
+  PARASUT_NOT_FOUND: "Paraşüt'te ilgili kayıt bulunamadı (müşteri ya da ürün silinmiş olabilir). Seçimleri kontrol edin.",
+  PARASUT_RESULT_UNCERTAIN: "Önceki gönderimin sonucu Paraşüt'ten alınamadı; teklif oluşmuş olabilir. Paraşüt'teki Teklifler listesini kontrol edin; yoksa formu yeniden açıp gönderin.",
+  PARASUT_UNAVAILABLE: "Paraşüt'ten geçerli yanıt alınamadı; teklif oluşmuş olabilir. Teklifler listesini kontrol edin; yoksa formu yeniden açıp gönderin.",
+  PARASUT_TIMEOUT: "Paraşüt zamanında yanıt vermedi; teklif oluşmuş olabilir. Teklifler listesini kontrol edin; yoksa formu yeniden açıp gönderin.",
+  IDEMPOTENCY_CONFLICT: "Bu teklif daha önce farklı bilgilerle gönderilmiş. Formu kapatıp Teklifler listesini kontrol edin.",
+  OPERATION_PENDING: "Teklif hâlâ Paraşüt'e gönderiliyor; birkaç saniye içinde aynı teklif yeniden denenecek.",
+};
+
+export function offerErrorText(e: any): string {
+  const code = typeof e?.code === "string" ? e.code : "";
+  const detail = typeof e?.message === "string" ? e.message.trim() : "";
+  if (code === "PARASUT_AUTH") return `${detail || "Paraşüt yetkisi reddedildi."} Paraşüt bağlantısını yenileyin (web paneli > Entegrasyonlar).`;
+  if (OFFER_TEXTS[code]) return OFFER_TEXTS[code];
+  if (offerWriteKind(e) === "retry-same")
+    return "Bağlantı koptu ya da sunucu yanıt vermedi; teklif oluşmuş olabilir. Bilgiler kilitlendi: aynı teklifi yeniden gönderebilirsiniz, ikinci kez oluşturulmaz.";
+  return detail || "Teklif oluşturulamadı.";
+}
+
+export function offerDoneText(r: any): string {
+  return r?.replayed === true ? "Bu teklif zaten oluşturulmuştu; ikinci kez gönderilmedi." : "Teklif oluşturuldu";
 }
 
 export function addDays(iso: string, days: number): string {

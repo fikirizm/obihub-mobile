@@ -74,12 +74,32 @@ t("gövde: web CreateModal ile aynı alanlar; boş tarih/not gönderilmez, sayı
   assert.equal(m.offerPayload({ ...contact, description: "", issue_date: "2026-11-13", due_date: "2026-11-30", currency: "TRL", note: "n", items: [line()] }).due_date, "2026-11-30");
 });
 
-t("sonuç belirsiz mi: ağ ve 5xx belirsiz (işlem anahtarı yok, yeniden gönderilmez), 4xx kesin", () => {
-  assert.equal(m.offerResultUncertain(err(0)), true);
-  assert.equal(m.offerResultUncertain(err(502)), true);
-  assert.equal(m.offerResultUncertain(err(500)), true);
-  assert.equal(m.offerResultUncertain(err(400)), false);
-  assert.equal(m.offerResultUncertain(err(422)), false);
+t("yazım türü (13 Kas sözleşmesi): ağ ve kodsuz 5xx aynı anahtarla yeniden; bekleyen; kontrol et; kesin ret", () => {
+  assert.equal(m.offerWriteKind(err(0)), "retry-same");
+  assert.equal(m.offerWriteKind(err(500)), "retry-same");
+  assert.equal(m.offerWriteKind(err(502)), "retry-same");
+  assert.equal(m.offerWriteKind(err(409, "OPERATION_PENDING")), "pending");
+  for (const [s, c] of [[409, "PARASUT_RESULT_UNCERTAIN"], [502, "PARASUT_UNAVAILABLE"], [504, "PARASUT_TIMEOUT"], [409, "IDEMPOTENCY_CONFLICT"]])
+    assert.equal(m.offerWriteKind(err(s, c)), "check", c);
+  for (const [s, c] of [[422, "PARASUT_VALIDATION"], [424, "PARASUT_AUTH"], [429, "PARASUT_RATE_LIMITED"], [503, "PARASUT_PRESEND_UNAVAILABLE"], [404, "PARASUT_NOT_FOUND"], [400, undefined], [422, "IDEMPOTENCY_KEY_INVALID"]])
+    assert.equal(m.offerWriteKind(err(s, c)), "rejected", String(c));
+});
+t("503 koda göre ayrılır: yalnız PARASUT_PRESEND_UNAVAILABLE kesin ret, kodsuz 503 belirsiz", () => {
+  assert.equal(m.offerWriteKind(err(503, "PARASUT_PRESEND_UNAVAILABLE")), "rejected");
+  assert.equal(m.offerWriteKind(err(503)), "retry-same");
+});
+t("hata metinleri: Paraşüt ret metni olduğu gibi, 424'te bağlantı yönlendirmesi, kontrol kodlarında liste", () => {
+  assert.equal(m.offerErrorText(err(422, "PARASUT_VALIDATION", "Vergi numarası geçersiz")), "Vergi numarası geçersiz");
+  assert.match(m.offerErrorText(err(424, "PARASUT_AUTH", "x")), /Paraşüt bağlantısını yenileyin/);
+  assert.match(m.offerErrorText(err(429, "PARASUT_RATE_LIMITED")), /birkaç dakika/i);
+  assert.match(m.offerErrorText(err(503, "PARASUT_PRESEND_UNAVAILABLE", "Paraşüt'e bağlanılamadı, teklif gönderilmedi. Tekrar deneyin.")), /gönderilmedi/);
+  assert.match(m.offerErrorText(err(504, "PARASUT_TIMEOUT")), /Teklifler listesini kontrol/);
+  assert.match(m.offerErrorText(err(409, "IDEMPOTENCY_CONFLICT")), /farklı bilgilerle/);
+  assert.match(m.offerErrorText(err(0)), /aynı teklifi yeniden gönderebilirsiniz/);
+});
+t("başarı metni: replayed bilgisi", () => {
+  assert.equal(m.offerDoneText({ replayed: true }), "Bu teklif zaten oluşturulmuştu; ikinci kez gönderilmedi.");
+  assert.equal(m.offerDoneText({ id: "1" }), "Teklif oluşturuldu");
 });
 t("geçerlilik tarihi kısayolu: gün ekler", () => {
   assert.equal(m.addDays("2026-11-13", 15), "2026-11-28");
