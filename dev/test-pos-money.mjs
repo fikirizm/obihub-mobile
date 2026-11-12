@@ -18,6 +18,7 @@ async function load(rel) {
 }
 const pm = await load("pos-money.ts");
 const ap = await load("account-pick.ts");
+const cl = await load("currency-lines.ts");
 
 let n = 0;
 function t(name, fn) { fn(); n++; console.log("ok -", name); }
@@ -123,6 +124,38 @@ t("etiketler: varsayılan yalnız birden çok seçenekte, POS işaretli", () => 
   assert.equal(ap.accountOptionLabel(acc("Nakit Kasa", { name: "Nakit Kasa", is_default: true }), false), "Nakit Kasa");
   assert.equal(ap.accountOptionLabel(acc("p", { name: "POS (Kart)", account_type: "pos" }), true), "POS (Kart) · kart");
   assert.equal(ap.accountOptionLabel(acc("p", { name: "Yapı Kredi", account_type: "pos" }), true), "Yapı Kredi (POS)");
+});
+
+// ── POS açık hesap (12 Kas 2026, 366cdf789) ──────────────────────────────────
+t("açık hesap carisi: yalnız kayıtlı ve tedarikçi olmayan kart", () => {
+  assert.equal(pm.openAccountBlock(null), "missing");
+  assert.equal(pm.openAccountBlock({ id: "" }), "missing");
+  assert.equal(pm.openAccountBlock({ id: "c1", source: "registered" }), null);
+  assert.equal(pm.openAccountBlock({ id: "c1", source: "registered", contact_role: "customer" }), null);
+  assert.equal(pm.openAccountBlock({ id: "c1", source: "registered", contact_role: "both" }), null);
+  assert.equal(pm.openAccountBlock({ id: "c3", source: "registered", contact_role: "supplier" }), "supplier");
+  assert.equal(pm.openAccountBlock({ id: "e:ayse", source: "orders" }), "unregistered");
+  // kimlik siparişten türetilmişse kaynak alanı yanlış gelse de seçtirilmez
+  for (const id of ["e:x", "p:x", "n:x"]) assert.equal(pm.openAccountBlock({ id, source: "registered" }), "unregistered", id);
+});
+t("açık hesap alanları: customer_id, paid 0, para üstü 0, bölme yok", () => {
+  assert.deepEqual(pm.openAccountFields({ id: "c1", name: "Elif Kaya" }), { customer_id: "c1", customer_name: "Elif Kaya", paid_amount: 0, change_amount: 0 });
+});
+t("açık hesap hata kodları kesin ret: yeni anahtar", () => {
+  for (const x of [e(400, "POS_CUSTOMER_REQUIRED"), e(422, "POS_CUSTOMER_NOT_CUSTOMER"), e(422, "POS_OPEN_ACCOUNT_NOT_SPLITTABLE"), e(404, "CUSTOMER_NOT_FOUND")])
+    assert.equal(pm.posErrorAction(x), "new-key", x.code);
+});
+
+// ── Rapor: TRY dışı para birimleri ayrı (reports/overview by_currency) ───────────
+t("by_currency: TRY dışı, sıfır olmayan satırlar; para birimleri toplanmaz", () => {
+  const by = {
+    TRY: { summary: { total_revenue: 1000, total_orders: 4 } },
+    USD: { summary: { total_revenue: 250.5, total_orders: 2 } },
+    EUR: { summary: { total_revenue: 0, total_orders: 0 } },
+  };
+  assert.deepEqual(cl.otherCurrencyRevenue(by), [{ currency: "USD", revenue: 250.5, orders: 2 }]);
+  assert.deepEqual(cl.otherCurrencyRevenue(undefined), []);
+  assert.deepEqual(cl.otherCurrencyRevenue({ TL: { summary: { total_revenue: 5, total_orders: 1 } } }), []);
 });
 
 console.log(`${n} test geçti`);

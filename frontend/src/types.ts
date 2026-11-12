@@ -174,6 +174,8 @@ export type ReportsOverview = {
   status_breakdown?: Array<{ status: string; count: number }>;
   daily_sales?: Array<{ date: string; label?: string; revenue: number; orders: number }>;
   channel_breakdown?: Array<{ provider: string; label: string; revenue: number; orders: number }>;
+  // Tekil alanlar yalnız TRY; diğer birimlerin cirosu ayrı (toplanmaz).
+  other_currencies?: Array<{ currency: string; revenue: number; orders: number }>;
 };
 
 export type HepsiJetManualCustomer = {

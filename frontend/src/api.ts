@@ -1,6 +1,7 @@
 // Premium ObiHub API client targeting api.obihub.app/api by default.
 // Override via EXPO_PUBLIC_OBIHUB_API_URL env if needed.
 
+import { otherCurrencyRevenue } from "./currency-lines";
 import type {
   CatalogProduct,
   ChannelRef,
@@ -307,6 +308,7 @@ export async function getSalesReportsOverview(
     average_order_value: Number(payload?.average_order_value ?? summary?.avg_order_value ?? payload?.avg_order ?? 0),
     channel_breakdown,
     daily_sales,
+    other_currencies: otherCurrencyRevenue(payload?.by_currency),
   } as ReportsOverview;
 }
 

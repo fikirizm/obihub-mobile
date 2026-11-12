@@ -10,11 +10,12 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../src/auth/AuthProvider";
 import { canManage } from "../src/auth/permissions";
-import { newIdempotencyKey } from "../src/api";
+import { getParties, newIdempotencyKey } from "../src/api";
 import { getUiCapabilities } from "../src/api-gider";
 import { cartTotals, cashPostingText, createPosSale, findByBarcode, getPosCardAccounts, posPayload, searchPosProducts, splitCents, toCents, type CartLine, type PaymentType, type PosProduct, type PosSale } from "../src/api-pos";
 import type { CashAccount } from "../src/types";
-import { nextPosKey, posErrorAction } from "../src/pos-money";
+import { nextPosKey, openAccountBlock, posErrorAction } from "../src/pos-money";
+import type { Party } from "../src/types";
 import { markCatalogDirty } from "../src/catalogCache";
 import { useDebounce } from "../src/hooks/useDebounce";
 import { haptic } from "../src/haptics";
@@ -38,6 +39,7 @@ const PAYMENTS: { value: PaymentType; label: string }[] = [
   { value: "nakit", label: "Nakit" },
   { value: "kart", label: "Kart" },
   { value: "karma", label: "Nakit + Kart" },
+  { value: "acik_hesap", label: "Açık hesap" },
 ];
 
 function Scanner({ onCode }: { onCode: (code: string) => void }) {
@@ -107,6 +109,13 @@ export default function PosScreen() {
   const [cardAccounts, setCardAccounts] = useState<CashAccount[]>([]);
   const [cardAccountId, setCardAccountId] = useState("");
   const cardPicked = useRef(false);
+  // Açık hesap: yalnız kayıtlı müşteri kartı (siparişten türetilen kişi ve tedarikçi kartı seçtirilmez).
+  const [customer, setCustomer] = useState<{ id: string; name: string } | null>(null);
+  const [custSearch, setCustSearch] = useState("");
+  const custTerm = useDebounce(custSearch.trim(), 300);
+  const [custResults, setCustResults] = useState<Party[]>([]);
+  const [custHidden, setCustHidden] = useState(0);
+  const [custLoading, setCustLoading] = useState(false);
   const keyRef = useRef(newIdempotencyKey("pos"));
   const sending = useRef(false);
   const lookupBusy = useRef(false);
@@ -145,6 +154,24 @@ export default function PosScreen() {
       live = false;
     };
   }, [token, term]);
+
+  useEffect(() => {
+    if (!token || payment !== "acik_hesap" || customer) return;
+    let live = true;
+    setCustLoading(true);
+    getParties(token, { search: custTerm || undefined, role: "customer" })
+      .then((r) => {
+        if (!live) return;
+        const ok = r.items.filter((p) => openAccountBlock(p) === null);
+        setCustResults(ok.slice(0, 20));
+        setCustHidden(r.items.length - ok.length);
+      })
+      .catch(() => live && setCustResults([]))
+      .finally(() => live && setCustLoading(false));
+    return () => {
+      live = false;
+    };
+  }, [token, payment, customer, custTerm]);
 
   const discount = discountText.trim() ? parseAmount(discountText, true) : 0;
   const totals = useMemo(() => cartTotals(cart, discount || 0), [cart, discount]);
@@ -213,6 +240,7 @@ export default function PosScreen() {
       if (toCents(splitCash) <= 0 || toCents(splitCash) >= totalCents) return setError("Karma ödemede nakit ve kart tutarlarının ikisi de sıfırdan büyük olmalı.");
     }
     if (needCardAccount && !cardAccountId) return setError("Kart ödemesinin yazılacağı POS hesabını seçin.");
+    if (payment === "acik_hesap" && !customer) return setError("Açık hesap için satışın yazılacağı cariyi seçin.");
     setError("");
     sending.current = true;
     setBusy(true);
@@ -220,6 +248,7 @@ export default function PosScreen() {
       const body = posPayload(cart, discount || 0, payment, paid ?? totals.total, {
         cashCents: split?.cash,
         cardAccountId: cardAccounts.length > 1 ? cardAccountId : undefined,
+        customer: payment === "acik_hesap" ? customer : null,
       });
       const s = await createPosSale(token, body, keyRef.current);
       setSale(s);
@@ -258,6 +287,8 @@ export default function PosScreen() {
     setDiscountText("");
     setPaidText("");
     setSplitCashText("");
+    setCustomer(null);
+    setCustSearch("");
     setSale(null);
     setError("");
     setUncertain(false);
@@ -299,15 +330,15 @@ export default function PosScreen() {
                 {formatTry(sale.total)}
               </Text>
               <View style={styles.doneFacts}>
-                <Text style={styles.doneFact}>{sale.paymentType === "kart" ? "Kart" : sale.paymentType === "karma" ? "Nakit + Kart" : "Nakit"}</Text>
+                <Text style={styles.doneFact}>{sale.paymentType === "kart" ? "Kart" : sale.paymentType === "karma" ? "Nakit + Kart" : sale.paymentType === "acik_hesap" ? "Açık hesap" : "Nakit"}</Text>
                 <Text style={styles.doneFact}>{`${sale.itemCount || totals.itemCount} kalem`}</Text>
                 {payment === "nakit" && paid !== null && change > 0 ? <Text style={styles.doneFact}>{`Para üstü ${formatTry(change)}`}</Text> : null}
               </View>
             </HeroCard>
           </SafeAnimatedView>
           {cashPostingText(sale) ? (
-            <View style={[styles.notice, { backgroundColor: sale.cashStatus === "pending" ? colors.infoBg : colors.successBg }]} testID="pos-cash-note">
-              <WalletIcon size={16} color={sale.cashStatus === "pending" ? colors.info : colors.success} />
+            <View style={[styles.notice, { backgroundColor: sale.cashStatus === "pending" || sale.ledgerStatus === "pending" ? colors.infoBg : colors.successBg }]} testID="pos-cash-note">
+              <WalletIcon size={16} color={sale.cashStatus === "pending" || sale.ledgerStatus === "pending" ? colors.info : colors.success} />
               <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{cashPostingText(sale)}</Text>
             </View>
           ) : null}
@@ -328,7 +359,7 @@ export default function PosScreen() {
           ) : null}
           <View style={[styles.notice, { backgroundColor: colors.successBg }]}>
             <PackageIcon size={16} color={colors.success} />
-            <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{sale.cashStatus === "none" ? "Satış kaydedildi; ürünler ObiHub stoğundan düşüldü." : "Ürünler ObiHub stoğundan düşüldü."}</Text>
+            <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{cashPostingText(sale) ? "Ürünler ObiHub stoğundan düşüldü." : "Satış kaydedildi; ürünler ObiHub stoğundan düşüldü."}</Text>
           </View>
           {ownerAccounting ? (
             <View style={[styles.notice, { backgroundColor: colors.infoBg }]} testID="pos-owner-note">
@@ -451,6 +482,51 @@ export default function PosScreen() {
                       hint={split ? `Kart ${formatTry(split.card / 100)} · Toplam ${formatTry(totals.total)}` : `Kalanı kartla alınır. Toplam ${formatTry(totals.total)}`}
                     />
                   ) : null}
+                  {payment === "acik_hesap" ? (
+                    customer ? (
+                      <View style={[styles.custPicked, { borderColor: colors.border, backgroundColor: colors.surface }]} testID="pos-customer-picked">
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={[type.caption, { color: colors.textTertiary }]}>Borç yazılacak cari</Text>
+                          <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={1}>{customer.name}</Text>
+                        </View>
+                        {!locked ? <Button size="sm" variant="ghost" label="Değiştir" testID="pos-customer-change" onPress={() => setCustomer(null)} /> : null}
+                      </View>
+                    ) : (
+                      <>
+                        <Text style={[type.callout, { color: colors.textSecondary, fontWeight: "600" }]}>Cari</Text>
+                        <SearchField testID="pos-customer-search" value={custSearch} onChangeText={setCustSearch} placeholder="Cari adı ara" />
+                        <Card style={{ marginHorizontal: 0 }}>
+                          {custLoading && !custResults.length ? (
+                            <ActivityIndicator color={colors.primary} style={{ margin: spacing.md }} />
+                          ) : custResults.length ? (
+                            custResults.map((p, i) => {
+                              const name = p.name || p.company_name || p.full_name || "Cari";
+                              return (
+                                <PressableScale
+                                  key={p.id}
+                                  testID={`pos-customer-${p.id}`}
+                                  onPress={() => setCustomer({ id: p.id, name })}
+                                  style={[styles.result, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+                                >
+                                  <Text style={[type.body, { color: colors.textPrimary, flex: 1 }]} numberOfLines={1}>{name}</Text>
+                                  {Math.abs(p.balance) > 0.004 ? (
+                                    <Text style={[type.caption, tabular, { color: colors.textTertiary }]}>{`Bakiye ${formatTry(p.balance)}`}</Text>
+                                  ) : null}
+                                </PressableScale>
+                              );
+                            })
+                          ) : (
+                            <Text style={[type.footnote, { color: colors.textTertiary, padding: spacing.md }]}>Kayıtlı müşteri kartı bulunamadı.</Text>
+                          )}
+                        </Card>
+                        <Text style={[type.caption, { color: colors.textTertiary }]}>
+                          {custHidden > 0
+                            ? "Yalnız kayıtlı müşteri kartları seçilebilir. Siparişten gelen kişileri önce cari olarak kaydedin."
+                            : "Yalnız kayıtlı müşteri kartları seçilebilir."}
+                        </Text>
+                      </>
+                    )
+                  ) : null}
                   {needCardAccount ? (
                     <>
                       <Text style={[type.callout, { color: colors.textSecondary, fontWeight: "600" }]}>Kart hesabı</Text>
@@ -502,7 +578,7 @@ export default function PosScreen() {
                 {!locked ? <Button variant="secondary" label="Geri" onPress={() => setStage("cart")} style={{ flex: 1 }} /> : null}
                 <Button
                   testID="pos-charge"
-                  label={uncertain ? "Aynı ödemeyi yeniden gönder" : `${payment === "kart" ? "Kartla" : payment === "karma" ? "Nakit + kart" : "Nakit"} ${formatTry(totals.total)} al`}
+                  label={uncertain ? "Aynı ödemeyi yeniden gönder" : payment === "acik_hesap" ? `Açık hesaba ${formatTry(totals.total)} yaz` : `${payment === "kart" ? "Kartla" : payment === "karma" ? "Nakit + kart" : "Nakit"} ${formatTry(totals.total)} al`}
                   busy={busy}
                   onPress={charge}
                   style={{ flex: 2 }}
@@ -541,6 +617,7 @@ const styles = StyleSheet.create({
   stepBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   stepTxt: { fontSize: 20, fontWeight: "700" },
   lineTotal: { fontWeight: "700", minWidth: 76, textAlign: "right" },
+  custPicked: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1 },
   leg: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.md, minHeight: 44 },
   notice: { flexDirection: "row", gap: spacing.xs, alignItems: "flex-start", marginHorizontal: spacing.lg, padding: spacing.sm, borderRadius: radius.md },
   bar: { position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: spacing.lg, paddingTop: spacing.sm, gap: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },

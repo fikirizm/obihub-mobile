@@ -75,3 +75,20 @@ export function posErrorAction(e: { status?: number; code?: string; message?: st
 export function nextPosKey(key: string, e: { status?: number; code?: string; message?: string }, make: () => string) {
   return posErrorAction(e) === "retry-same" ? key : make();
 }
+
+// Açık hesap (Aşama 4 P4): satış cariye borç yazılır. Yalnız kayıtlı ve tedarikçi olmayan kart seçilebilir
+// (sunucu: 400 POS_CUSTOMER_REQUIRED, 404 CUSTOMER_NOT_FOUND, 422 POS_CUSTOMER_NOT_CUSTOMER). Siparişten türetilmiş
+// kişiler (kimlik e:/p:/n:, source "orders") cari kaydı olmadan seçtirilmez.
+export type OpenAccountBlock = "missing" | "unregistered" | "supplier" | null;
+export function openAccountBlock(c: { id?: string; source?: string; contact_role?: string } | null | undefined): OpenAccountBlock {
+  const id = String(c?.id || "");
+  if (!id) return "missing";
+  if (/^[epn]:/.test(id) || c?.source !== "registered") return "unregistered";
+  if (c?.contact_role === "supplier") return "supplier";
+  return null;
+}
+
+// Açık hesap gövde alanları: kasa/bölme yok, ödenen 0.
+export function openAccountFields(c: { id: string; name: string }) {
+  return { customer_id: c.id, customer_name: c.name, paid_amount: 0, change_amount: 0 };
+}

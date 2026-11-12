@@ -14,7 +14,7 @@ import { Skeleton } from "../src/components/Skeleton";
 import { palette, radius, spacing, tabular, type } from "../src/theme/tokens";
 import type { Palette } from "../src/theme/tokens";
 import { getOrders, getSalesReportsOverview } from "../src/api";
-import { formatCompact, formatTry, providerKey, providerLabel, orderTimestamp } from "../src/utils";
+import { formatCompact, formatMoney, formatTry, providerKey, providerLabel, orderTimestamp } from "../src/utils";
 import { DonutChart, Sparkline, AnimatedNumber } from "../src/components/Charts";
 import { ChartIcon, CheckIcon, PackageIcon, TrendDownIcon, TrendUpIcon, ZapIcon } from "../src/components/Icons";
 import { NetworkErrorBanner } from "../src/components/NetworkErrorBanner";
@@ -356,6 +356,7 @@ function ReportsContent() {
 
   const totalRevenue = Number(reports?.total_revenue || 0);
   const totalOrders = Number(reports?.total_orders || 0);
+  const otherCurrencies = reports?.other_currencies || [];
   const aov = Number(reports?.average_order_value || 0);
   const channelBreakdown = (reports?.channel_breakdown || []).slice().sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0));
   const dailyData = reports?.daily_sales || [];
@@ -504,6 +505,18 @@ function ReportsContent() {
                 {`Toplam ciro · ${rangeLabel(range)}`}
               </Text>
               <AnimatedNumber testID="reports-total-revenue" value={totalRevenue} format={(n) => formatTry(n)} style={[type.largeTitle, tabular, styles.heroValue]} />
+              {otherCurrencies.length ? (
+                <View testID="reports-other-currencies" style={styles.heroOther}>
+                  {otherCurrencies.map((c) => (
+                    <Text key={c.currency} style={[type.footnote, tabular, { color: hero.textSecondary, fontWeight: "600" }]} numberOfLines={1}>
+                      {`+ ${formatMoney(c.revenue, c.currency)} · ${c.orders} sipariş`}
+                    </Text>
+                  ))}
+                  <Text style={[type.caption, { color: hero.textTertiary }]} numberOfLines={2}>
+                    Toplam ciro ve sipariş sayısı yalnız TL siparişleri kapsar; dövizli satışlar ayrı gösterilir.
+                  </Text>
+                </View>
+              ) : null}
 
               {trendPct != null ? (
               <View style={styles.heroTrendRow}>
@@ -531,7 +544,7 @@ function ReportsContent() {
               </View>
             </SafeAnimatedView>
 
-            {!loading && totalRevenue === 0 && totalOrders === 0 ? (
+            {!loading && totalRevenue === 0 && totalOrders === 0 && !otherCurrencies.length ? (
               <SafeAnimatedView
                 entering={FadeInUp.delay(140).duration(400)}
                 style={[styles.notice, { backgroundColor: colors.warningBg, borderColor: colors.warning }]}
@@ -724,6 +737,7 @@ function HeroStat({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
+  heroOther: { marginTop: 4, gap: 2 },
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },
   pendingWrap: { marginHorizontal: spacing.lg, marginTop: spacing.xs, gap: spacing.sm },

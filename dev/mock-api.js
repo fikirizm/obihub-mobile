@@ -81,7 +81,7 @@ const entries = [
 const parties = [
   { id: "c1", name: "Elif Kaya", phone: "0555 111 22 33", source: "registered", balance: 6200, payments: [] },
   { id: "c2", name: "Can Öztürk", email: "can@example.test", source: "registered", balance: 12850.5, payments: [] },
-  { id: "c3", name: "Tedarikçi A.Ş.", source: "registered", balance: -9400, payments: [] },
+  { id: "c3", name: "Tedarikçi A.Ş.", contact_role: "supplier", source: "registered", balance: -9400, payments: [] },
   { id: "e:ayse@example.test", name: "Ayşe Yılmaz", source: "orders", balance: 0, payments: [] },
 ];
 const localInvoices = [
@@ -279,6 +279,7 @@ http
           timeline: Object.values(buckets).sort((x, y) => x.key.localeCompare(y.key)),
           channels: Object.values(chans).sort((x, y) => y.revenue - x.revenue),
           top_products: [],
+          by_currency: { TRY: { summary: { total_revenue: total, total_orders: hit.length } }, USD: { summary: { total_revenue: 420.5, total_orders: 3 } } },
         });
       });
       return;
@@ -322,6 +323,19 @@ http
         // P4: kasa bacakları
         const totalC = Math.round(b.total * 100);
         let legs;
+        if (b.payment_type === "acik_hesap") {
+          const c = parties.find((x) => x.id === b.customer_id);
+          if (!b.customer_id) return send(res, 400, { code: "POS_CUSTOMER_REQUIRED", detail: "Açık hesap için cari seçin." });
+          if (!c || c.source !== "registered") return send(res, 404, { code: "CUSTOMER_NOT_FOUND", detail: "Cari bulunamadı." });
+          if (c.contact_role === "supplier") return send(res, 422, { code: "POS_CUSTOMER_NOT_CUSTOMER", detail: "Tedarikçi kartına açık hesap satışı yazılamaz." });
+          for (const it of b.items) { const p = products.find((x) => x.id === it.product_id); if (p) p.stock -= it.quantity; }
+          c.balance += b.total;
+          const resp = { id: "s" + (posSales.length + 1), sale_number: "POS-20261112-" + String(posSales.length + 1).padStart(4, "0"), total: b.total, payment_type: "acik_hesap", customer_name: c.name, customer_id: c.id, item_count: b.items.length,
+            cash_status: "none", cash_entries: [], payments: [{ method: "acik_hesap", amount: Number(b.total).toFixed(2) }], ledger_status: state.posPending === "1" ? "pending" : "posted" };
+          console.log("POS acik_hesap customer_id=" + b.customer_id + " paid=" + b.paid_amount);
+          posSales.push({ key, fp, resp });
+          return send(res, 200, resp);
+        }
         if (b.payment_type === "karma") {
           if (!Array.isArray(b.payments)) return send(res, 422, { code: "POS_PAYMENT_SPLIT_REQUIRED", detail: "Karma ödemede nakit ve kart tutarları gerekli." });
           const sum = b.payments.reduce((t, x) => t + Math.round(Number(x.amount) * 100), 0);

@@ -4,9 +4,9 @@
 // İşlem anahtarı: her satış denemesine bir anahtar; ağ hatası / 5xx sonrası AYNI anahtar ve AYNI sepetle tekrar.
 // Aynı anahtar + farklı sepet → 409. 200 yanıtı = satış ve stok düşümü tamamlandı.
 // Aşama 4 / P4: satışın ödemesi kasaya yazılır (nakit → varsayılan TL kasa, kart → "pos" türü TL hesap, karma → iki bacak).
-// "Açık hesap" sunucuda henüz kapalı (409 POS_OPEN_ACCOUNT_PENDING); mobilde gizli.
+// Açık hesap: kayıtlı müşteri kartına borç yazılır, kasaya yazılmaz (customer_id zorunlu; karma yalnız nakit + kart).
 import { getCashAccounts, request } from "./api";
-import { karmaPayments, posTotalsCents, splitCents, toCents } from "./pos-money";
+import { karmaPayments, openAccountFields, posTotalsCents, splitCents, toCents } from "./pos-money";
 import type { CashAccount } from "./types";
 
 export type PosProduct = { id: string; name: string; sku: string; barcode: string; price: number; vatRate: number; stock: number; imageUrl: string };
@@ -59,12 +59,12 @@ export function cartTotals(lines: CartLine[], discountAmount: number) {
   return { subtotal: c.subtotalCents / 100, discount: c.discountCents / 100, vat: r2(vat), total: c.totalCents / 100, itemCount: lines.reduce((s, l) => s + l.quantity, 0) };
 }
 
-export type PaymentType = "nakit" | "kart" | "karma";
+export type PaymentType = "nakit" | "kart" | "karma" | "acik_hesap";
 
 // Kuruş hesapları ve karma bölmesi: ./pos-money (saf, birim testli).
 export { splitCents, toCents };
 
-export type PosPayOptions = { cashCents?: number; cardAccountId?: string };
+export type PosPayOptions = { cashCents?: number; cardAccountId?: string; customer?: { id: string; name: string } | null };
 
 export function posPayload(lines: CartLine[], discountAmount: number, payment: PaymentType, paid: number, opts: PosPayOptions = {}) {
   const t = cartTotals(lines, discountAmount);
@@ -95,6 +95,7 @@ export function posPayload(lines: CartLine[], discountAmount: number, payment: P
     session_number: 1,
     ...(split ? { payments: karmaPayments(totalCents, split.cash) } : {}),
     ...(usesCard && opts.cardAccountId ? { card_account_id: opts.cardAccountId } : {}),
+    ...(payment === "acik_hesap" && opts.customer ? openAccountFields(opts.customer) : {}),
   };
 }
 
@@ -109,6 +110,9 @@ export type PosSale = {
   cashStatus: "posted" | "pending" | "none";
   cashEntries: PosCashEntry[];
   rounded: boolean;
+  // Açık hesap: cari defterine yazım (posted | pending) ve carinin adı.
+  ledgerStatus: "posted" | "pending" | "";
+  customerName: string;
 };
 
 export async function createPosSale(token: string, body: ReturnType<typeof posPayload>, idempotencyKey: string): Promise<PosSale> {
@@ -127,6 +131,8 @@ export async function createPosSale(token: string, body: ReturnType<typeof posPa
       amount: Number(e?.amount) || 0,
     })),
     rounded: Array.isArray(d?.warnings) && d.warnings.includes("POS_SPLIT_ROUNDED"),
+    ledgerStatus: d?.ledger_status === "posted" || d?.ledger_status === "pending" ? d.ledger_status : "",
+    customerName: String(d?.customer_name || ""),
   };
 }
 
@@ -140,6 +146,11 @@ export async function getPosCardAccounts(token: string): Promise<CashAccount[]> 
 
 // Satışın kasaya nasıl işlendiğinin metni (özet ekranı).
 export function cashPostingText(s: PosSale): string {
+  if (s.paymentType === "acik_hesap") {
+    const who = s.customerName ? `${s.customerName} carisine` : "Cariye";
+    if (s.ledgerStatus === "pending") return `Satış tamamlandı. ${who} borç kaydı birkaç dakika içinde kendiliğinden yazılacak; satışı yeniden göndermeyin.`;
+    return `Satış kaydedildi: ${who} borç olarak yazıldı. Kasaya giriş olmadı.`;
+  }
   if (s.cashStatus === "pending") return "Satış tamamlandı. Kasa kaydı birkaç dakika içinde kendiliğinden tamamlanacak; satışı yeniden göndermeyin.";
   if (s.cashStatus !== "posted") return "";
   const where = (m: string) => {
