@@ -351,7 +351,7 @@ export default function ProductMatchScreen() {
                 index === 0 && { marginTop: spacing.sm },
               ]}
             >
-              <View style={[styles.radio, { borderColor: isSel ? colors.primary : colors.border }]}>
+              <View style={[styles.radio, { borderColor: isSel ? colors.primary : colors.textTertiary }]}>
                 {isSel ? <View style={[styles.radioDot, { backgroundColor: colors.primary }]} /> : null}
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>

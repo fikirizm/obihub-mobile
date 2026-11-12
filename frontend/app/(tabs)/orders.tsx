@@ -421,7 +421,7 @@ export default function OrdersScreen() {
                       accessibilityState={{ checked: sel, disabled: !ok }}
                       style={[styles.selectRow, { opacity: ok ? 1 : 0.4 }]}
                     >
-                      <View style={[styles.check, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary : "transparent" }]}>
+                      <View style={[styles.check, { borderColor: sel ? colors.primary : colors.textTertiary, backgroundColor: sel ? colors.primary : "transparent" }]}>
                         {sel ? <Text style={styles.checkMark}>✓</Text> : null}
                       </View>
                       <View style={{ flex: 1 }} pointerEvents="none">

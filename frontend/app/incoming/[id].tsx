@@ -562,7 +562,7 @@ export default function IncomingImportScreen() {
                     onPress={() => chooseSupplier(c.id, false)}
                     style={[styles.option, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
                   >
-                    <View style={[styles.radio, { borderColor: sel ? colors.primary : colors.border }]}>{sel ? <View style={[styles.radioDot, { backgroundColor: colors.primary }]} /> : null}</View>
+                    <View style={[styles.radio, { borderColor: sel ? colors.primary : colors.textTertiary }]}>{sel ? <View style={[styles.radioDot, { backgroundColor: colors.primary }]} /> : null}</View>
                     <Text style={[type.callout, { color: colors.textPrimary, flex: 1 }]} numberOfLines={2}>
                       {c.label || "Kayıtlı tedarikçi"}
                     </Text>
@@ -577,7 +577,7 @@ export default function IncomingImportScreen() {
                   onPress={() => chooseSupplier(null, true)}
                   style={[styles.option, (supplier.candidates || []).length > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
                 >
-                  <View style={[styles.radio, { borderColor: args.createSupplier && !args.supplierId ? colors.primary : colors.border }]}>
+                  <View style={[styles.radio, { borderColor: args.createSupplier && !args.supplierId ? colors.primary : colors.textTertiary }]}>
                     {args.createSupplier && !args.supplierId ? <View style={[styles.radioDot, { backgroundColor: colors.primary }]} /> : null}
                   </View>
                   <Text style={[type.callout, { color: colors.textPrimary, flex: 1 }]} numberOfLines={2}>
