@@ -149,12 +149,27 @@ http
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
     const user = { id: "u1", email: "test@example.test", company_name: "Deneme A.Ş.", full_name: "Deneme Kullanıcı" };
     if (path === "/auth/login") return send(res, 200, { access_token: "test-token", token_type: "bearer", user });
+    // Şifre sıfırlama (sunucu kuralı: en az 8, harf + rakam, e-postayla aynı değil → 400 PASSWORD_WEAK). /__mode?pwWeak=1 → bir kez zayıf say.
+    if (path === "/auth/password-reset/request-code" && req.method === "POST") return send(res, 200, { success: true, message: "Kod gönderildi", expires_in: 600 });
+    if (path === "/auth/password-reset/confirm" && req.method === "POST") {
+      let raw = ""; req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        const b = JSON.parse(raw || "{}"); const pw = String(b.new_password || "");
+        console.log("PW-RESET email=" + b.email + " code=" + b.code + " len=" + pw.length);
+        const forced = state.pwWeak === "1"; state.pwWeak = "0";
+        if (forced || pw.length < 8 || !/\p{L}/u.test(pw) || !/\d/.test(pw) || pw.toLowerCase() === String(b.email || "").toLowerCase())
+          return send(res, 400, { code: "PASSWORD_WEAK", detail: "Şifre en az 8 karakter olmalı, en az bir harf ve bir rakam içermeli ve e-posta adresinizle aynı olmamalı." });
+        if (b.code === "000000") return send(res, 400, { detail: "Doğrulama kodu geçersiz ya da süresi dolmuş." });
+        send(res, 200, { success: true });
+      });
+      return;
+    }
     if (state.session === "expired") return send(res, 401, { detail: "Token süresi dolmuş" });
     if (path === "/auth/me") return send(res, 200, user);
     if (state.session === "locked")

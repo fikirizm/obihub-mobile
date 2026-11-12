@@ -10,6 +10,7 @@ import { PressableScale } from "../src/components/KPICard";
 import { ArrowLeftIcon, CheckIcon } from "../src/components/Icons";
 import { Button } from "../src/ui/Button";
 import { confirmPasswordReset, requestPasswordReset } from "../src/api";
+import { PASSWORD_HINT, passwordProblem, resetErrorText } from "../src/password-rule";
 
 type Step = "email" | "code";
 
@@ -47,8 +48,9 @@ export default function ForgotPasswordScreen() {
       setError("Doğrulama kodunu girin.");
       return;
     }
-    if (newPassword.length < 6) {
-      setError("Şifre en az 6 karakter olmalıdır.");
+    const weak = passwordProblem(newPassword, email);
+    if (weak) {
+      setError(weak);
       return;
     }
     if (newPassword !== newPasswordConfirm) {
@@ -61,7 +63,7 @@ export default function ForgotPasswordScreen() {
       await confirmPasswordReset(email.trim().toLowerCase(), code.trim(), newPassword);
       setSuccess(true);
     } catch (e: any) {
-      setError(e?.message || "Şifre sıfırlanamadı. Kodu kontrol edin.");
+      setError(resetErrorText(e));
     } finally {
       setLoading(false);
     }
@@ -173,10 +175,15 @@ export default function ForgotPasswordScreen() {
                   textContentType="newPassword"
                   autoComplete="new-password"
                   accessibilityLabel="Yeni şifre"
-                  placeholder="En az 6 karakter"
+                  accessibilityHint={PASSWORD_HINT}
+                  placeholder={PASSWORD_HINT}
                   placeholderTextColor={colors.textTertiary}
                   style={inputStyle}
+                  testID="reset-new-password"
                 />
+                <Text testID="reset-password-rule" style={[type.caption, { color: colors.textTertiary, marginTop: 6 }]}>
+                  {`${PASSWORD_HINT}; e-posta adresinizle aynı olamaz.`}
+                </Text>
                 <Text style={[labelStyle, styles.labelGap]}>Yeni şifre (tekrar)</Text>
                 <TextInput
                   value={newPasswordConfirm}
