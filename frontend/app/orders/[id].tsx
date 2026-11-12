@@ -7,11 +7,21 @@ import * as Haptics from "expo-haptics";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
+import { createHepsiJetShipment } from "../../src/api";
 import {
-  createHepsiJetShipment,
-  enqueueOrderCloudPrint,
-  getOrderDetail,
-} from "../../src/api";
+  ORDER_STATUS_OPTIONS,
+  STOCK_RESTORE_STATUSES,
+  MARKETPLACE_LABEL_CHANNELS,
+  channelKeyOf,
+  enqueueCloudPrint,
+  getOrderDetailFull,
+  mergeOrderDetail,
+  rememberOrderRow,
+  rememberedOrderRow,
+  updateOrderStatus,
+  type OrderFull,
+} from "../../src/api-siparis";
+import { canManage } from "../../src/auth/permissions";
 import {
   displayOrderNo,
   orderTimestamp,
@@ -30,13 +40,13 @@ import { AlertIcon, ClockIcon, CloudIcon, PackageIcon, PrinterIcon, TruckIcon } 
 import { FadeInDown, SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { Button } from "../../src/ui/Button";
 import { useFeedback } from "../../src/ui/Feedback";
-import { fetchOrderLabelFile } from "../../src/labels";
+import { fetchOrderLabelFile, labelOptionsFor, orderDisplayCodes, orderHasPrintableLabel, type LabelTemplate } from "../../src/labels";
+import { Chip, ChipRow } from "../../src/ui/Chip";
 import { StackHeader } from "../../src/ui/Header";
 import { Card, IconTile, ListRow, SectionTitle } from "../../src/ui/ListRow";
 import { DetailHero, type HeroStat } from "../../src/ui/DetailHero";
 import { ON_HERO } from "../../src/ui/HeroCard";
 import { saveCache, loadCache } from "../../src/offlineCache";
-import type { Order } from "../../src/types";
 
 // Yüklenirken içerikle aynı biçimde yer tutucular: özet kartı, işlem düğmeleri, ürün satırları.
 function DetailSkeleton() {
@@ -82,13 +92,15 @@ export default function OrderDetail() {
   const params = useLocalSearchParams<{ id: string; provider?: string }>();
   const orderId = String(params.id || "");
   const providerHint = String(params.provider || "");
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { colors } = useTheme();
-  const [order, setOrder] = useState<Order | null>(null);
+  // Liste satırı varsa ilk çizim ondan yapılır; detay gelince birleştirilir.
+  const [order, setOrder] = useState<OrderFull | null>(() => rememberedOrderRow(orderId) || null);
   const [loading, setLoading] = useState(true);
   const [isOffline, setIsOffline] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [printBusy, setPrintBusy] = useState(false);
+  const [printBusy, setPrintBusy] = useState<LabelTemplate | null>(null);
+  const [statusBusy, setStatusBusy] = useState<string | null>(null);
   const [cloudBusy, setCloudBusy] = useState(false);
   const [printStatus, setPrintStatus] = useState<string | null>(null);
   const [shipBusy, setShipBusy] = useState(false);
@@ -99,15 +111,18 @@ export default function OrderDetail() {
     if (!silent) setLoading(true);
     const cacheKey = `order_detail_${orderId}`;
     if (!silent) {
-      const cached = await loadCache<Order>(cacheKey);
+      const cached = await loadCache<OrderFull>(cacheKey);
       if (cached) {
-        setOrder(cached);
+        setOrder((cur) => cur || cached);
         setIsOffline(true);
         setLoading(false);
       }
     }
     try {
-      const o = await getOrderDetail(token, orderId);
+      // Detay ucu (response_model=Order) wc_status, idefix_* gibi alanları atar; liste satırıyla birleştirilir.
+      // Yenilemede satır da sunucudan yeniden alınır.
+      const o = await getOrderDetailFull(token, orderId, silent);
+      rememberOrderRow(o);
       setOrder(o);
       setIsOffline(false);
       await saveCache(cacheKey, o);
@@ -125,32 +140,32 @@ export default function OrderDetail() {
 
   const provider = providerHint || (order ? String(order.integration_provider || order.provider || order.channel || "") : "");
 
-  const fetchLabelFile = async (): Promise<string> => {
-    if (!token || !order) throw new Error("Oturum bulunamadı.");
-    return fetchOrderLabelFile(token, order.id, provider);
-  };
+  const channel = channelKeyOf(provider || order?.channel);
+  // Web CargoLabelSidebar: ilk seçenek varsayılan şablon; Hepsiburada ve Idefix'te ikinci şablon aynı ekranda seçilir.
+  const labelOptions = labelOptionsFor(provider || String(order?.channel || ""));
 
-  const handlePrint = async () => {
-    if (!token || !order) return;
-    setPrintBusy(true);
+  const handlePrint = async (template: LabelTemplate) => {
+    if (!token || !order || printBusy) return;
+    setPrintBusy(template);
     try {
       setPrintStatus("Etiket alınıyor...");
-      let path: string;
+      let file: { path: string; notice?: string };
       try {
-        path = await fetchLabelFile();
+        file = await fetchOrderLabelFile(token, order.id, provider, { template, order });
       } catch (e: any) {
         toast(e?.message || "Bu sipariş için etiket alınamadı.", "error");
         setPrintStatus(null);
         return;
       }
+      if (file.notice) toast(file.notice);
       setPrintStatus("Yazıcıya gönderiliyor...");
-      await printOrShare(path);
+      await printOrShare(file.path);
       setPrintStatus(null);
     } catch (e: any) {
       toast(e?.message || "Yazdırma başarısız.", "error");
       setPrintStatus(null);
     } finally {
-      setPrintBusy(false);
+      setPrintBusy(null);
     }
   };
 
@@ -190,16 +205,76 @@ export default function OrderDetail() {
     }
   };
 
+  // Web'de "Uzaktan yazdır" yalnız etiketi basılabilir siparişte görünür: pazaryerlerinde (n11/Idefix kargo koduyla)
+  // barkodsuz, diğer kanallarda siparişe açılmış her barkod için ayrı iş.
+  const cloudBarcodes: string[] | null = (() => {
+    if (!order) return null;
+    if (MARKETPLACE_LABEL_CHANNELS.includes(channel)) return orderHasPrintableLabel(order, provider) ? [""] : null;
+    const codes = orderDisplayCodes(order, provider);
+    return codes.length > 0 ? codes : null;
+  })();
+
   const handleCloud = async () => {
-    if (!token || !order) return;
+    if (!token || !order || !cloudBarcodes) return;
     setCloudBusy(true);
     try {
-      const r = await enqueueOrderCloudPrint(token, order.id);
-      toast(r?.message || "Yazdırma kuyruğa eklendi.", "success");
+      let ok = 0;
+      for (const bc of cloudBarcodes) {
+        // Sunucu otomatik yazdırma kapalıyken HTTP 200 + success:false döner.
+        const r = await enqueueCloudPrint(token, order.id, bc || undefined);
+        if (!r?.success) {
+          toast(r?.message || "Uzaktan yazdırma kuyruğa eklenemedi.", "error");
+          return;
+        }
+        ok += 1;
+      }
+      toast(ok > 1 ? `${ok} etiket uzaktan yazdırma kuyruğuna eklendi.` : "Uzaktan yazdırma kuyruğa eklendi.", "success");
     } catch (e: any) {
-      toast(e?.message || "Bulut yazdırma başarısız.", "error");
+      toast(e?.message || "Uzaktan yazdırma başarısız.", "error");
     } finally {
       setCloudBusy(false);
+    }
+  };
+
+  // Web sipariş detayı: Trendyol dışındaki kanallarda durum değiştirilebilir. Web ayrı izin istemez;
+  // mobilde siparişe yazma izni (orders.manage) aranır.
+  const canChangeStatus = Boolean(order) && channel !== "trendyol" && canManage(user, "orders");
+
+  const handleStatusChange = async (next: string) => {
+    if (!token || !order || statusBusy || order.status === next) return;
+    const label = ORDER_STATUS_OPTIONS.find((o) => o.value === next)?.label || next;
+    const restores = STOCK_RESTORE_STATUSES.includes(next);
+    const ok = await confirm({
+      title: `Durum "${label}" yapılsın mı?`,
+      message: restores
+        ? "Siparişin ObiHub'da düşülen stoğu geri eklenir."
+        : channel === "woocommerce"
+          ? "Yeni durum WooCommerce mağazasına da iletilir."
+          : undefined,
+      confirmLabel: "Durumu değiştir",
+      destructive: restores,
+    });
+    if (!ok) return;
+    setStatusBusy(next);
+    try {
+      const updated = await updateOrderStatus(token, order.id, next);
+      const merged = { ...mergeOrderDetail(updated, order), status: updated?.status || next };
+      setOrder(merged);
+      rememberOrderRow(merged);
+      await saveCache(`order_detail_${order.id}`, merged);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      toast("Sipariş durumu güncellendi", "success");
+    } catch (e: any) {
+      if (e?.status === 409) {
+        // Durum kaydedildi, yalnız stok iadesi yapılamadı: eski hale döndürülmez, sipariş yeniden çekilir.
+        toast(e?.message || "Durum güncellendi ancak stok iadesi yapılamadı.", "error");
+        await load(true);
+      } else {
+        // 502: WooCommerce'e iletilemedi, durum kaydedilmedi.
+        toast(e?.message || "Durum güncellenemedi.", "error");
+      }
+    } finally {
+      setStatusBusy(null);
     }
   };
 
@@ -314,26 +389,42 @@ export default function OrderDetail() {
         <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)}>
           <Button
             testID="print-btn"
-            label="Yazdır"
+            label={labelOptions.length > 1 ? `Yazdır · ${labelOptions[0].label}` : "Yazdır"}
             icon={<PrinterIcon size={18} color="#FFFFFF" />}
-            busy={printBusy}
-            onPress={handlePrint}
+            busy={printBusy === labelOptions[0].template}
+            disabled={Boolean(printBusy)}
+            onPress={() => handlePrint(labelOptions[0].template)}
             style={styles.primaryBtn}
           />
-          <View style={styles.actions}>
+          {labelOptions.slice(1).map((opt) => (
             <Button
-              testID="cloud-btn"
-              label="Bulut yazıcı"
+              key={opt.template}
+              testID={`print-${opt.template}-btn`}
+              label={opt.label}
               variant="secondary"
-              icon={<CloudIcon size={16} color={colors.textPrimary} />}
-              busy={cloudBusy}
-              onPress={handleCloud}
-              style={styles.flexBtn}
+              icon={<PrinterIcon size={16} color={colors.textPrimary} />}
+              busy={printBusy === opt.template}
+              disabled={Boolean(printBusy)}
+              onPress={() => handlePrint(opt.template)}
+              style={styles.secondaryPrintBtn}
             />
+          ))}
+          <View style={styles.actions}>
+            {cloudBarcodes ? (
+              <Button
+                testID="cloud-btn"
+                label="Uzaktan yazdır"
+                variant="secondary"
+                icon={<CloudIcon size={16} color={colors.textPrimary} />}
+                busy={cloudBusy}
+                onPress={handleCloud}
+                style={styles.flexBtn}
+              />
+            ) : null}
             {canCreateShipment ? (
               <Button
                 testID="create-shipment-btn"
-                label="Gönderi oluştur"
+                label={channel === "n11" ? "Etiketi hazırla" : "Gönderi oluştur"}
                 variant="secondary"
                 icon={<TruckIcon size={16} color={colors.textPrimary} />}
                 busy={shipBusy}
@@ -365,6 +456,23 @@ export default function OrderDetail() {
             </View>
           ) : null}
         </SafeAnimatedView>
+
+        {canChangeStatus ? (
+          <SafeAnimatedView entering={FadeInDown.delay(105).duration(380)}>
+            <SectionTitle title="Durumu değiştir" />
+            <ChipRow>
+              {ORDER_STATUS_OPTIONS.map((opt) => (
+                <Chip
+                  key={opt.value}
+                  testID={`status-${opt.value}`}
+                  label={statusBusy === opt.value ? `${opt.label}…` : opt.label}
+                  selected={order.status === opt.value}
+                  onPress={() => handleStatusChange(opt.value)}
+                />
+              ))}
+            </ChipRow>
+          </SafeAnimatedView>
+        ) : null}
 
         <SafeAnimatedView entering={FadeInDown.delay(140).duration(380)}>
           <SectionTitle title="Sipariş bilgileri" />
@@ -502,6 +610,7 @@ const styles = StyleSheet.create({
   heroStatusLabel: { color: ON_HERO.soft, fontSize: 12, fontWeight: "500" },
   heroStatusBadge: { flexShrink: 1, minWidth: 0 },
   primaryBtn: { marginHorizontal: spacing.lg, marginTop: spacing.md },
+  secondaryPrintBtn: { marginHorizontal: spacing.lg, marginTop: spacing.sm },
   actions: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginTop: spacing.sm },
   flexBtn: { flex: 1, minWidth: 0, paddingHorizontal: spacing.xs },
   notice: {

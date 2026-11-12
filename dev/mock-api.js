@@ -80,7 +80,7 @@ http
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -118,6 +118,29 @@ http
         delivered: n("delivered"), cancelled: n("cancelled"), deleted: n("deleted"), needs_invoice: 0,
       });
     }
+    // Sipariş/etiket/mağaza web eşitlemesi (src/api-siparis.ts).
+    if (/^\/orders\/[^/]+\/product-label\/pdf$/.test(path)) {
+      const pdf = "%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj 3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 283 425]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF";
+      res.writeHead(200, { "Content-Type": "application/pdf", "Access-Control-Allow-Origin": "*" });
+      return res.end(pdf);
+    }
+    if (req.method === "PATCH" && /^\/orders\/[^/]+$/.test(path)) {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      return req.on("end", () => {
+        const o = orders.find((x) => path.endsWith("/" + x.id));
+        if (!o) return send(res, 404, { detail: "Sipariş bulunamadı" });
+        const next = JSON.parse(raw || "{}").status;
+        if (next) o.status = next;
+        if (next === "cancelled" && state.stock409 === "1")
+          return send(res, 409, { detail: "Sipariş durumu güncellendi ancak stok iadesi yapılamadı: deneme" });
+        send(res, 200, o);
+      });
+    }
+    if (req.method === "POST" && path.startsWith("/print-jobs/enqueue/"))
+      return send(res, 200, state.autoprint === "0" ? { success: false, message: "Auto print kapalı veya kullanıcı yetkili değil." } : { success: true, job_id: "j1", status: "pending" });
+    if (req.method === "POST" && /\/sync-orders$/.test(path)) return send(res, 200, { success: true, message: "Senkronizasyon tamamlandı", count: 0, total_fetched: 0 });
+    if (req.method === "POST" && path === "/orders/resync-dates") return send(res, 200, { success: true, updated: 0, total: 0 });
     if (path.startsWith("/orders/")) return send(res, 200, orders.find((o) => path.endsWith("/" + o.id)) || orders[0]);
     if (path === "/dashboard/stats")
       return send(res, 200, {
@@ -349,6 +372,23 @@ http
         send(res, 200, { ok: true, remaining_amount: inv.remaining_amount, status: inv.status });
       });
     }
+    // Web eşitleme (src/api-gider.ts): yetenekler, gider ayarı, ObiHub gider defteri. Okuma modeli ve gelen kutusu 404 → eski uçlara düşüş.
+    if (path === "/ui-capabilities")
+      return send(res, 200, { version: 1, capabilities: { obihub_os: false, inbox_read: false, payable_payment: true, expense_ledger: true, expense_manual_entry: true, manual_entry_reason: null, parasut_connected: true, parasut_expense_view: true }, workspace_scope: null });
+    if (path === "/accounting/expense-settings") return send(res, 200, { expense_module_enabled: true, parasut_expense_view_enabled: true, parasut_connected: true });
+    if (path === "/accounting/expense-invoices/summary") return send(res, 200, { currencies: [{ currency: "TRY", payable: "9400.00", overdue: "1250.50" }] });
+    if (path === "/accounting/expense-invoices") {
+      const rows = [
+        { id: "obihub:e1", source: "obihub", supplier_name: "Kargo Lojistik A.Ş.", document_number: "ABC2026000123", issue_date: "2026-11-09", due_date: "2026-11-24", total: "1840.60", currency: "TRY", payment_status: "pending", reversed: false, other_levies: null, remaining: "1840.60", source_kind: "import" },
+        { id: "obihub:e2", source: "obihub", supplier_name: "Ofis Kırtasiye", document_number: "OK-77", issue_date: "2026-10-20", due_date: "2026-11-01", total: "1250.50", currency: "TRY", payment_status: "overdue", reversed: false, other_levies: "50.00", remaining: "1250.50", source_kind: "manual" },
+        { id: "legacy:p1", source: "legacy", supplier_name: "Ambalaj Ltd.", document_number: "XYZ2026000456", issue_date: "2026-10-07", due_date: null, total: "3275.00", currency: "TRY", payment_status: "paid", reversed: false, other_levies: null, remaining: "0.00", source_kind: "legacy" },
+      ];
+      const pay = url.searchParams.get("payment");
+      const sets = { open: ["pending", "partial", "overdue"], overdue: ["overdue"], paid: ["paid"] };
+      const out = rows.filter((r) => !pay || (sets[pay] || []).includes(r.payment_status));
+      return send(res, 200, { items: out, total: out.length, page: 1, per_page: 20 });
+    }
+    if (path.startsWith("/accounting/read-model/") || path === "/incoming-inbox") return send(res, 404, { detail: "Not Found" });
     if (path === "/parasut/expense-invoices")
       return send(res, 200, { invoices: [{ id: "x1", invoice_no: "GF-88", supplier_name: "Tedarikçi A.Ş.", issue_date: "2026-11-03", due_date: "2026-11-18", gross_total: 9400, currency: "TRL", status: "unpaid" }], total: 1, page: 1, per_page: 30 });
     if (path === "/turkcell-efatura/status") return send(res, 200, { connected: false });

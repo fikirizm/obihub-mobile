@@ -23,12 +23,13 @@ import type { Integration, Order } from "../../src/types";
 
 type FilterKey = "all" | "pending" | "shipped" | "delivered" | "cancelled";
 
-// Sunucudaki iç sipariş durumları: pending, processing, shipped, delivered, cancelled.
+// Süzgeç adları web (IntegrationOrdersPage STATUS_OPTIONS) ile aynı. "Bekleyen" ve "Kargoda" panel kartının
+// saydığı durumları kapsar (routers/dashboard.py); sunucu tek durum süzdüğü için durumlar ayrı çağrılarla birleştirilir.
 const FILTERS: { key: FilterKey; label: string; statuses: string[] }[] = [
   { key: "all", label: "Tümü", statuses: [] },
-  { key: "pending", label: "Bekleyen", statuses: ["pending", "processing"] },
-  { key: "shipped", label: "Kargoda", statuses: ["shipped"] },
-  { key: "delivered", label: "Teslim edildi", statuses: ["delivered"] },
+  { key: "pending", label: "Bekleyen", statuses: ["pending", "processing", "preparing", "payment_received"] },
+  { key: "shipped", label: "Kargoda", statuses: ["shipped", "in_transit", "intransit", "cargo", "kargoda"] },
+  { key: "delivered", label: "Tamamlandı", statuses: ["delivered", "completed"] },
   { key: "cancelled", label: "İptal", statuses: ["cancelled"] },
 ];
 
@@ -134,7 +135,9 @@ export default function OrdersScreen() {
       setPrintingId(order.id);
       toast("Etiket hazırlanıyor…");
       try {
-        const printed = await printOrderLabel(token, order.id, orderProvider(order));
+        // Kanalın varsayılan şablonu (web ile aynı); n11/Idefix kargo kodu ön koşulu satırdan denetlenir.
+        const { printed, notice } = await printOrderLabel(token, order.id, orderProvider(order), { order });
+        if (notice) toast(notice);
         if (printed) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       } catch (e: any) {
         toast(e?.message || "Etiket alınamadı.", "error");

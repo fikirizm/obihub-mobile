@@ -103,16 +103,15 @@ export function trStatus(status: string) {
   return map[key] || map[compact] || status;
 }
 
+// Web IntegrationOrdersPage ile aynı: tüm kanallarda (WooCommerce dahil) ObiHub'ın iç durumu gösterilir
+// (pending → Bekleyen, processing → Gönderime Hazır, shipped → Kargoda, delivered/completed → Tamamlandı,
+// cancelled → İptal, deleted → Silinmiş). Woo'nun kendi durumu (wc_status) kullanılmaz; Trendyol'da kendi durumu.
 export function displayOrderStatus(order: Order, providerHint?: string) {
   const provider = String(providerHint || order.channel || "").toLowerCase();
-  if (provider.includes("woo")) {
-    return trStatus(String(order.wc_status || order.status || ""));
-  }
   if (provider.includes("trendyol") && order.trendyol_status) {
     const known = trendyolStatusMap[compactStatus(order.trendyol_status)];
     if (known) return known;
   }
-  // Pazaryerlerinde "pending" ödemesi alınmış, hazırlanmayı bekleyen sipariştir (web paneliyle aynı etiketler).
   const internal = compactStatus(order.status);
   if (internal === "pending") return "Bekleyen";
   if (internal === "processing") return "Gönderime Hazır";

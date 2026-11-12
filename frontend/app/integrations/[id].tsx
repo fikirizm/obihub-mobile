@@ -4,7 +4,8 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
-import { getIntegrations, getOrders, getOrdersPage, getOrderStats, syncIntegrationOrders } from "../../src/api";
+import { getIntegrations, getOrders, getOrdersPage, getOrderStats } from "../../src/api";
+import { rememberOrderRow, storeSyncDays, storeSyncMessage, syncStoreOrders } from "../../src/api-siparis";
 import type { OrderStats } from "../../src/api";
 import { useDebounce } from "../../src/hooks/useDebounce";
 import {
@@ -194,10 +195,11 @@ export default function IntegrationOrders() {
     if (!token || !integration || syncBusy || remainingMs > 0) return;
     setSyncBusy(true);
     try {
-      await syncIntegrationOrders(token, integration.id, integration.provider || integration.name || "", 7);
+      // Web ile aynı uçlar (Idefix, Pazarama, Amazon dahil); success:false hata sayılır, Woo'da tarihler yeniden çekilir.
+      const r = await syncStoreOrders(token, integration);
       setCooldownEnd(Date.now() + SYNC_COOLDOWN_MS);
       await load(true);
-      toast("Yeni siparişler güncellendi.", "success");
+      toast(storeSyncMessage(r), "success");
     } catch (e: any) {
       toast(e?.message || "Senkronizasyon başarısız oldu.", "error");
     } finally {
@@ -260,7 +262,7 @@ export default function IntegrationOrders() {
           style={remainingMs > 0 ? styles.syncDisabled : undefined}
         />
         <Text style={[type.caption, tabular, styles.syncNote, { color: colors.textTertiary }]} accessibilityLiveRegion="none">
-          {cooldownText ? `Yeniden senkronizasyon: ${cooldownText}` : "Son 7 günün siparişleri çekilir."}
+          {cooldownText ? `Yeniden senkronizasyon: ${cooldownText}` : `Son ${storeSyncDays(integration?.provider || provider)} günün siparişleri çekilir.`}
         </Text>
       </SafeAnimatedView>
 
@@ -320,7 +322,10 @@ export default function IntegrationOrders() {
             >
               <PressableScale
                 testID={`order-${item.id}`}
-                onPress={() => router.push({ pathname: "/orders/[id]", params: { id: item.id, provider } })}
+                onPress={() => {
+                  rememberOrderRow(item);
+                  router.push({ pathname: "/orders/[id]", params: { id: item.id, provider } });
+                }}
                 accessibilityRole="button"
                 accessibilityLabel={`Sipariş ${displayOrderNo(item)}, ${item.customer_name || "müşteri"}, ${amount}, ${status}`}
               >

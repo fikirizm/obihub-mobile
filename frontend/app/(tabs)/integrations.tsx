@@ -24,10 +24,10 @@ import type { Integration } from "../../src/types";
 type Counts = { all: number; pending: number; shipped: number };
 type IntegCache = { list: Integration[]; orderCounts: Record<string, Counts> };
 
-// Sunucudaki entegrasyon durumları: success, failed, pending.
+// Sunucudaki entegrasyon durumları: success/connected, failed, pending. Web gibi "connected" da bağlı sayılır.
 function statusOf(status: string | undefined, colors: { success: string; error: string; warning: string }) {
   const k = String(status || "").trim().toLowerCase();
-  if (k === "success") return { label: "Bağlı", color: colors.success };
+  if (k === "success" || k === "connected") return { label: "Bağlı", color: colors.success };
   if (k === "failed") return { label: "Bağlantı sorunu", color: colors.error };
   return { label: "Kurulum bekliyor", color: colors.warning };
 }

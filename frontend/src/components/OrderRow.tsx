@@ -5,6 +5,7 @@ import { useTheme } from "../theme/ThemeProvider";
 import { spacing, tabular, type } from "../theme/tokens";
 import { displayOrderNo, displayOrderStatus, formatTry, providerLabel, relativeDateLabel, statusKindFromOrder } from "../utils";
 import type { Order } from "../types";
+import { rememberOrderRow } from "../api-siparis";
 import type { StatusKind } from "../utils";
 import { PressableScale } from "./KPICard";
 import { PlatformLogo } from "./PlatformLogo";
@@ -31,7 +32,11 @@ export function OrderRow({ order, divider }: { order: Order; divider?: boolean }
   return (
     <PressableScale
       testID={`order-row-${order.id}`}
-      onPress={() => router.push({ pathname: "/orders/[id]", params: { id: order.id, provider } })}
+      onPress={() => {
+        // Detay ucu bazı alanları atar; detay ekranı bu satırla birleştirir.
+        rememberOrderRow(order);
+        router.push({ pathname: "/orders/[id]", params: { id: order.id, provider } });
+      }}
       accessibilityRole="button"
       accessibilityLabel={`${providerLabel(provider)} siparişi ${displayOrderNo(order)}, ${order.customer_name || "müşteri"}, ${amount}, ${status}`}
     >
