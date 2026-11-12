@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { InlineEmpty } from "../../src/components/InlineEmpty";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { FadeInDown } from "react-native-reanimated";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -330,11 +331,12 @@ export default function CustomerDetailScreen() {
               <Text style={[type.body, styles.stateText, { color: colors.error }]}>{error}</Text>
             </Card>
           ) : rows.length === 0 ? (
-            <Card padded style={[styles.block, styles.state]}>
-              <IconTile tint={colors.surfaceMuted}>
-                <InboxIcon size={18} color={colors.textTertiary} />
-              </IconTile>
-              <Text style={[type.body, styles.stateText, { color: colors.textSecondary }]}>Henüz hareket yok.</Text>
+            <Card style={styles.block}>
+              <InlineEmpty
+                icon={<InboxIcon size={22} color={colors.primary} />}
+                title="Henüz hareket yok"
+                description="Fatura, tahsilat ve ödemeler bu cariye işlendikçe burada listelenir."
+              />
             </Card>
           ) : (
             <Card style={styles.block}>

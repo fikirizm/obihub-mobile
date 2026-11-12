@@ -131,6 +131,14 @@ function RootInner() {
         <Stack.Screen name="forgot-password" options={{ animation: "slide_from_bottom" }} />
         <Stack.Screen name="products/scan" options={{ animation: "slide_from_bottom" }} />
         <Stack.Screen name="pos" options={{ animation: "slide_from_bottom", gestureEnabled: false }} />
+        {/* Cila turu: kayıt oluşturan / para işleyen formlar alttan açılır (detay ve listeler sağdan kayar). */}
+        <Stack.Screen name="products/new" options={{ animation: "slide_from_bottom" }} />
+        <Stack.Screen name="customers/new" options={{ animation: "slide_from_bottom" }} />
+        <Stack.Screen name="local-invoices/new" options={{ animation: "slide_from_bottom" }} />
+        <Stack.Screen name="expenses/new" options={{ animation: "slide_from_bottom" }} />
+        <Stack.Screen name="expenses/pay" options={{ animation: "slide_from_bottom" }} />
+        <Stack.Screen name="cash/new" options={{ animation: "slide_from_bottom" }} />
+        <Stack.Screen name="cash/transfer" options={{ animation: "slide_from_bottom" }} />
         <Stack.Screen name="support/new" options={{ animation: "slide_from_bottom" }} />
       </Stack>
       <SubscriptionLockOverlay />

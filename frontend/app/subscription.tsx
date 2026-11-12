@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { FormSkeleton } from "../src/components/Skeleton";
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useAuth } from "../src/auth/AuthProvider";
 import { getTrialStatus, getUsageSummary } from "../src/api";
 import { useTheme } from "../src/theme/ThemeProvider";
@@ -48,7 +49,7 @@ export default function SubscriptionScreen() {
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="subscription-screen">
       <StackHeader title="Abonelik" />
       {loading ? (
-        <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.xxl }} />
+        <FormSkeleton fields={2} label="Abonelik yükleniyor" />
       ) : (
         <ScrollView
           contentContainerStyle={{ paddingBottom: spacing.huge }}

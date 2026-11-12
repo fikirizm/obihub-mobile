@@ -31,7 +31,7 @@ import { EmptyState } from "../../src/components/EmptyState";
 import { PressableScale } from "../../src/components/KPICard";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
 import { FadeInDown, SafeAnimatedView } from "../../src/components/SafeAnimatedView";
-import { Skeleton } from "../../src/components/Skeleton";
+import { RowsSkeleton, Skeleton } from "../../src/components/Skeleton";
 import { Button } from "../../src/ui/Button";
 import { Chip, ChipRow } from "../../src/ui/Chip";
 import { useFeedback } from "../../src/ui/Feedback";
@@ -230,7 +230,9 @@ export default function ProductMatchScreen() {
     return (
       <View style={[styles.wrap, { backgroundColor: colors.background }]}>
         <StackHeader title="Eşleştir" />
-        <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.xxl }} />
+        <View style={{ paddingTop: spacing.sm }}>
+          <RowsSkeleton rows={5} label="Mağaza bilgisi yükleniyor" />
+        </View>
       </View>
     );
   }

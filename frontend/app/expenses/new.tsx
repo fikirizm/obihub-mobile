@@ -3,6 +3,7 @@
 // Kaydet = önizleme özetiyle onay (işlem anahtarlı). Stok sahibi ObiHub ise satır "Ürün (stoğa girer)" olabilir: katalogdan ürün,
 // tam sayı adet; birden çok depoda depo seçilir. Muhasebe sahipli firmada ürün seçeneği yerine yönlendirme notu gösterilir.
 // Mobilde tevkifat ve KDV dışı vergi girişi yok; o faturalar web'den girilir (not gösterilir).
+import { FormSkeleton } from "../../src/components/Skeleton";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
@@ -303,7 +304,7 @@ export default function ManualExpenseScreen() {
     return (
       <View style={[styles.wrap, { backgroundColor: colors.background }]}>
         <StackHeader title="Yeni gider faturası" />
-        <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.xxl }} />
+        <FormSkeleton fields={5} label="Form hazırlanıyor" />
       </View>
     );
   }

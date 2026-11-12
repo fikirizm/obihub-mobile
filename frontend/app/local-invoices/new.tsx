@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { FormSkeleton } from "../../src/components/Skeleton";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
@@ -276,7 +277,7 @@ export default function NewLocalInvoiceScreen() {
       <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="local-invoice-edit-state">
         <StackHeader title="Faturayı düzenle" />
         {editState === "loading" ? (
-          <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.xxl }} />
+          <FormSkeleton fields={4} label="Fatura yükleniyor" />
         ) : (
           <EmptyState
             icon={<ReceiptIcon size={30} color={colors.textTertiary} />}

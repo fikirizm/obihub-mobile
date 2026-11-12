@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { InlineEmpty } from "../../src/components/InlineEmpty";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
@@ -198,11 +199,12 @@ export default function CashAccountScreen() {
               action={entries.length > 0 ? <Text style={[type.caption, tabular, { color: colors.textTertiary }]}>{entries.length} kayıt</Text> : undefined}
             />
             {entries.length === 0 ? (
-              <Card padded style={[styles.block, styles.empty]}>
-                <IconTile tint={colors.emeraldSoft}>
-                  <InboxIcon size={18} color={colors.emerald} />
-                </IconTile>
-                <Text style={[type.body, { color: colors.textSecondary, flex: 1 }]}>Henüz hareket yok.</Text>
+              <Card style={styles.block}>
+                <InlineEmpty
+                  icon={<InboxIcon size={22} color={colors.primary} />}
+                  title="Henüz hareket yok"
+                  description="Gelir, gider ve virmanlar bu hesaba işlendikçe burada görünür."
+                />
               </Card>
             ) : (
               <Card style={styles.block}>

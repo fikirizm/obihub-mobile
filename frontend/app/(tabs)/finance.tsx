@@ -9,12 +9,14 @@ import { todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing, tabular, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney, formatTry } from "../../src/utils";
-import { DownloadIcon, FileTextIcon, InboxIcon, ReceiptIcon, TagIcon, UserIcon, WalletIcon } from "../../src/components/Icons";
+import { AlertIcon, DownloadIcon, FileTextIcon, InboxIcon, ReceiptIcon, TagIcon, UserIcon, WalletIcon } from "../../src/components/Icons";
 import { EmptyState } from "../../src/components/EmptyState";
 import { useFocusLoad } from "../../src/hooks/useFocusLoad";
 import { TabHeader } from "../../src/ui/Header";
 import { Card, IconTile, ListRow, SectionTitle } from "../../src/ui/ListRow";
 import { StatCard } from "../../src/ui/RowCard";
+import { Skeleton } from "../../src/components/Skeleton";
+import { InlineEmpty } from "../../src/components/InlineEmpty";
 import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
 import type { FinanceOverview } from "../../src/types";
 
@@ -83,15 +85,25 @@ export default function FinanceScreen() {
       >
         {financeRead && !data ? (
           failed ? (
-            <Card padded style={[styles.block, { marginTop: spacing.xs }]}>
-              <Text style={[type.bodyStrong, { color: colors.textPrimary }]}>Finans özeti yüklenemedi</Text>
-              <Text style={[type.footnote, { color: colors.textSecondary, marginTop: 2 }]}>Bağlantınızı kontrol edip sayfayı aşağı çekerek yenileyin.</Text>
+            <Card style={[styles.block, { marginTop: spacing.xs }]}>
+              <InlineEmpty
+                icon={<AlertIcon size={22} color={colors.error} />}
+                title="Finans özeti yüklenemedi"
+                description="Bağlantınızı kontrol edip yeniden deneyin."
+                actionLabel="Tekrar dene"
+                onAction={() => load()}
+              />
             </Card>
           ) : (
-            <View
-              accessibilityLabel="Finans özeti yükleniyor"
-              style={{ height: 168, marginHorizontal: spacing.lg, marginTop: spacing.xs, borderRadius: 28, backgroundColor: colors.backgroundElevated }}
-            />
+            <View accessible accessibilityRole="progressbar" accessibilityLabel="Finans özeti yükleniyor" style={{ gap: spacing.sm }}>
+              <View style={{ marginHorizontal: spacing.lg, marginTop: spacing.xs }}>
+                <Skeleton height={168} borderRadius={28} />
+              </View>
+              <View style={{ flexDirection: "row", gap: spacing.sm, marginHorizontal: spacing.lg }}>
+                <Skeleton height={72} borderRadius={20} style={{ flex: 1 }} />
+                <Skeleton height={72} borderRadius={20} style={{ flex: 1 }} />
+              </View>
+            </View>
           )
         ) : null}
         {financeRead && data ? (

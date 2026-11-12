@@ -1,4 +1,6 @@
 import { printOrShare } from "../../src/pdf";
+import { InlineEmpty } from "../../src/components/InlineEmpty";
+import { RowsSkeleton } from "../../src/components/Skeleton";
 import { createHepsiJetManualShipmentsBulk, getHjCities, getHjDistricts, getHjTowns, type LocOption } from "../../src/api-hepsijet";
 import { OptionPicker } from "../../src/components/OptionPicker";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -35,7 +37,7 @@ import {
   trackHepsiJetManualShipment,
 } from "../../src/api";
 import { PressableScale } from "../../src/components/KPICard";
-import { CheckIcon, CloseIcon, CloudIcon, PackageIcon, PlusIcon, PrinterIcon, RefreshIcon, TrashIcon, TruckIcon } from "../../src/components/Icons";
+import { CheckIcon, CloseIcon, CloudIcon, PackageIcon, PlusIcon, PrinterIcon, RefreshIcon, TrashIcon, TruckIcon, UserIcon } from "../../src/components/Icons";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { Button } from "../../src/ui/Button";
 import { useFeedback } from "../../src/ui/Feedback";
@@ -451,14 +453,13 @@ export default function HepsiJetScreen() {
               ) : null}
               <Card style={styles.block}>
                 {filteredCustomers.length === 0 ? (
-                  <View style={styles.empty}>
-                    <Text style={[type.bodyStrong, { color: colors.textPrimary, textAlign: "center" }]}>
-                      {customers.length === 0 ? "Henüz müşteri yok" : "Sonuç bulunamadı"}
-                    </Text>
-                    <Text style={[type.footnote, { color: colors.textSecondary, textAlign: "center", marginTop: spacing.xxs }]}>
-                      {customers.length === 0 ? "Yeni düğmesiyle müşteri ekleyin." : "Farklı bir arama deneyin."}
-                    </Text>
-                  </View>
+                  <InlineEmpty
+                    icon={<UserIcon size={22} color={colors.primary} />}
+                    title={customers.length === 0 ? "Henüz müşteri yok" : "Sonuç bulunamadı"}
+                    description={customers.length === 0 ? "Gönderi alıcısını bir kez kaydedin; sonraki etiketlerde tek dokunuşla seçin." : "Farklı bir isim, telefon ya da şehirle arayın."}
+                    actionLabel={customers.length === 0 ? "Müşteri ekle" : undefined}
+                    onAction={customers.length === 0 ? () => setShowNewCustomer(true) : undefined}
+                  />
                 ) : (
                   filteredCustomers.slice(0, 8).map((c, idx) => {
                     const active = selectedCustomerId === c.id;
@@ -564,12 +565,15 @@ export default function HepsiJetScreen() {
           <SectionTitle title="Son gönderiler" />
           <Card style={styles.block}>
             {loading ? (
-              <ActivityIndicator color={colors.primary} style={{ marginVertical: spacing.lg }} />
-            ) : shipments.length === 0 ? (
-              <View style={styles.empty}>
-                <PackageIcon size={26} color={colors.textTertiary} />
-                <Text style={[type.footnote, { color: colors.textSecondary, textAlign: "center", marginTop: spacing.xs }]}>Kayıtlı etiket yok.</Text>
+              <View style={{ marginHorizontal: -spacing.lg, paddingVertical: spacing.xs }}>
+                <RowsSkeleton rows={3} label="Gönderiler yükleniyor" />
               </View>
+            ) : shipments.length === 0 ? (
+              <InlineEmpty
+                icon={<PackageIcon size={22} color={colors.primary} />}
+                title="Henüz etiket yok"
+                description="Bir müşteri seçip Etiket oluştur'a dokunduğunuzda gönderiler burada listelenir."
+              />
             ) : (
               shipments.slice(0, 20).map((s, idx) => {
                 const code = s.barcode || s.id;

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { FormSkeleton } from "../../src/components/Skeleton";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
@@ -92,9 +93,7 @@ export default function ProductEditScreen() {
       <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="product-edit-screen">
         <StackHeader title="Ürün bilgileri" />
         {loading ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={colors.primary} />
-          </View>
+          <FormSkeleton fields={3} label="Ürün bilgileri yükleniyor" />
         ) : (
           <EmptyState icon={<PackageIcon size={30} color={colors.textTertiary} />} title="Ürün bilgileri okunamadı" description="Bağlantınızı kontrol edip ürünü yeniden açın." />
         )}

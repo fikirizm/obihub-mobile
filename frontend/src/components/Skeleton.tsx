@@ -178,4 +178,63 @@ const styles = StyleSheet.create({
   heroCell: { flex: 1, alignItems: "center", gap: 6 },
   kpiRow: { flexDirection: "row", gap: spacing.sm },
   kpi: { flex: 1, borderRadius: radius.xl, borderWidth: 1, padding: spacing.md },
+  rowSk: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, minHeight: 64 },
 });
+
+// Cila turu: form ve detay ekranları için ortak yer tutucular (dönen gösterge yerine içeriğin biçimi).
+// Form: özet kartı + etiketli alanlar + birincil düğme.
+export function FormSkeleton({ fields = 4, label = "Yükleniyor" }: { fields?: number; label?: string }) {
+  const { colors } = useTheme();
+  return (
+    <View accessible accessibilityRole="progressbar" accessibilityLabel={label} style={{ padding: spacing.lg, gap: spacing.md }}>
+      <View style={{ borderRadius: radius.xl, padding: spacing.lg, gap: spacing.sm, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.borderSubtle }}>
+        <Skeleton width="45%" height={12} />
+        <Skeleton width="65%" height={28} />
+      </View>
+      {Array.from({ length: fields }).map((_, i) => (
+        <View key={i} style={{ gap: 6 }}>
+          <Skeleton width={i % 2 ? "28%" : "36%"} height={11} />
+          <Skeleton height={48} borderRadius={radius.md} />
+        </View>
+      ))}
+      <Skeleton height={50} borderRadius={radius.md} style={{ marginTop: spacing.sm }} />
+    </View>
+  );
+}
+
+// Satır listesi (kart içinde): yuvarlak simge + iki satır + sağda değer.
+export function RowsSkeleton({ rows = 5, label = "Yükleniyor" }: { rows?: number; label?: string }) {
+  const { colors } = useTheme();
+  return (
+    <View
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel={label}
+      style={{ marginHorizontal: spacing.lg, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.borderSubtle, backgroundColor: colors.surface }}
+    >
+      {Array.from({ length: rows }).map((_, i) => (
+        <View key={i} style={[styles.rowSk, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
+          <Skeleton width={36} height={36} borderRadius={10} />
+          <View style={{ flex: 1, gap: 8 }}>
+            <Skeleton width={i % 2 ? "52%" : "64%"} height={13} />
+            <Skeleton width={i % 2 ? "34%" : "40%"} height={10} />
+          </View>
+          <Skeleton width={64} height={13} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// Mesajlaşma (destek talebi): karşılıklı balonlar.
+export function ThreadSkeleton() {
+  return (
+    <View accessible accessibilityRole="progressbar" accessibilityLabel="Mesajlar yükleniyor" style={{ padding: spacing.lg, gap: spacing.md }}>
+      {[0, 1, 2, 3].map((i) => (
+        <View key={i} style={{ alignItems: i % 2 ? "flex-end" : "flex-start" }}>
+          <Skeleton width={i % 2 ? "62%" : "74%"} height={i % 2 ? 44 : 64} borderRadius={radius.lg} />
+        </View>
+      ))}
+    </View>
+  );
+}

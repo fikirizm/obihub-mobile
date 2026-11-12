@@ -3,6 +3,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { getProductIdentity, getStockMovements, type StockMovement } from "../api-urun-stok";
 import { recallProduct } from "../catalogCache";
 import { PressableScale } from "./KPICard";
+import { InlineEmpty } from "./InlineEmpty";
 import { useTheme } from "../theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../theme/tokens";
 import { Button } from "../ui/Button";
@@ -164,10 +165,12 @@ export function StockMovements({
             />
           </View>
         ) : items.length === 0 ? (
-          <View style={styles.center} testID="stock-movements-empty">
-            <Text style={[type.footnote, { color: colors.textSecondary, textAlign: "center" }]}>
-              {all ? "Henüz stok hareketi yok." : "Bu ürün için henüz stok hareketi yok."}
-            </Text>
+          <View testID="stock-movements-empty">
+            <InlineEmpty
+              icon={<Text style={{ fontSize: 22, color: colors.primary, fontWeight: "800" }}>±</Text>}
+              title="Henüz stok hareketi yok"
+              description={all ? "Satış, alış ve sayımlar stoğa işlendikçe burada görünür." : "Bu ürünün stok girişi, çıkışı ve sayımları burada listelenir."}
+            />
           </View>
         ) : (
           <>

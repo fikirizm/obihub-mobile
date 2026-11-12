@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
+import { InlineEmpty } from "../../src/components/InlineEmpty";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
@@ -351,12 +352,13 @@ export default function DashboardScreen() {
             />
             <Card style={styles.block}>
               {data.recent.length === 0 ? (
-                <View style={styles.empty}>
-                  <InboxIcon size={24} color={colors.textTertiary} />
-                  <Text style={[type.callout, { color: colors.textSecondary, textAlign: "center" }]}>
-                    Henüz sipariş yok. Mağazalar eşitlendiğinde burada görünür.
-                  </Text>
-                </View>
+                <InlineEmpty
+                  icon={<InboxIcon size={22} color={colors.primary} />}
+                  title="Henüz sipariş yok"
+                  description="Mağazalarınız eşitlendiğinde son siparişler burada görünür."
+                  actionLabel={canAccess(user, "integrations") ? "Mağazalara git" : undefined}
+                  onAction={canAccess(user, "integrations") ? () => router.push("/(tabs)/integrations") : undefined}
+                />
               ) : (
                 data.recent.map((o, i) => <OrderRow key={o.id} order={o} divider={i > 0} />)
               )}

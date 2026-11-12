@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { FormSkeleton } from "../../src/components/Skeleton";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -249,10 +250,7 @@ export default function NewPartyScreen() {
       <View style={[styles.wrap, { backgroundColor: colors.background }]}>
         <StackHeader title="Cariyi düzenle" />
         {editState === "loading" ? (
-          <ActivityIndicator
-            color={colors.primary}
-            style={{ marginTop: spacing.xxl }}
-          />
+          <FormSkeleton fields={5} label="Cari yükleniyor" />
         ) : (
           <EmptyState
             icon={<UserIcon size={30} color={colors.textTertiary} />}
