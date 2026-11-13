@@ -8,16 +8,16 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { canAccess } from "../../src/auth/permissions";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import type { Palette } from "../../src/theme/tokens";
-import { BagIcon, HomeIcon, MenuIcon, PlugIcon, TruckIcon, WalletIcon } from "../../src/components/Icons";
+import { BagIcon, HomeIcon, MenuIcon, PlugIcon, WalletIcon } from "../../src/components/Icons";
 
-type TabName = "dashboard" | "integrations" | "orders" | "finance" | "hepsijet" | "menu";
+// 13 Kas 2026 (kullanıcı isteği): HepsiJet alt sekmeden çıkarıldı; Menü'de, yalnız HepsiJet entegrasyonu olan firmada.
+type TabName = "dashboard" | "integrations" | "orders" | "finance" | "menu";
 
 const TABS: { name: TabName; label: string; Icon: typeof HomeIcon; accent: (c: Palette) => string }[] = [
   { name: "dashboard", label: "Panel", Icon: HomeIcon, accent: (c) => c.primary },
   { name: "integrations", label: "Mağaza", Icon: PlugIcon, accent: (c) => c.info },
   { name: "orders", label: "Sipariş", Icon: BagIcon, accent: (c) => c.amber },
   { name: "finance", label: "Finans", Icon: WalletIcon, accent: (c) => c.emerald },
-  { name: "hepsijet", label: "HepsiJet", Icon: TruckIcon, accent: (c) => c.hepsijet },
   { name: "menu", label: "Menü", Icon: MenuIcon, accent: (c) => c.violet },
 ];
 
@@ -126,7 +126,6 @@ export default function TabsLayout() {
       <Tabs.Screen name="integrations" />
       <Tabs.Screen name="orders" />
       <Tabs.Screen name="finance" />
-      <Tabs.Screen name="hepsijet" />
       <Tabs.Screen name="menu" />
     </Tabs>
   );

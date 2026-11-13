@@ -1,12 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
-import { router, type Href } from "expo-router";
+import { router, useFocusEffect, type Href } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
-import { request } from "../../src/api";
+import { getIntegrations, request } from "../../src/api";
+import { hasHepsiJet } from "../../src/hepsijet-ui";
 import { useNotifications } from "../../src/notifications/store";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing, type } from "../../src/theme/tokens";
-import { BellIcon, ChartIcon, LogoutIcon, MailIcon, PackageIcon, RefreshIcon, SettingsIcon, SparkleIcon, WalletIcon } from "../../src/components/Icons";
+import { BellIcon, ChartIcon, LogoutIcon, MailIcon, PackageIcon, RefreshIcon, SettingsIcon, SparkleIcon, TruckIcon, WalletIcon } from "../../src/components/Icons";
 import { canAccess, canManage } from "../../src/auth/permissions";
 import { TabHeader } from "../../src/ui/Header";
 import { useFeedback } from "../../src/ui/Feedback";
@@ -30,6 +31,20 @@ export default function MenuScreen() {
       alive = false;
     };
   }, [token]);
+  // HepsiJet yalnız entegrasyonu kurulu ve etkin firmada görünür; Menü'ye her dönüşte yeniden okunur (okunamazsa gizli).
+  const [hepsijet, setHepsijet] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!token) return;
+      let alive = true;
+      getIntegrations(token)
+        .then((list) => alive && setHepsijet(hasHepsiJet(list as any)))
+        .catch(() => undefined);
+      return () => {
+        alive = false;
+      };
+    }, [token])
+  );
   const { colors } = useTheme();
   const { unread } = useNotifications();
   const { confirm } = useFeedback();
@@ -37,7 +52,7 @@ export default function MenuScreen() {
   const canProducts = canAccess(user, "catalog") || canAccess(user, "inventory");
   const canReports = canAccess(user, "reports");
   const canPos = canManage(user, "billing");
-  const showOps = canPos || canProducts || canReports || canAccess(user, "catalog");
+  const showOps = canPos || canProducts || canReports || canAccess(user, "catalog") || hepsijet;
 
   const onLogout = async () => {
     const ok = await confirm({
@@ -78,10 +93,21 @@ export default function MenuScreen() {
               onPress={() => router.push("/products")}
             />
           ) : null}
+          {hepsijet ? (
+            <ListRow
+              testID="menu-hepsijet"
+              divider={canPos || canProducts}
+              leading={<IconTile tint={colors.hepsijetSoft}><TruckIcon size={18} color={colors.hepsijet} /></IconTile>}
+              title="HepsiJet"
+              subtitle="Manuel gönderi, etiket ve alıcılar"
+              chevron
+              onPress={() => router.push("/hepsijet")}
+            />
+          ) : null}
           {canAccess(user, "reports") ? (
             <ListRow
               testID="menu-reports"
-              divider={canProducts || canPos}
+              divider={canProducts || canPos || hepsijet}
               leading={<IconTile tint={colors.violetSoft}><ChartIcon size={18} color={colors.violet} /></IconTile>}
               title="Raporlar"
               subtitle="Satış, kanal ve ürün analizi"
@@ -92,7 +118,7 @@ export default function MenuScreen() {
           {canAccess(user, "catalog") ? (
             <ListRow
               testID="menu-jobs"
-              divider={canProducts || canReports || canPos}
+              divider={canProducts || canReports || canPos || hepsijet}
               leading={<IconTile tint={colors.infoBg}><RefreshIcon size={18} color={colors.info} /></IconTile>}
               title="Senkron işleri"
               subtitle="Ürün eşitleme sonuçları"

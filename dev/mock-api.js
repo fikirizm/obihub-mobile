@@ -72,7 +72,10 @@ const expenseState = {
 const importState = { in2: "applied" };
 const posSales = [];
 const entryKeys = new Set();
-const hjCustomers = [{ id: "hc1", full_name: "Ayşe Demir", phone: "05551112233", city: "İstanbul", town: "Kadıköy", district: "Moda", address_line: "Moda Cad. 1" }];
+const hjCustomers = [
+  { id: "hc1", full_name: "Ayşe Demir", phone: "05551112233", city: "İstanbul", town: "Kadıköy", district: "Moda", address_line: "Moda Cad. 1" },
+  ...Array.from({ length: 14 }, (_, i) => ({ id: "hc" + (i + 2), full_name: ["Örnek Butik", "Demo Spor", "Örnek Kafe", "Demo Kırtasiye", "Örnek Ofis", "Demo Lojistik", "Örnek Kozmetik"][i % 7] + " " + (i + 1), phone: "0555000" + String(1000 + i), city: i % 2 ? "Ankara" : "İzmir", town: "Merkez", district: "Örnek Mah.", address_line: "Örnek Sk. " + (i + 1) })),
+];
 const hjShipments = [];
 const entries = [
   { id: "e1", account_id: "a1", entry_type: "income", amount: 1250, entry_date: "2026-11-10", description: "Nakit satış" },
@@ -166,7 +169,7 @@ http
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -324,7 +327,7 @@ http
       { id: "i1", name: "Deneme Mağaza", provider: "woocommerce", kind: "store", status: "success" },
       { id: "i2", name: "Trendyol", provider: "trendyol", kind: "marketplace", status: "success" },
       { id: "i3", name: "Hepsiburada", provider: "hepsiburada", kind: "marketplace", status: "failed" },
-      { id: "i4", name: "HepsiJet", provider: "hepsijet", kind: "cargo", status: "success" },
+      ...(state.hj === "0" ? [] : [{ id: "i4", name: "HepsiJet", provider: "hepsijet", kind: "cargo", status: "success" }]),
     ]);
     if (path === "/parasut/invoices")
       return send(res, 200, { invoices: Array.from({ length: 6 }, (_, i) => ({
@@ -598,6 +601,16 @@ http
     if (path === "/hepsijet/manual/customers" && req.method === "GET") return send(res, 200, { items: hjCustomers });
     if (path === "/hepsijet/manual/customers" && req.method === "POST")
       return (() => { let raw = ""; req.on("data", (c) => (raw += c)); req.on("end", () => { console.log("WRITE", path, raw); const c = { id: "hc" + (hjCustomers.length + 1), ...JSON.parse(raw || "{}") }; hjCustomers.unshift(c); send(res, 200, { success: true, customer: c }); }); })();
+    // Alıcı düzelt / sil (13 Kas: listeden silme kalktı, ayrıntı ekranında)
+    let hm;
+    if ((hm = path.match(/^\/hepsijet\/manual\/customers\/([^/]+)$/)) && (req.method === "PUT" || req.method === "DELETE")) {
+      const i = hjCustomers.findIndex((x) => x.id === decodeURIComponent(hm[1]));
+      if (i < 0) return send(res, 404, { detail: "Müşteri bulunamadı" });
+      if (req.method === "DELETE") { console.log("HJ-CUSTOMER DELETE", hm[1]); hjCustomers.splice(i, 1); return send(res, 200, { success: true }); }
+      let raw = ""; req.on("data", (c) => (raw += c));
+      req.on("end", () => { console.log("HJ-CUSTOMER PUT", hm[1], raw); Object.assign(hjCustomers[i], JSON.parse(raw || "{}")); send(res, 200, { success: true, customer: hjCustomers[i] }); });
+      return;
+    }
     if (path === "/hepsijet/manual/shipments" && req.method === "GET") return send(res, 200, { items: hjShipments });
     if ((path === "/hepsijet/manual/shipments" || path === "/hepsijet/manual/shipments/bulk") && req.method === "POST")
       return (() => { let raw = ""; req.on("data", (c) => (raw += c)); req.on("end", () => {

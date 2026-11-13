@@ -372,6 +372,16 @@ export async function createHepsiJetManualCustomer(token: string, payload: Parti
   return res?.customer as HepsiJetManualCustomer;
 }
 
+// Alıcı düzeltme: PUT /hepsijet/manual/customers/{id} (gövde oluşturmayla aynı; sunucu aynı doğrulamayı yapar).
+export async function updateHepsiJetManualCustomer(token: string, customerId: string, payload: Partial<HepsiJetManualCustomer>) {
+  const res = await request<{ success?: boolean; customer?: HepsiJetManualCustomer; message?: string }>(
+    `/hepsijet/manual/customers/${encodeURIComponent(customerId)}`,
+    { method: "PUT", body: JSON.stringify(payload) },
+    token
+  );
+  return (res?.customer || { ...payload, id: customerId }) as HepsiJetManualCustomer;
+}
+
 export async function listHepsiJetManualShipments(token: string, options?: { page?: number; perPage?: number }) {
   const qs = new URLSearchParams();
   qs.set("page", String(options?.page ?? 1));
