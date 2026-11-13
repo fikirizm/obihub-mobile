@@ -9,6 +9,8 @@ export type ContactView = {
   phone: { text: string; href: string } | null;
   email: { text: string; href: string } | null;
   address: { text: string; mapsUrl: string } | null;
+  // Fatura adresi (sunucu yalnız WooCommerce'te verir); teslimat adresinden farklıysa gösterilir.
+  billing: string | null;
   hasAny: boolean;
 };
 
@@ -34,16 +36,36 @@ export function mapsUrl(address: string, platform: string = "ios"): string {
   return platform === "ios" ? `https://maps.apple.com/?q=${q}` : `https://www.google.com/maps/search/?api=1&query=${q}`;
 }
 
-export function customerContact(o: AnyOrder, platform: string = "ios"): ContactView {
-  const addr = String(o?.shipping_address ?? "")
+const HOME_COUNTRY = ["tr", "tur", "türkiye", "turkiye", "turkey"];
+const trLower = (v: unknown) => clean(v).toLocaleLowerCase("tr-TR");
+
+// Teslimat adresi metni + sözleşmedeki parçalar (ilçe, il, eyalet, posta kodu, ülke); metinde zaten geçen parça eklenmez.
+export function fullAddress(o: AnyOrder): string {
+  let text = String(o?.shipping_address ?? "")
     .split(/\n+/)
     .map(clean)
     .filter(Boolean)
     .join(", ");
+  const has = (part: string) => trLower(text).includes(trLower(part));
+  const place = [o?.shipping_district, o?.shipping_city, o?.shipping_state].map(clean).filter((p) => p && !has(p));
+  const uniq = place.filter((p, i) => place.findIndex((x) => trLower(x) === trLower(p)) === i);
+  if (uniq.length) text = [text, ...uniq].filter(Boolean).join(", ");
+  const post = clean(o?.shipping_postcode);
+  if (post && !has(post)) text = text ? `${text} ${post}` : post;
+  const country = clean(o?.shipping_country);
+  if (country && !HOME_COUNTRY.includes(trLower(country)) && !has(country)) text = text ? `${text}, ${country}` : country;
+  return text;
+}
+
+export function customerContact(o: AnyOrder, platform: string = "ios"): ContactView {
+  const addr = fullAddress(o);
   const phone = phoneOf(o?.customer_phone);
   const email = emailOf(o?.customer_email);
   const address = addr ? { text: addr, mapsUrl: mapsUrl(addr, platform) } : null;
-  return { name: clean(o?.customer_name) || "Müşteri", phone, email, address, hasAny: Boolean(phone || email || address) };
+  const norm = (v: string) => trLower(v).replace(/[^\p{L}\p{N}]+/gu, "");
+  const billingRaw = clean(o?.billing_address);
+  const billing = billingRaw && !norm(addr).startsWith(norm(billingRaw)) && norm(billingRaw) !== norm(addr) ? billingRaw : null;
+  return { name: clean(o?.customer_name) || "Müşteri", phone, email, address, billing, hasAny: Boolean(phone || email || address) };
 }
 
 // Cari eşleşmesi: siparişte cari kimliği yok. Önce e-posta / telefon, sonra tek bir tam ad eşleşmesi; belirsizse yok.
@@ -143,7 +165,31 @@ const firstNum = (o: AnyOrder, keys: string[]) => {
   return null;
 };
 
+const decOrNull = (v: unknown) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : minor(v));
+
 export function amountBreakdown(o: AnyOrder): { rows: AmountRow[]; total: number } {
+  // Sunucu dökümü (amount_breakdown): kalemleri (kargo / indirim / KDV) varsa yalnız onlar gösterilir; Fark satırı yazılmaz.
+  const ab = o?.amount_breakdown && typeof o.amount_breakdown === "object" ? o.amount_breakdown : null;
+  if (ab) {
+    const sub = decOrNull(ab.subtotal);
+    const ship = decOrNull(ab.shipping);
+    const disc = decOrNull(ab.discount);
+    const tax = decOrNull(ab.tax);
+    const tot = decOrNull(ab.total);
+    if (ship || disc || tax) {
+      const rows: AmountRow[] = [];
+      if (sub != null) rows.push({ key: "subtotal", label: "Ara toplam", amount: major(sub) });
+      if (disc) rows.push({ key: "discount", label: "İndirim", amount: -major(Math.abs(disc)) });
+      if (ship) rows.push({ key: "shipping", label: "Kargo", amount: major(ship) });
+      if (tax) rows.push({ key: "tax", label: "KDV", amount: major(tax) });
+      return { rows, total: major(tot ?? minor(o?.total_amount)) };
+    }
+    if (sub != null && tot != null) {
+      return sub === tot
+        ? { rows: [], total: major(tot) }
+        : { rows: [{ key: "subtotal", label: "Ara toplam", amount: major(sub) }, { key: "difference", label: "Fark (kargo/indirim)", amount: major(tot - sub) }], total: major(tot) };
+    }
+  }
   const items: AnyOrder[] = Array.isArray(o?.items) ? o.items : [];
   const subK = items.reduce(
     (a, it) =>

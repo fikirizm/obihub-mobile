@@ -7,7 +7,7 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, type } from "../../src/theme/tokens";
 import { getIntegrations, getOrdersPage, getOrderStats, type OrderStats } from "../../src/api";
-import { groupCount, ORDER_GROUPS, type OrderGroupKey } from "../../src/order-filters";
+import { groupCount, ORDER_GROUPS, orderQuery, type OrderGroupKey } from "../../src/order-filters";
 import { bulkDeleteOrders, canCreateHepsiJetShipment } from "../../src/api-siparis";
 import { createHepsiJetShipment } from "../../src/api";
 import { canManage } from "../../src/auth/permissions";
@@ -174,12 +174,13 @@ export default function OrdersScreen() {
       if (mode === "reset") setLoading(true);
       if (mode === "more") setLoadingMore(true);
       try {
-        const statuses = staleOnly ? ["pending"] : FILTERS.find((f) => f.key === filter)?.statuses ?? [];
         const res = await getOrdersPage(token, {
           page: nextPage,
           perPage: PER_PAGE,
           search: debouncedSearch || undefined,
-          statuses,
+          // Eski siparişler görünümü yalnız bekleyen iç durumu ister; diğerlerinde sunucu grubu (status_group).
+          statuses: staleOnly ? ["pending"] : undefined,
+          statusGroup: staleOnly ? undefined : orderQuery({ group: filter }).statusGroup,
           integrationId: integrationId || undefined,
           sortBy: staleOnly ? "created_at" : undefined,
         });

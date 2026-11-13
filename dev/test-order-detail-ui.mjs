@@ -114,4 +114,34 @@ t("g: döküm toplamla aynıysa satır yok (yalnız genel toplam); ürünsüz si
   assert.equal(m.amountBreakdown({ total_amount: 0, items: [{ unit_price: 10, quantity: 3 }] }).total, 30);
 });
 
+// Sözleşme (13 Kas 2026): GET /orders/{id} amount_breakdown {subtotal, shipping, discount, tax, total} ondalık metin, bilinmeyen null;
+// shipping_city / district / state / postcode / country; billing_address.
+t("g: amount_breakdown kalemleri varsa yalnız onlar; Fark satırı yok", () => {
+  const b = m.amountBreakdown({ total_amount: 999, items: [{ total_price: 300, quantity: 1 }],
+    amount_breakdown: { subtotal: "449.70", shipping: "29.90", discount: "60.00", tax: "69.95", total: "419.60" } });
+  assert.deepEqual(b.rows.map((r) => [r.key, r.label, r.amount]), [
+    ["subtotal", "Ara toplam", 449.7], ["discount", "İndirim", -60], ["shipping", "Kargo", 29.9], ["tax", "KDV", 69.95],
+  ]);
+  assert.equal(b.total, 419.6);
+  const z = m.amountBreakdown({ items: [{ total_price: 100 }], amount_breakdown: { subtotal: "100.00", shipping: "0.00", discount: null, tax: null, total: "100.00" } });
+  assert.deepEqual(z.rows, []);
+  const n2 = m.amountBreakdown({ items: [{ total_price: 100 }], amount_breakdown: { subtotal: "100.00", shipping: "0.00", discount: "10.00", tax: null, total: "90.00" } });
+  assert.deepEqual(n2.rows.map((r) => r.key), ["subtotal", "discount"]);
+});
+t("g: amount_breakdown kalemsizse (yalnız ara toplam / toplam) fark satırı yine yalnız fark varsa", () => {
+  const b = m.amountBreakdown({ items: [{ total_price: 299.8 }], amount_breakdown: { subtotal: "299.80", shipping: null, discount: null, tax: null, total: "286.90" } });
+  assert.deepEqual(b.rows.map((r) => [r.key, r.amount]), [["subtotal", 299.8], ["difference", -12.9]]);
+  assert.equal(b.total, 286.9);
+});
+t("a: adres parçaları eklenir (tekrar etmeden); Türkiye yazılmaz; fatura adresi ayrı ve farklıysa", () => {
+  const c = m.customerContact({ shipping_address: "Moda Cad. No:12", shipping_district: "Kadıköy", shipping_city: "İstanbul", shipping_postcode: "34710", shipping_country: "TR",
+    billing_address: "Moda Cad. No:12, Kadıköy, İstanbul" }, "ios");
+  assert.equal(c.address.text, "Moda Cad. No:12, Kadıköy, İstanbul 34710");
+  assert.equal(c.billing, null);
+  const d = m.customerContact({ shipping_address: "Atatürk Mah. 5, Bornova / İzmir", shipping_district: "Bornova", shipping_city: "İzmir", shipping_country: "Germany", billing_address: "Vergi Sk. 1, Konak" });
+  assert.equal(d.address.text, "Atatürk Mah. 5, Bornova / İzmir, Germany");
+  assert.equal(d.billing, "Vergi Sk. 1, Konak");
+  assert.equal(m.customerContact({ shipping_city: "Ankara" }).address.text, "Ankara");
+});
+
 console.log(`\n${n} test geçti`);

@@ -18,34 +18,29 @@ let n = 0;
 function t(name, fn) { fn(); n++; console.log("ok -", name); }
 const g = (k) => m.ORDER_GROUPS.find((x) => x.key === k);
 
-t("gruplar ve sıra: Tümü, Bekleyen, Gönderime hazır, Kargoda, Tamamlandı, İptal / İade, Silinmiş", () => {
-  assert.deepEqual(m.ORDER_GROUPS.map((x) => x.label), ["Tümü", "Bekleyen", "Gönderime hazır", "Kargoda", "Tamamlandı", "İptal / İade", "Silinmiş"]);
+// Sözleşme (13 Kas 2026, backend/order_status.py ORDER_STATUS_GROUPS): GET /orders?status_group=…, /orders/stats → groups.
+t("gruplar sunucu gruplarıyla bire bir: Tümü, Bekleyen, Gönderime hazır, Kargoda, Tamamlandı, İptal, İade, Silinmiş", () => {
+  assert.deepEqual(m.ORDER_GROUPS.map((x) => x.key), ["all", "pending", "ready_to_ship", "shipped", "delivered", "cancelled", "returned", "deleted"]);
+  assert.deepEqual(m.ORDER_GROUPS.map((x) => x.label), ["Tümü", "Bekleyen", "Gönderime hazır", "Kargoda", "Tamamlandı", "İptal", "İade", "Silinmiş"]);
 });
-t("sunucunun iç durumları gruplara düşer (order_status.py): new / ready_to_ship açık siparişte", () => {
-  for (const s of ["pending", "new", "processing", "ready_to_ship"]) assert.ok(g("pending").statuses.includes(s), s);
-  for (const s of ["processing", "ready_to_ship"]) assert.ok(g("processing").statuses.includes(s), s);
-  assert.ok(g("shipped").statuses.includes("shipped"));
-  for (const s of ["delivered", "completed"]) assert.ok(g("delivered").statuses.includes(s), s);
-  for (const s of ["cancelled", "returned", "refunded"]) assert.ok(g("cancelled").statuses.includes(s), s);
-  assert.deepEqual(g("deleted").statuses, ["deleted"]);
-  assert.deepEqual(g("all").statuses, []);
-});
-t("grup sayıları /orders/stats'tan (mağaza süzgeciyle aynı uç); özet yoksa sayı yok", () => {
-  const st = { total: 74, pending: 12, processing: 8, shipped: 18, delivered: 25, cancelled: 9, deleted: 2 };
+t("çip sayıları stats.groups'tan; toplama yok; groups yoksa sayı yok", () => {
+  const st = { total: 74, pending: 12, processing: 8, groups: { all: 74, pending: 20, ready_to_ship: 3, shipped: 18, delivered: 25, cancelled: 4, returned: 2, deleted: 2 } };
   assert.equal(m.groupCount(st, "all"), 74);
-  assert.equal(m.groupCount(st, "pending"), 20); // Bekleyen = bekleyen + gönderime hazır (panel kartıyla aynı)
-  assert.equal(m.groupCount(st, "processing"), 8);
-  assert.equal(m.groupCount(st, "shipped"), 18);
-  assert.equal(m.groupCount(st, "delivered"), 25);
-  assert.equal(m.groupCount(st, "cancelled"), 9);
-  assert.equal(m.groupCount(st, "deleted"), 2);
+  assert.equal(m.groupCount(st, "pending"), 20);
+  assert.equal(m.groupCount(st, "ready_to_ship"), 3);
+  assert.equal(m.groupCount(st, "returned"), 2);
+  assert.equal(m.groupCount(st, "cancelled"), 4);
   assert.equal(m.groupCount(null, "shipped"), undefined);
-  assert.equal(m.groupCount({ total: 3 }, "shipped"), 0);
+  assert.equal(m.groupCount({ total: 3, pending: 1, processing: 1 }, "pending"), undefined);
+  assert.equal(m.groupCount({ groups: { all: 3 } }, "shipped"), 0);
 });
-t("sunucu sorgusu: durumlar virgüllü, mağaza ve arama birlikte (süzgeç sunucuda; sayfalama doğru)", () => {
-  assert.deepEqual(m.orderQuery({ group: "shipped", integrationId: "i1", search: "  ayşe " }), { statuses: g("shipped").statuses, integrationId: "i1", search: "ayşe" });
-  assert.deepEqual(m.orderQuery({ group: "all", integrationId: "", search: "" }), { statuses: [], integrationId: undefined, search: undefined });
-  assert.deepEqual(m.orderQuery({ group: "bilinmeyen", integrationId: "i2", search: "a" }), { statuses: [], integrationId: "i2", search: undefined });
+t("sunucu sorgusu status_group ile; Tümü'de grup gönderilmez; mağaza ve arama birlikte", () => {
+  assert.deepEqual(m.orderQuery({ group: "returned", integrationId: "i1", search: "  ayşe " }), { statusGroup: "returned", integrationId: "i1", search: "ayşe" });
+  assert.deepEqual(m.orderQuery({ group: "all", integrationId: "", search: "" }), { statusGroup: undefined, integrationId: undefined, search: undefined });
+  assert.deepEqual(m.orderQuery({ group: "bilinmeyen", integrationId: "i2", search: "a" }), { statusGroup: undefined, integrationId: "i2", search: undefined });
+});
+t("arama sunucuda kaçışlanır: istemci metni olduğu gibi gönderir (+90 telefon, parantez)", () => {
+  assert.equal(m.orderQuery({ group: "all", search: "+90 (555)" }).search, "+90 (555)");
 });
 
 console.log(`\n${n} test geçti`);

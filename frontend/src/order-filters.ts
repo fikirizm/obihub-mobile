@@ -1,40 +1,40 @@
 // Sipariş durum grupları (saf modül; birim testi dev/test-order-filters.mjs).
 // Kullanıcı (13 Kas 2026): "sipariş durumları filtrelenebilmeli. Yani kargoda olanları tamamlananları görebilmeli."
-// Süzgeç SUNUCUDA uygulanır (GET /orders?status=a,b&integration_id=…): sayfalama doğru kalır. Sayılar GET /orders/stats
-// (integration_id ile mağazaya göre) — sunucunun iç durumları backend/order_status.py'deki tablodan gelir.
-// Not: kanallar iadeyi "cancelled"a çevirir (returned/refunded pratikte oluşmaz); bu yüzden tek grup "İptal / İade".
+// Ortak sözleşme (13 Kas 2026, docs/mobil-oturum-icin-notlar.md; backend/order_status.py ORDER_STATUS_GROUPS):
+// süzgeç GET /orders?status_group=…&integration_id=… (sunucuda; sayfalama doğru), sayılar GET /orders/stats → groups.
+// Her sipariş tam bir gruba düşer; "İade" iç durumu iptal/silinmiş olup kanal ham durumu iade olan siparişlerdir.
 
-export type OrderGroupKey = "all" | "pending" | "processing" | "shipped" | "delivered" | "cancelled" | "deleted";
-export type OrderGroup = { key: OrderGroupKey; label: string; statuses: string[] };
+export type OrderGroupKey = "all" | "pending" | "ready_to_ship" | "shipped" | "delivered" | "cancelled" | "returned" | "deleted";
+export type OrderGroup = { key: OrderGroupKey; label: string };
 
 export const ORDER_GROUPS: OrderGroup[] = [
-  { key: "all", label: "Tümü", statuses: [] },
-  // "Bekleyen" panel kartının saydığı açık siparişler (gönderime hazır dahil).
-  { key: "pending", label: "Bekleyen", statuses: ["pending", "new", "processing", "ready_to_ship", "preparing", "payment_received"] },
-  { key: "processing", label: "Gönderime hazır", statuses: ["processing", "ready_to_ship"] },
-  { key: "shipped", label: "Kargoda", statuses: ["shipped", "in_transit", "intransit", "cargo", "kargoda"] },
-  { key: "delivered", label: "Tamamlandı", statuses: ["delivered", "completed"] },
-  { key: "cancelled", label: "İptal / İade", statuses: ["cancelled", "returned", "refunded"] },
-  { key: "deleted", label: "Silinmiş", statuses: ["deleted"] },
+  { key: "all", label: "Tümü" },
+  { key: "pending", label: "Bekleyen" },
+  { key: "ready_to_ship", label: "Gönderime hazır" },
+  { key: "shipped", label: "Kargoda" },
+  { key: "delivered", label: "Tamamlandı" },
+  { key: "cancelled", label: "İptal" },
+  { key: "returned", label: "İade" },
+  { key: "deleted", label: "Silinmiş" },
 ];
 
-type Stats = { total?: unknown; pending?: unknown; processing?: unknown; shipped?: unknown; delivered?: unknown; cancelled?: unknown; deleted?: unknown } | null | undefined;
+type Stats = { groups?: Partial<Record<OrderGroupKey, unknown>> | null } | null | undefined;
 const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
+// Sayılar yalnız sunucunun grup bölünmesinden; groups yoksa (eski sunucu) sayı gösterilmez.
 export function groupCount(stats: Stats, key: OrderGroupKey): number | undefined {
-  if (!stats) return undefined;
-  switch (key) {
-    case "all":
-      return num(stats.total);
-    case "pending":
-      return num(stats.pending) + num(stats.processing);
-    default:
-      return num((stats as any)[key]);
-  }
+  const groups = stats?.groups;
+  if (!groups || typeof groups !== "object") return undefined;
+  return num(groups[key]);
 }
 
+// Arama metni olduğu gibi gönderilir: sunucu regex kaçışını kendisi yapar.
 export function orderQuery(o: { group: string; integrationId?: string; search?: string }) {
   const g = ORDER_GROUPS.find((x) => x.key === o.group);
   const q = String(o.search || "").trim();
-  return { statuses: g ? g.statuses : [], integrationId: o.integrationId || undefined, search: q.length >= 2 ? q : undefined };
+  return {
+    statusGroup: g && g.key !== "all" ? g.key : undefined,
+    integrationId: o.integrationId || undefined,
+    search: q.length >= 2 ? q : undefined,
+  };
 }

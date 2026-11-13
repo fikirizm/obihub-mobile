@@ -159,6 +159,8 @@ export type OrderStats = {
   delivered: number;
   cancelled: number;
   deleted: number;
+  // 13 Kas 2026 sözleşmesi: her sipariş tam bir gruba düşer (toplam = all). Sipariş çipleri bunu kullanır.
+  groups?: Partial<Record<"all" | "pending" | "ready_to_ship" | "shipped" | "delivered" | "cancelled" | "returned" | "deleted", number>>;
 };
 
 // Duruma göre gerçek sipariş sayıları (tüm siparişler üzerinden); mağaza verilirse yalnızca o mağaza.
@@ -573,7 +575,7 @@ export async function getAccountingSettings(token: string) {
 // sayfalama ve toplam sunucudan gelir.
 export async function getOrdersPage(
   token: string,
-  options: { page?: number; perPage?: number; search?: string; statuses?: string[]; integrationId?: string; sortBy?: string } = {}
+  options: { page?: number; perPage?: number; search?: string; statuses?: string[]; statusGroup?: string; integrationId?: string; sortBy?: string } = {}
 ): Promise<OrdersPage> {
   const page = options.page ?? 1;
   const perPage = options.perPage ?? 30;
@@ -581,9 +583,12 @@ export async function getOrdersPage(
   qs.set("page", String(page));
   qs.set("per_page", String(perPage));
   qs.set("sort_by", options.sortBy ?? "-order_date");
-  if (options.search) qs.set("search", escapeSearch(options.search));
+  // Sunucu (13 Kas 2026) arama metnini kendisi kaçışlar; istemci kaçışı "+90" gibi aramaları bozar.
+  if (options.search) qs.set("search", options.search);
   if (options.integrationId) qs.set("integration_id", options.integrationId);
+  // `status` verilirse sunucuda `status_group`'a üstündür; ikisi birlikte gönderilmez.
   if (options.statuses && options.statuses.length > 0) qs.set("status", options.statuses.join(","));
+  else if (options.statusGroup) qs.set("status_group", options.statusGroup);
   const payload = await request<any>(`/orders?${qs.toString()}`, { method: "GET" }, token);
   const items: Order[] = Array.isArray(payload) ? payload : Array.isArray(payload?.items) ? payload.items : [];
   const total = Number(payload?.total ?? items.length);

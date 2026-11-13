@@ -807,6 +807,26 @@ export default function OrderDetail() {
                     </View>
                   </View>
                 ) : null}
+              {contact.billing ? (
+                <ListRow
+                  divider
+                  testID="customer-billing"
+                  leading={
+                    <IconTile tint={colors.surfaceMuted}>
+                      <FileTextIcon size={18} color={colors.textSecondary} />
+                    </IconTile>
+                  }
+                  title="Fatura adresi"
+                  subtitle={contact.billing}
+                  onPress={() => copyText(contact.billing!, "Fatura adresi")}
+                  accessibilityLabel={`Fatura adresi ${contact.billing}, kopyalamak için dokunun`}
+                  trailing={
+                    <View style={[styles.iconPill, { backgroundColor: colors.primarySoft }]}>
+                      <CopyIcon size={14} color={colors.primary} />
+                    </View>
+                  }
+                />
+              ) : null}
               </Card>
             </View>
           </SafeAnimatedView>

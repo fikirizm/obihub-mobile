@@ -11,6 +11,7 @@ import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
 import { Skeleton } from "../../src/components/Skeleton";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { getIntegrations, getOrderStats } from "../../src/api";
+import { groupCount } from "../../src/order-filters";
 import { providerLabel, isStoreIntegration } from "../../src/utils";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
 import { PressableScale } from "../../src/components/KPICard";
@@ -64,10 +65,11 @@ export default function IntegrationsScreen() {
       intList.forEach((it, i) => {
         const st = stats[i];
         if (!st) return; // Alınamayan sayı 0 yazılmaz; kartta "—" görünür.
+        // Grup sayıları (13 Kas 2026 sözleşmesi) Siparişler çipleriyle aynı; eski sunucuda ham sayılar.
         counts[it.id] = {
-          all: Number(st.total || 0),
-          pending: Number(st.pending || 0) + Number(st.processing || 0),
-          shipped: Number(st.shipped || 0),
+          all: groupCount(st, "all") ?? Number(st.total || 0),
+          pending: groupCount(st, "pending") ?? Number(st.pending || 0) + Number(st.processing || 0),
+          shipped: groupCount(st, "shipped") ?? Number(st.shipped || 0),
         };
       });
       setOrderCounts(counts);

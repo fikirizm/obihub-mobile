@@ -47,6 +47,23 @@ Object.assign(orders[0], {
   ],
 });
 Object.assign(orders[1], { shipping_address: "Atatürk Mah. 1203 Sk. No:5\nBornova / İzmir" });
+// 13 Kas 2026 sözleşmesi: o1 sunucu dökümü + adres parçaları + fatura adresi; bir "gönderime hazır" ve bir iade (iç durum iptal,
+// kanal ham durumu iade) siparişi.
+Object.assign(orders[0], {
+  shipping_district: "Kadıköy", shipping_city: "İstanbul", shipping_postcode: "34710", shipping_country: "TR",
+  billing_address: "Kaya Kozmetik Ltd., Bağdat Cad. 200, Maltepe, İstanbul",
+  amount_breakdown: { subtotal: "449.70", shipping: "0.00", discount: "30.00", tax: null, total: "419.70" },
+});
+orders[9].status = "ready_to_ship";
+Object.assign(orders[23], { hepsiburada_status: "Returned" });
+// backend/order_status.py group_filter ile aynı bölünme (her sipariş tam bir grup).
+function orderGroup(o) {
+  const raw = [o.trendyol_status, o.hepsiburada_status, o.wc_status, o.n11_status].some((v) => /^(returned|refunded|refund)$/i.test(String(v || "")));
+  if (["returned", "refunded"].includes(o.status) || (["cancelled", "deleted"].includes(o.status) && raw)) return "returned";
+  if (o.status === "completed") return "delivered";
+  if (["ready_to_ship", "shipped", "delivered", "cancelled", "deleted"].includes(o.status)) return o.status;
+  return "pending";
+}
 Object.assign(orders[4], { parasut_invoice_id: "inv1", invoice_number: "OBI2026000123" });
 orders[7].status = "deleted";
 orders[15].status = "deleted";
@@ -237,7 +254,7 @@ http
       const search = (q.get("search") || "").toLocaleLowerCase("tr-TR");
       let rows = orders.filter(
         (o) =>
-          (!q.get("status") || q.get("status").split(",").includes(o.status)) &&
+          (q.get("status") ? q.get("status").split(",").includes(o.status) : !q.get("status_group") || q.get("status_group") === "all" || orderGroup(o) === q.get("status_group")) &&
           (!q.get("integration_id") || o.integration_id === q.get("integration_id")) &&
           (!search || o.customer_name.toLocaleLowerCase("tr-TR").includes(search) || o.channel_order_id.toLowerCase().includes(search))
       );
@@ -252,6 +269,7 @@ http
       return send(res, 200, {
         total: rows.length, pending: n("pending"), processing: n("processing"), shipped: n("shipped"),
         delivered: n("delivered"), cancelled: n("cancelled"), deleted: n("deleted"), needs_invoice: 0,
+        groups: Object.fromEntries(["pending", "ready_to_ship", "shipped", "delivered", "cancelled", "returned", "deleted"].map((g) => [g, rows.filter((o) => orderGroup(o) === g).length]).concat([["all", rows.length]])),
       });
     }
     // Sipariş/etiket/mağaza web eşitlemesi (src/api-siparis.ts).
