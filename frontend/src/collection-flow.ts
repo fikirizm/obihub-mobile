@@ -21,7 +21,7 @@ export function voidMessage(c: Collection, currency: string): string {
   if (invoices.length) {
     lines.push("", "Yeniden açılacak faturalar:");
     for (const i of invoices) lines.push(`• ${i.invoice_number || "Fatura"} · ${formatMoney(Number(i.amount || 0), currency)} kalan bakiyeye geri eklenir`);
-  } else if (c.type === "customer") lines.push("", "Tahsilat faturalara dağıtılmamış; tutar avans olarak duruyordu.");
+  } else if (c.type === "customer") lines.push("", "Tahsilat faturalara işlenmemişti; tutar carinin alacak bakiyesinde duruyordu.");
   if (c.parasut) lines.push("", PARASUT_TEXT);
   return lines.join("\n");
 }

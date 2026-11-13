@@ -1,6 +1,6 @@
-// Aşama 4 / P8 — "Avansı faturaya dağıt" (C2 kalıbı).  Web: components/customers/AllocateAdvanceDialog.jsx.
+// Aşama 4 / P8 — "Faturalarla eşleştir" (C2 kalıbı; K10 13 Kas 2026: "avans" yerine "alacak bakiyesi").  Web: AllocateAdvanceDialog.jsx.
 // GET /customers/{id}/allocation-state → POST /customers/{id}/allocations {allocations} + Idempotency-Key.
-// Kasaya ve cari bakiyesine yeni kayıt yazılmaz; yalnız daha önce alınan avans faturalara bağlanır.  K4: taslak faturalar listelenmez.
+// Kasaya ve cari bakiyesine yeni kayıt yazılmaz; yalnız eşleşmemiş tahsilat (alacak bakiyesi) faturalara bağlanır.  K4: taslak faturalar listelenmez.
 import React, { useCallback, useEffect, useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
@@ -78,38 +78,38 @@ export default function AllocateAdvanceScreen() {
       return <EmptyState icon={<WalletIcon size={30} color={colors.textTertiary} />} title="Yetkiniz yok" description="Dağıtım için cari ya da fatura yönetimi yetkisi gerekir." />;
     if (state === null)
       return (
-        <View style={{ padding: spacing.lg, gap: spacing.md }} accessibilityLabel="Avans ve açık faturalar yükleniyor">
+        <View style={{ padding: spacing.lg, gap: spacing.md }} accessibilityLabel="Alacak bakiyesi ve açık faturalar yükleniyor">
           <Skeleton height={130} borderRadius={radius.xl} />
           <Skeleton height={72} borderRadius={radius.md} />
           <Skeleton height={72} borderRadius={radius.md} />
         </View>
       );
     if (state === "error")
-      return <EmptyState icon={<AlertIcon size={30} color={colors.error} />} title="Okunamadı" description="Avans ve açık faturalar şu anda okunamadı." actionLabel="Yeniden dene" onAction={load} />;
+      return <EmptyState icon={<AlertIcon size={30} color={colors.error} />} title="Okunamadı" description="Alacak bakiyesi ve açık faturalar şu anda okunamadı." actionLabel="Yeniden dene" onAction={load} />;
     return (
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
           <SummaryHero
             testID="alloc-advance"
             tone="violet"
-            label="Dağıtılabilir avans"
+            label="Eşleşmemiş alacak"
             value={formatMinor(advance, cur)}
             facts={[
               { label: "Açık fatura", value: String(invoices.length) },
               { label: "Dağıtılacak", value: formatMinor(alloc.total, cur) },
-              { label: "Kalan avans", value: formatMinor(alloc.total > advance ? 0n : advance - alloc.total, cur), tone: alloc.total > advance ? "bad" : undefined },
+              { label: "Kalan alacak", value: formatMinor(alloc.total > advance ? 0n : advance - alloc.total, cur), tone: alloc.total > advance ? "bad" : undefined },
             ]}
           />
 
           {advance <= 0n ? (
             <Card padded style={[styles.block, { marginTop: spacing.md }]}>
               <Text testID="alloc-no-advance" style={[type.body, { color: colors.textSecondary }]}>
-                Bu cari için dağıtılmamış avans yok. Önce faturasız bir tahsilat alın ya da "Avans olarak bırak" seçeneğini kullanın.
+                Bu caride eşleşmemiş alacak yok. Faturalara işlenmeden kalan tahsilat olduğunda burada faturalarla eşleştirebilirsiniz.
               </Text>
             </Card>
           ) : !invoices.length ? (
             <Card padded style={[styles.block, { marginTop: spacing.md }]}>
-              <Text testID="alloc-no-invoices" style={[type.body, { color: colors.textSecondary }]}>Açık fatura yok; avans, fatura kesildiğinde buradan faturaya bağlanır.</Text>
+              <Text testID="alloc-no-invoices" style={[type.body, { color: colors.textSecondary }]}>Açık fatura yok; alacak bakiyesi, fatura kesildiğinde buradan faturaya bağlanır.</Text>
             </Card>
           ) : (
             <>
@@ -121,7 +121,7 @@ export default function AllocateAdvanceScreen() {
                 <Button testID="alloc-clear" size="sm" variant="secondary" label="Temizle" disabled={locked} onPress={() => setValues({})} />
               </View>
               <Text style={[type.caption, styles.hint, { color: colors.textTertiary }]}>
-                Bu işlem kasaya ve cari bakiyesine yeni kayıt yazmaz; yalnız daha önce alınan avansı faturalara bağlar.
+                Bu işlem kasaya ve cari bakiyesine yeni kayıt yazmaz; yalnız eşleşmemiş tahsilatı faturalara bağlar.
               </Text>
             </>
           )}
@@ -149,7 +149,7 @@ export default function AllocateAdvanceScreen() {
             {write.blocked ? (
               <Button testID="alloc-close" variant="secondary" label="Kapat" onPress={() => router.canGoBack() && router.back()} />
             ) : canSubmit ? (
-              <Button testID="alloc-submit" label={moneySubmitLabel(write, "Faturalara dağıt")} busy={write.saving} onPress={submit} />
+              <Button testID="alloc-submit" label={moneySubmitLabel(write, "Eşleştir")} busy={write.saving} onPress={submit} />
             ) : null}
           </View>
         </ScrollView>
@@ -159,7 +159,7 @@ export default function AllocateAdvanceScreen() {
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="allocate-screen">
-      <StackHeader title="Avansı faturaya dağıt" subtitle={params.name ? String(params.name) : undefined} />
+      <StackHeader title="Faturalarla eşleştir" subtitle={params.name ? String(params.name) : undefined} />
       {body()}
     </View>
   );

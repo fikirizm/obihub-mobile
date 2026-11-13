@@ -115,6 +115,8 @@ const recon = [
   { id: "r2", product_id: "p5", product_name: "Deneme Ürün 5", sku: "SKU-5", program: "bizimhesap", remote_qty: 20, pending_out: 0, expected: 20, observed_stock: 28, diff: -8, status: "open" },
 ];
 const colKeys = new Map();
+const transfers = [];
+const trKeys = new Map();
 const offers = [];
 const offerKeys = new Map();
 // P11: c1'in tahsilat satırları (cari tahsilatı + li1'in kendi tahsilatı); silinenler ters kayıtla.
@@ -169,7 +171,7 @@ http
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -754,10 +756,61 @@ http
     // Aşama 4 / P8: dağıtım durumu ve avans dağıtımı
     let am;
     const openFor = (cid) => localInvoices.filter((i) => i.customer_id === cid && i.currency === "TRY" && i.remaining_amount > 0.004).sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)));
+    // K9: cari virman (Idempotency-Key zorunlu)
+    let tm;
+    if ((tm = path.match(/^\/customers\/([^/]+)\/transfers(?:\/([^/]+))?$/))) {
+      const party = parties.find((p) => p.id === decodeURIComponent(tm[1]));
+      if (!party) return send(res, 404, { code: "CUSTOMER_NOT_FOUND", detail: "Cari bulunamadı" });
+      if (req.method === "GET") return send(res, 200, { items: transfers.filter((t) => t.source_customer_id === party.id || t.target_customer_id === party.id).map((t) => ({ ...t, direction: t.source_customer_id === party.id ? "out" : "in" })), total: transfers.length });
+      const key = req.headers["idempotency-key"];
+      if (!key) return send(res, 422, { code: "IDEMPOTENCY_KEY_REQUIRED", detail: "İşlem anahtarı gerekli." });
+      return readBody((b) => {
+        console.log(`TRANSFER ${req.method} ${path} key=${key} body=${JSON.stringify(b)}`);
+        if (trKeys.has(key)) return send(res, 200, { ...trKeys.get(key), replayed: true });
+        if (req.method === "POST") {
+          const tgt = parties.find((p) => p.id === b.target_customer_id);
+          if (!tgt) return send(res, 404, { code: "CUSTOMER_NOT_FOUND", detail: "Hedef cari bulunamadı" });
+          if (tgt.id === party.id) return send(res, 422, { code: "TRANSFER_SAME_CUSTOMER", detail: "Aynı cari" });
+          if (!String(b.note || "").trim()) return send(res, 422, { code: "TRANSFER_NOTE_REQUIRED", detail: "Açıklama zorunlu" });
+          const t = { id: "t" + Date.now(), source_customer_id: party.id, source_name: party.name, target_customer_id: tgt.id, target_name: tgt.name, currency: "TRY", amount: Number(b.amount).toFixed(2), date: b.date, note: b.note, voided: false, replayed: false };
+          transfers.push(t); party.balance -= Number(b.amount); tgt.balance += Number(b.amount);
+          trKeys.set(key, t);
+          if (state.colFail === "1") { state.colFail = "0"; return send(res, 500, { code: "MONEY_INCOMPLETE", detail: "İşlem tamamlanamadı." }); }
+          return send(res, 200, t);
+        }
+        const t = transfers.find((x) => x.id === tm[2]);
+        if (!t) return send(res, 404, { code: "TRANSFER_NOT_FOUND", detail: "Virman bulunamadı" });
+        if (t.voided) return send(res, 409, { code: "TRANSFER_VOIDED", detail: "Virman silinmiş" });
+        const src = parties.find((p) => p.id === t.source_customer_id), tgt = parties.find((p) => p.id === t.target_customer_id);
+        src.balance += Number(t.amount); tgt.balance -= Number(t.amount); t.voided = true;
+        if (req.method === "DELETE") { const out = { ok: true, voided: true, transfer_id: t.id, operation_id: "op" + Date.now(), transfer: t, replayed: false }; trKeys.set(key, out); return send(res, 200, out); }
+        const nt = { ...t, id: "t" + Date.now(), amount: Number(b.amount ?? t.amount).toFixed(2), date: b.date || t.date, note: b.note ?? t.note, voided: false, replaces: t.id };
+        t.replaced_by = nt.id; transfers.push(nt); src.balance -= Number(nt.amount); tgt.balance += Number(nt.amount);
+        const out = { ok: true, mode: "replaced", replaced: t.id, replaced_by: nt.id, operation_id: "op" + Date.now(), transfer: nt, replayed: false };
+        trKeys.set(key, out); send(res, 200, out);
+      });
+    }
+    // K8: "Eşleşmeyi kaldır"
+    if (req.method === "DELETE" && (tm = path.match(/^\/local-invoices\/([^/]+)\/allocations\/([^/]+)$/))) {
+      const inv = localInvoices.find((i) => i.id === tm[1]);
+      if (!inv) return send(res, 404, { code: "INVOICE_NOT_FOUND", detail: "Fatura bulunamadı" });
+      const p = inv.payments.find((x) => x.id === tm[2]);
+      if (!p) return send(res, 404, { code: "COLLECTION_NOT_FOUND", detail: "Eşleşme bulunamadı" });
+      if (p.source !== "customer_payment") return send(res, 409, { code: "COLLECTION_NOT_ALLOCATION", detail: "Doğrudan tahsilat" });
+      console.log("UNMATCH", tm[1], tm[2], "key=" + req.headers["idempotency-key"]);
+      inv.payments = inv.payments.filter((x) => x !== p); inv.voided_payments.push({ ...p, released: true });
+      inv.paid_amount -= Number(p.amount); inv.remaining_amount += Number(p.amount);
+      const c1 = parties.find((x) => x.id === inv.customer_id); if (c1) c1.advance = Number(c1.advance || 0) + Number(p.amount);
+      return send(res, 200, { ok: true, operation_id: "op" + Date.now(), released: [{ payment_id: p.id, amount: p.amount }], released_amount: Number(p.amount), credit_remaining: c1 ? c1.advance : 0, currency: "TRY", invoice: { invoice_id: inv.id, status: inv.status, paid_amount: inv.paid_amount, remaining_amount: inv.remaining_amount }, warnings: [], warning_texts: [], replayed: false });
+    }
     if ((am = path.match(/^\/customers\/([^/]+)\/allocation-state$/))) {
       const party = parties.find((p) => p.id === am[1]);
       if (!party) return send(res, 404, { detail: "Müşteri bulunamadı" });
-      return send(res, 200, { currency: "TRY", advance: Number(party.advance || 0).toFixed(2),
+      // K8/K10: credit, has_credit, can_match, match_blocked_reason (/__mode?ledgerBlock=pending|issue)
+      const credit = Number(party.advance || 0);
+      const opens = openFor(party.id).filter((i) => i.status !== "taslak");
+      const blocked = state.ledgerBlock === "pending" ? "ledger_pending" : state.ledgerBlock === "issue" ? "ledger_issue" : null;
+      return send(res, 200, { currency: "TRY", advance: credit.toFixed(2), credit, has_credit: credit > 0, can_match: !blocked && credit > 0 && opens.length > 0, match_blocked_reason: blocked,
         open_invoices: openFor(party.id).map((i) => ({ id: i.id, invoice_number: i.invoice_number, invoice_date: i.issue_date, due_date: i.due_date, total: Number(i.total).toFixed(2), remaining: Number(i.remaining_amount).toFixed(2), status: i.status })) });
     }
     const applyAlloc = (party, items) => {
@@ -802,6 +855,12 @@ http
         const all = [
           ...party.payments.map((pay, i) => ({ id: "pay" + i, date: today, description: "Tahsilat", credit: pay, balance: party.balance, currency: "TRY" })),
           ...(party.id === "c1" ? colLedgerRows(party) : []),
+          // K9: virman satırları (kind "adjustment"; etkinse actions edit/void)
+          ...transfers.filter((t) => t.source_customer_id === party.id || t.target_customer_id === party.id).map((t) => {
+            const out = t.source_customer_id === party.id;
+            return { id: "tr-" + t.id, date: t.date, kind: "adjustment", description: out ? `Virman: ${t.target_name} carisine` : `Virman: ${t.source_name} carisinden`, reference: t.note,
+              credit: out ? Number(t.amount) : undefined, debit: out ? undefined : Number(t.amount), currency: "TRY", reversed: t.voided, transfer: { ...t, direction: out ? "out" : "in" }, actions: t.voided ? { edit: false, void: false } : { edit: true, void: true } };
+          }),
           { id: "l1", date: "2026-11-02", description: "Satış faturası OBI2026101", debit: 6200, balance: 6200, currency: "TRY", reversed: false },
           { id: "l2", date: "2026-10-30", description: "Satış faturası OBI2026099", debit: 900, balance: 0, currency: "TRY", reversed: true },
           ...Array.from({ length: 127 }, (_, i) => ({ id: "old" + i, date: "2026-0" + (1 + (i % 9)) + "-15", description: "Satış faturası ESK" + (1000 + i), debit: 100, balance: 0, currency: "TRY" })),
@@ -973,7 +1032,14 @@ http
         });
       }
       if (!invMatch[2]) return send(res, 200, inv);
-      if (invMatch[2] === "resmilestir") { inv.status = inv.display_status = "resmilesti"; inv.parasut_invoice_id = "ps1"; return send(res, 200, { ok: true, message: "Fatura resmileşti", edoc_state: "done" }); }
+      if (invMatch[2] === "resmilestir") {
+        inv.status = inv.display_status = "resmilesti"; inv.parasut_invoice_id = "ps1";
+        // K8: carinin serbest alacağı faturayı kendiliğinden kapatır
+        const c = parties.find((p) => p.id === inv.customer_id); const credit = c ? Number(c.advance || 0) : 0;
+        const applied = Math.min(credit, inv.remaining_amount);
+        if (applied > 0) { c.advance = credit - applied; inv.paid_amount += applied; inv.remaining_amount -= applied; inv.payments.push({ id: "auto" + Date.now(), amount: applied, date: new Date().toISOString().slice(0, 10), method: "havale", source: "customer_payment", auto: true, notes: "Cari alacaktan mahsup" }); }
+        return send(res, 200, { ok: true, message: "Fatura resmileşti", edoc_state: "done", auto_settlement: applied > 0 ? { applied_amount: applied, credit_remaining: c.advance, currency: "TRY", invoice_status: inv.status, paid_amount: inv.paid_amount, remaining_amount: inv.remaining_amount, skipped: [], operation_id: "op" + Date.now(), skipped_reason: null } : null });
+      }
       return readBody((b) => {
         // Aşama 4 P2: anahtar (aynı anahtar → ilk sonuç + replayed); /__mode?payFail=1 → işlenir ama 500 (bir kez).
         const pk = req.headers["idempotency-key"];

@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { InlineEmpty } from "../../src/components/InlineEmpty";
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { FadeInDown } from "react-native-reanimated";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { getLegacyPartyCurrency, getPartyLedgerCompat, legacyIdOf } from "../../src/api-gider";
-import { deleteParty, deletePartyErrorText, getParty, getPartyOrders, type PartyOrder } from "../../src/api-finans";
+import { deleteCustomerTransfer, deleteParty, deletePartyErrorText, getAllocationState, getParty, getPartyOrders, sendKeyedMoney, type AllocationState, type PartyOrder } from "../../src/api-finans";
+import { newIdempotencyKey } from "../../src/api";
+import { balanceHint, matchLinkView, transferErrorText, transferRowActions } from "../../src/cari-ui";
 import { ledgerCollection, ledgerRowActions } from "../../src/collection-actions";
 import { runVoidCollection } from "../../src/collection-flow";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -18,7 +20,7 @@ import { StackHeader } from "../../src/ui/Header";
 import { DetailHero } from "../../src/ui/DetailHero";
 import { ON_HERO } from "../../src/ui/HeroCard";
 import { Card, IconTile, ListRow, SectionTitle } from "../../src/ui/ListRow";
-import { AlertIcon, DownloadIcon, InboxIcon, ReceiptIcon, WalletIcon } from "../../src/components/Icons";
+import { AlertIcon, ArrowRightIcon, DownloadIcon, InboxIcon, ReceiptIcon, RefreshIcon, WalletIcon } from "../../src/components/Icons";
 import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { Skeleton } from "../../src/components/Skeleton";
 import type { PartyLedgerRow } from "../../src/types";
@@ -160,6 +162,8 @@ export default function CustomerDetailScreen() {
       if (own) setCur(own);
       setOtherBalances((res.balances || []).filter((b) => b.currency !== (own || cur || "TRY")));
       setError(null);
+      // K8/K10: eşleşmemiş alacak ve "Faturalarla eşleştir" bağlantısı (okunamazsa bağlantı gösterilmez).
+      if (registered && mayCollect) getAllocationState(token, legacyIdOf(id)).then(setAllocState).catch(() => setAllocState(null));
     } catch (e: any) {
       setError(e?.message || "Ekstre yüklenemedi.");
     } finally {
@@ -171,6 +175,8 @@ export default function CustomerDetailScreen() {
   useEffect(() => {
     load();
   }, [load]);
+  const [allocState, setAllocState] = useState<AllocationState | null>(null);
+  const matchView = matchLinkView(allocState);
   const loadRef = useRef<(() => Promise<void>) | null>(null);
   loadRef.current = load;
 
@@ -187,6 +193,37 @@ export default function CustomerDetailScreen() {
     setVoiding(r.id || c.id);
     try {
       if (await runVoidCollection({ token, c, currency: c.currency || rowCur, confirm, toast })) await load();
+    } finally {
+      setVoiding(null);
+    }
+  };
+
+  // K9: virman (cari → cari). Düzenle aynı ekranda; sil onaylı, işlem anahtarlı (belirsizde aynı anahtarla yeniden).
+  const openTransfer = (r?: PartyLedgerRow) =>
+    router.push({
+      pathname: "/customers/transfer",
+      params: { id: legacyIdOf(id), name: nameOverride || String(params.name || ""), currency: cur || "TRY", ...(r?.transfer ? { t: JSON.stringify(r.transfer) } : {}) },
+    });
+  const onVoidTransfer = async (r: PartyLedgerRow, rowCur: string) => {
+    const t = r.transfer;
+    if (!token || !t || voiding) return;
+    const ok = await confirm({
+      title: "Virman silinsin mi?",
+      message: `${r.description || "Virman"} · ${formatMoney(Number(t.amount || 0), rowCur)}\n\nVirman ters kayıtla geri alınır; iki carinin bakiyesi de eski hâline döner.`,
+      confirmLabel: "Virmanı sil",
+      destructive: true,
+    });
+    if (!ok) return;
+    setVoiding(r.id || t.id);
+    const key = newIdempotencyKey("trf-void");
+    try {
+      const out = await sendKeyedMoney(
+        () => deleteCustomerTransfer(token, legacyIdOf(id), t.id, key),
+        () => confirm({ title: "Sonuç alınamadı", message: "Virman silinmiş olabilir. Aynı işlemi yeniden gönderebilirsiniz; ikinci kez işlenmez.", confirmLabel: "Yeniden gönder" })
+      );
+      if (out.ok) toast(out.result?.replayed ? "Bu işlem zaten kaydedilmişti; ikinci kez işlenmedi." : "Virman silindi; iki carinin bakiyesi güncellendi.", "success");
+      else toast(transferErrorText(out.error), "error");
+      await load();
     } finally {
       setVoiding(null);
     }
@@ -238,7 +275,8 @@ export default function CustomerDetailScreen() {
   };
 
   const name = nameOverride || String(params.name || "Cari");
-  const balanceLabel = balance > 0 ? "Alacağınız" : balance < 0 ? "Borcunuz" : "Bakiye";
+  // K10: eksi bakiye = carinin alacak bakiyesi (biz cariye borçluyuz).
+  const balanceLabel = balanceHint(balance);
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="customer-detail">
@@ -269,6 +307,25 @@ export default function CustomerDetailScreen() {
                 {`${b.balance >= 0 ? "Alacak" : "Borç"} ${formatMoney(Math.abs(b.balance), b.currency)}`}
               </Text>
             ))}
+            {/* M1 (K8): eşleşmemiş tahsilat varsa ve açık fatura varsa küçük bağlantı; ayrı ana düğme yok. */}
+            {registered && mayCollect && matchView.show ? (
+              <Pressable
+                testID="customer-match-link"
+                accessibilityRole="link"
+                onPress={() => router.push({ pathname: "/customers/allocate", params: { id: legacyIdOf(id), name, currency: cur || "TRY" } })}
+                style={styles.matchLink}
+              >
+                <Text style={styles.matchText} numberOfLines={2}>
+                  {matchView.text}
+                </Text>
+                <ArrowRightIcon size={14} color={ON_HERO.text} />
+              </Pressable>
+            ) : null}
+            {registered && mayCollect && !matchView.show && matchView.note ? (
+              <Text testID="customer-match-note" style={styles.matchNote}>
+                {matchView.note}
+              </Text>
+            ) : null}
           </View>
         </DetailHero>
 
@@ -281,13 +338,14 @@ export default function CustomerDetailScreen() {
               busy={busy}
               onPress={onCollect}
             />
-            {/* Aşama 4 / P8: dağıtılmamış avansı kesilmiş faturalara bağlar (web "Avansı faturaya dağıt"). */}
+            {/* K9: cari → cari virman (kasa/banka yok). "Avansı faturaya dağıt" kalktı (M1); eşleştirme bakiye kartındaki bağlantıda. */}
             <Button
-              testID="customer-allocate"
+              testID="customer-transfer"
               variant="secondary"
-              label="Avansı faturaya dağıt"
+              label="Virman"
+              icon={<RefreshIcon size={16} color={colors.textPrimary} />}
               style={{ marginTop: spacing.sm }}
-              onPress={() => router.push({ pathname: "/customers/allocate", params: { id: legacyIdOf(id), name: nameOverride || String(params.name || ""), currency: cur || "TRY" } })}
+              onPress={() => openTransfer()}
             />
           </SafeAnimatedView>
         ) : null}
@@ -390,6 +448,7 @@ export default function CustomerDetailScreen() {
                 const isCredit = credit > 0;
                 const rowCur = (r.currency || curLabel).toUpperCase().replace("TRL", "TRY");
                 const acts = mayCollect ? ledgerRowActions(r) : null;
+                const tActs = mayCollect && !acts ? transferRowActions(r) : null;
                 return (
                   <View key={r.id || i}>
                   <ListRow
@@ -415,6 +474,16 @@ export default function CustomerDetailScreen() {
                       ) : null}
                       {acts.void ? (
                         <Button testID={`ledger-void-${r.id}`} size="sm" variant="secondary" label="Sil" busy={voiding === (r.id || r.collection?.id)} disabled={Boolean(voiding)} onPress={() => onVoidCollection(r, rowCur)} />
+                      ) : null}
+                    </View>
+                  ) : null}
+                  {tActs ? (
+                    <View style={styles.rowActs}>
+                      {tActs.edit ? (
+                        <Button testID={`ledger-transfer-edit-${r.id}`} size="sm" variant="secondary" label="Düzenle" disabled={Boolean(voiding)} onPress={() => openTransfer(r)} />
+                      ) : null}
+                      {tActs.void ? (
+                        <Button testID={`ledger-transfer-void-${r.id}`} size="sm" variant="secondary" label="Sil" busy={voiding === (r.id || r.transfer?.id)} disabled={Boolean(voiding)} onPress={() => onVoidTransfer(r, rowCur)} />
                       ) : null}
                     </View>
                   ) : null}
@@ -450,6 +519,9 @@ const styles = StyleSheet.create({
   avatarText: { color: ON_HERO.text, fontSize: 17, fontWeight: "700" },
   valueBlock: { marginTop: spacing.md },
   valueLabel: { color: ON_HERO.soft, fontSize: 12, fontWeight: "500" },
+  matchLink: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", marginTop: spacing.sm, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: ON_HERO.faint },
+  matchText: { color: ON_HERO.text, fontSize: 13, fontWeight: "600", flexShrink: 1 },
+  matchNote: { color: ON_HERO.soft, fontSize: 12, marginTop: spacing.sm },
   otherBalance: { color: ON_HERO.soft, fontSize: 13, fontWeight: "600", marginTop: 2 },
   value: { color: ON_HERO.text, fontSize: 34, lineHeight: 40, fontWeight: "800", letterSpacing: -1 },
   notice: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, marginHorizontal: spacing.lg, marginTop: spacing.md, padding: spacing.md, borderRadius: radius.md },

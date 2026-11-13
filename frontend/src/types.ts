@@ -366,6 +366,9 @@ export type PartyLedgerRow = {
   source?: string;
   actions?: { edit?: boolean; void?: boolean } | null;
   collection?: import("./collection-actions").Collection | null;
+  // 13 Kas 2026 K9: virman satırı (kind "adjustment"); düzenle/sil actions'a göre.
+  transfer?: import("./api-finans").CustomerTransfer | null;
+  kind?: string;
 };
 
 export type LocalInvoice = {

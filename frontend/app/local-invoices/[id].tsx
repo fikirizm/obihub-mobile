@@ -5,10 +5,11 @@ import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { addLocalInvoicePayment, checkLocalInvoiceEdocStatus, getCashAccounts, getLocalInvoice, newIdempotencyKey, officializeLocalInvoice } from "../../src/api";
-import { accountOptionLabel, accountsForCurrency, collectErrorText, deleteLocalInvoice, getParasutAccounts, getParasutPaymentCaps, isInvoiceEditable, isUncertainWrite, postParasutPaymentAction, sendKeyedMoney } from "../../src/api-finans";
+import { accountOptionLabel, accountsForCurrency, collectErrorText, unmatchAllocation, deleteLocalInvoice, getParasutAccounts, getParasutPaymentCaps, isInvoiceEditable, isUncertainWrite, postParasutPaymentAction, sendKeyedMoney } from "../../src/api-finans";
 import { canOfferParasutSync, collectResultText, parasutActionFailText, parasutActionRequest, parasutActionResult, parasutCollectFields, parasutPayView, PARASUT_ACTION_LABELS, type ParasutAction } from "../../src/parasut-pay";
 import { invoiceStatus, isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { invoicePaymentActions, invoicePaymentCollection } from "../../src/collection-actions";
+import { autoSettlementText, canUnmatch, UNMATCH_CONFIRM, unmatchDoneText, unmatchErrorText } from "../../src/cari-ui";
 import { runVoidCollection } from "../../src/collection-flow";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
@@ -196,9 +197,11 @@ export default function LocalInvoiceDetailScreen() {
     setBusy("official");
     try {
       const r = await officializeLocalInvoice(token, inv.id);
-      toast(r?.message || (r?.pending ? "E-belge sıraya alındı" : "Fatura resmileşti"), "success");
+      // M5 (K8): fatura kesilince carinin alacak bakiyesi faturayı kendiliğinden kapatabilir; bildirim tek satırda birleşir.
+      const settled = autoSettlementText((r as any)?.auto_settlement);
+      const main = r?.message || (r?.pending ? "E-belge sıraya alındı" : "Fatura resmileşti");
       // P6: tutar Paraşüt iskontosu nedeniyle yeniden hesaplandıysa kısa not.
-      if (r?.amount_note) toast(String(r.amount_note), "info");
+      toast([main, settled, r?.amount_note ? String(r.amount_note) : null].filter(Boolean).join(" "), "success");
       await load();
     } catch (e: any) {
       toast(e?.message || "Resmileştirilemedi.", "error");
@@ -297,10 +300,9 @@ export default function LocalInvoiceDetailScreen() {
     try {
       const r = await checkLocalInvoiceEdocStatus(token, inv.id);
       const state = r?.edoc_state;
-      toast(
-        r?.message || (state === "done" ? "Fatura resmileşti" : state === "failed" ? "E-belge oluşturulamadı" : "E-belge sonucu henüz gelmedi"),
-        state === "failed" ? "error" : "success"
-      );
+      const settled = autoSettlementText((r as any)?.auto_settlement);
+      const main = r?.message || (state === "done" ? "Fatura resmileşti" : state === "failed" ? "E-belge oluşturulamadı" : "E-belge sonucu henüz gelmedi");
+      toast(settled ? `${main} ${settled}` : main, state === "failed" ? "error" : "success");
       await load();
     } catch (e: any) {
       toast(e?.message || "Durum sorgulanamadı.", "error");
@@ -315,6 +317,33 @@ export default function LocalInvoiceDetailScreen() {
     const c = invoicePaymentCollection(inv, p);
     router.push({ pathname: "/collections/edit", params: { c: JSON.stringify(c), currency: String(cur || "TRY"), title: inv.invoice_number || "Fatura" } });
   };
+  // M4 (K8): cari tahsilatından gelen eşleşmeyi faturadan çöz; tutar carinin alacak bakiyesine döner (kasa/cari bakiyesi değişmez).
+  const onUnmatch = async (p: Pay) => {
+    if (!token || busy || !p.id) return;
+    const ok = await confirm({
+      title: "Eşleşme kaldırılsın mı?",
+      message: `${formatMoney(p.amount, cur)} · ${formatDate(p.date)}\n\n${UNMATCH_CONFIRM}`,
+      confirmLabel: "Eşleşmeyi kaldır",
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusy("void");
+    setVoidingId(p.id);
+    const key = newIdempotencyKey("unmatch");
+    try {
+      const out = await sendKeyedMoney(
+        () => unmatchAllocation(token, inv.id, String(p.id), key),
+        () => confirm({ title: "Sonuç alınamadı", message: "Eşleşme kaldırılmış olabilir. Aynı işlemi yeniden gönderebilirsiniz; ikinci kez işlenmez.", confirmLabel: "Yeniden gönder" })
+      );
+      if (out.ok) toast(unmatchDoneText({ ...out.result, currency: out.result?.currency || cur }), "success");
+      else toast(unmatchErrorText(out.error), "error");
+      await load();
+    } finally {
+      setBusy(null);
+      setVoidingId(null);
+    }
+  };
+
   const onVoidPayment = async (p: Pay) => {
     if (!token || busy) return;
     const c = invoicePaymentCollection(inv, p);
@@ -539,7 +568,7 @@ export default function LocalInvoiceDetailScreen() {
                   }
                   title={PAYMENT_METHODS.find((m) => m.value === p.method)?.label || p.method || "Ödeme"}
                   subtitle={formatDate(p.date)}
-                  meta={acts?.customerPayment ? "Cari tahsilatından · cariden düzenlenir" : p.notes || undefined}
+                  meta={acts?.customerPayment ? ((p as any).auto ? "Cari alacaktan mahsup" : "Cari tahsilatından eşleşme") : p.notes || undefined}
                   trailing={<Text style={amount(colors.success)}>{formatMoney(p.amount, cur)}</Text>}
                 />
                 {ps ? (
@@ -550,6 +579,11 @@ export default function LocalInvoiceDetailScreen() {
                     {ps.actions.map((a) => (
                       <Button key={a} testID={`invoice-pay-parasut-${a}-${p.id}`} size="sm" variant="secondary" label={PARASUT_ACTION_LABELS[a]} busy={psBusy === p.id} disabled={Boolean(psBusy) || Boolean(busy)} onPress={() => onParasutAction(p, a)} />
                     ))}
+                  </View>
+                ) : null}
+                {mayWrite && canUnmatch(p) ? (
+                  <View style={styles.rowActs}>
+                    <Button testID={`invoice-pay-unmatch-${p.id}`} size="sm" variant="secondary" label="Eşleşmeyi kaldır" busy={voidingId === p.id} disabled={Boolean(busy)} onPress={() => onUnmatch(p)} />
                   </View>
                 ) : null}
                 {acts && (acts.edit || acts.void) ? (

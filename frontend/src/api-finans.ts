@@ -367,12 +367,25 @@ export async function postParasutPaymentAction(token: string, path: string, body
 
 // ---------------------------------------------------------------------------
 // Aşama 4 / P8: cari tahsilatı dağıtımı (web CustomersPage, AllocateAdvanceDialog).
-export type AllocationState = { currency: string; advance: string; open_invoices: import("./allocation").OpenInvoice[] };
+// 13 Kas 2026 (K8/K10): credit (eşleşmemiş alacak, sayı), has_credit, can_match, match_blocked_reason eklendi; eski alanlar aynı.
+export type AllocationState = {
+  currency: string;
+  advance: string;
+  credit: number;
+  has_credit: boolean;
+  can_match: boolean;
+  match_blocked_reason: "ledger_pending" | "ledger_issue" | null;
+  open_invoices: import("./allocation").OpenInvoice[];
+};
 export async function getAllocationState(token: string, customerId: string): Promise<AllocationState> {
   const d = await request<any>(`/customers/${encodeURIComponent(customerId)}/allocation-state`, { method: "GET" }, token);
   return {
     currency: String(d?.currency || "TRY").toUpperCase().replace("TRL", "TRY"),
     advance: String(d?.advance ?? "0"),
+    credit: Number(d?.credit ?? d?.advance ?? 0) || 0,
+    has_credit: d?.has_credit === true,
+    can_match: d?.can_match === true,
+    match_blocked_reason: d?.match_blocked_reason === "ledger_pending" || d?.match_blocked_reason === "ledger_issue" ? d.match_blocked_reason : null,
     open_invoices: (Array.isArray(d?.open_invoices) ? d.open_invoices : []).map((i: any) => ({ ...i, id: String(i?.id || ""), remaining: String(i?.remaining ?? "0") })),
   };
 }
@@ -380,6 +393,51 @@ export async function postAllocations(token: string, customerId: string, allocat
   return request<any>(
     `/customers/${encodeURIComponent(customerId)}/allocations`,
     { method: "POST", body: JSON.stringify({ allocations }), headers: { "Idempotency-Key": idempotencyKey } },
+    token
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 13 Kas 2026 — K8 "Eşleşmeyi kaldır" ve K9 cari virman (docs/mobil-oturum-icin-notlar.md 3 ve 5). Hepsi Idempotency-Key ile.
+export async function unmatchAllocation(token: string, invoiceId: string, paymentId: string, idempotencyKey: string) {
+  return request<any>(
+    `/local-invoices/${encodeURIComponent(invoiceId)}/allocations/${encodeURIComponent(paymentId)}`,
+    { method: "DELETE", headers: { "Idempotency-Key": idempotencyKey } },
+    token
+  );
+}
+
+export type CustomerTransfer = {
+  id: string;
+  source_customer_id: string;
+  source_name?: string;
+  target_customer_id: string;
+  target_name?: string;
+  currency?: string;
+  amount: string;
+  date?: string;
+  note?: string;
+  voided?: boolean;
+  direction?: "out" | "in";
+};
+export async function createCustomerTransfer(token: string, customerId: string, body: { target_customer_id: string; amount: string; date: string; note: string }, key: string) {
+  return request<CustomerTransfer & { replayed?: boolean }>(
+    `/customers/${encodeURIComponent(customerId)}/transfers`,
+    { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key } },
+    token
+  );
+}
+export async function patchCustomerTransfer(token: string, customerId: string, transferId: string, body: { amount: string; date: string; note: string }, key: string) {
+  return request<any>(
+    `/customers/${encodeURIComponent(customerId)}/transfers/${encodeURIComponent(transferId)}`,
+    { method: "PATCH", body: JSON.stringify(body), headers: { "Idempotency-Key": key } },
+    token
+  );
+}
+export async function deleteCustomerTransfer(token: string, customerId: string, transferId: string, key: string) {
+  return request<any>(
+    `/customers/${encodeURIComponent(customerId)}/transfers/${encodeURIComponent(transferId)}`,
+    { method: "DELETE", headers: { "Idempotency-Key": key } },
     token
   );
 }

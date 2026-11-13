@@ -1,6 +1,6 @@
 // Aşama 4 / P8 — cari tahsilatı (C2 kalıbı).  Web: components/customers/CollectionDialogOS.jsx + CustomersPage.handleTahsilatSave.
 // POST /customers/{id}/payments + Idempotency-Key.  Dağıtım: Otomatik (alan gönderilmez, sunucu en eski vadeden dağıtır) |
-// Ben seçeyim (satır tutarları) | Avans olarak bırak (allocations: []).  K4: taslak faturalar listelenmez.
+// Ben seçeyim (satır tutarları) | Faturalara işleme (allocations: []; tutar alacak bakiyesinde kalır, K10).  K4: taslak faturalar listelenmez.
 // Tutar dize gider; belirsiz sonuçta alanlar kilitlenir ve AYNI anahtarla yeniden gönderilir (src/useMoneyWrite).
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -66,7 +66,7 @@ const balanceMinor = (v: unknown) => {
 const MODES: { value: AllocationMode; label: string }[] = [
   { value: "auto", label: "Otomatik (en eski vade)" },
   { value: "manual", label: "Ben seçeyim" },
-  { value: "advance", label: "Avans olarak bırak" },
+  { value: "advance", label: "Faturalara işleme" },
 ];
 
 export default function CustomerCollectScreen() {
@@ -177,7 +177,7 @@ export default function CustomerCollectScreen() {
             value={formatMinor(amt ?? 0n, currency)}
             facts={[
               { label: "Açık bakiye", value: formatMinor(due ?? 0n, currency) },
-              { label: "Mevcut avans", value: formatMinor(advance, currency) },
+              { label: "Mevcut alacak bakiyesi", value: formatMinor(advance, currency) },
             ]}
           />
 
@@ -249,7 +249,7 @@ export default function CustomerCollectScreen() {
             ) : !invoices.length ? (
               <Card padded style={styles.block}>
                 <Text testID="collect-no-invoices" style={[type.footnote, { color: colors.textSecondary }]}>
-                  {`Açık fatura yok; tahsilat cari hesapta avans olarak kalır.${advance > 0n ? ` Mevcut avans ${formatMinor(advance, currency)}.` : ""}`}
+                  {`Açık fatura yok; tahsilat cari hesapta alacak bakiyesi olarak kalır.${advance > 0n ? ` Mevcut alacak bakiyesi ${formatMinor(advance, currency)}.` : ""}`}
                 </Text>
               </Card>
             ) : (
@@ -261,10 +261,10 @@ export default function CustomerCollectScreen() {
                 </ChipRow>
                 <View style={styles.form}>
                   {mode === "auto" ? (
-                    <Text style={[type.footnote, { color: colors.textSecondary }]}>Tutar açık faturalara en eski vadeden başlayarak işlenir; artan kısım cari hesapta avans olarak kalır.</Text>
+                    <Text style={[type.footnote, { color: colors.textSecondary }]}>Tutar açık faturalara en eski vadeden başlayarak işlenir; artan kısım carinin alacak bakiyesinde kalır.</Text>
                   ) : null}
                   {mode === "advance" ? (
-                    <Text style={[type.footnote, { color: colors.textSecondary }]}>Tahsilat faturalara işlenmez; tamamı cari hesapta avans olarak kalır. Avansı sonradan faturaya dağıtabilirsiniz.</Text>
+                    <Text style={[type.footnote, { color: colors.textSecondary }]}>Tahsilat faturalara işlenmez; tamamı carinin alacak bakiyesinde kalır. Sonradan "Faturalarla eşleştir" ile bağlayabilirsiniz; yeni kesilen fatura da bu bakiyeden kendiliğinden kapanır.</Text>
                   ) : null}
                 </View>
                 {mode === "manual" ? (
@@ -280,7 +280,7 @@ export default function CustomerCollectScreen() {
                       <Text style={[type.callout, tabular, { color: colors.textPrimary }]}>{`Dağıtılan ${formatMinor(alloc.total, currency)}`}</Text>
                       {amt ? (
                         <Text style={[type.callout, tabular, { color: alloc.total > amt ? colors.error : colors.textSecondary }]}>
-                          {`Avans olarak kalan ${formatMinor(alloc.total > amt ? 0n : amt - alloc.total, currency)}`}
+                          {`Alacak bakiyesinde kalan ${formatMinor(alloc.total > amt ? 0n : amt - alloc.total, currency)}`}
                         </Text>
                       ) : null}
                     </View>

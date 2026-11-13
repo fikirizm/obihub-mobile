@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
+import { balanceListHint } from "../../src/cari-ui";
 import { getPartiesCompat } from "../../src/api-gider";
 import { useDebounce } from "../../src/hooks/useDebounce";
 import { usePagedList } from "../../src/hooks/usePagedList";
@@ -224,7 +225,7 @@ export default function CustomersScreen() {
               subtitle={p.phone || p.email || (p.source === "orders" ? "Siparişlerden" : p.source === "obihub" ? "ObiHub defteri" : undefined)}
               amount={balanceText}
               amountColor={bal > 0 ? colors.success : bal < 0 ? colors.error : colors.textTertiary}
-              meta={bal > 0 ? "Alacağınız var" : bal < 0 ? "Borcunuz var" : undefined}
+              meta={balanceListHint(bal)}
               onPress={() =>
                 router.push({
                   pathname: "/customers/[id]",

@@ -1,4 +1,5 @@
-// Aşama 4 / P8: cari tahsilatının faturalara dağıtımı ve "avansı faturaya dağıt" (saf modül; birim testi dev/test-allocation.mjs).
+// Aşama 4 / P8: cari tahsilatının faturalara dağıtımı ve "Faturalarla eşleştir" (saf modül; birim testi dev/test-allocation.mjs).
+// K10 (13 Kas 2026): ekranlarda "avans" yerine "alacak bakiyesi"; alan adları (advance, advance_amount…) değişmedi.
 // Web: frontend/src/components/customers/allocation.js, CollectionDialogOS.jsx, AllocateAdvanceDialog.jsx; lib/moneyMinor.js.
 // Tutarlar kuruş (BigInt); girişte Türkçe biçim ("1.250,50").  Float yok.
 // Uçlar: GET /customers/{id}/allocation-state, POST /customers/{id}/payments {…, allocations?}, POST /customers/{id}/allocations.
@@ -106,7 +107,7 @@ export function autoFill(invoices: OpenInvoice[], available: bigint): Record<str
   return out;
 }
 
-// Tahsilat gövdesindeki `allocations`: undefined = alan yok (sunucu en eski vadeden dağıtır), [] = tamamı avans.
+// Tahsilat gövdesindeki `allocations`: undefined = alan yok (sunucu en eski vadeden dağıtır), [] = faturalara işleme (alacak bakiyesinde kalır).
 export function allocationBody(mode: AllocationMode, items: AllocationItem[]): AllocationItem[] | undefined {
   if (mode === "advance") return [];
   if (mode === "manual" && items.length) return items;
@@ -122,7 +123,7 @@ export function collectAllocationError(mode: AllocationMode, a: Allocations, amo
 export function advanceAllocationError(a: Allocations, advance: bigint): string {
   if (Object.keys(a.errors).length) return "Dağıtım tutarlarındaki hataları düzeltin.";
   if (!a.items.length) return "Dağıtılacak en az bir fatura için tutar girin.";
-  if (a.total > advance) return "Dağıtım toplamı mevcut avansı aşamaz.";
+  if (a.total > advance) return "Eşleştirme toplamı eşleşmemiş alacağı aşamaz.";
   return "";
 }
 
@@ -130,7 +131,7 @@ export function advanceAllocationError(a: Allocations, advance: bigint): string 
 export function balanceNote(due: bigint | null, amount: bigint | null, currency: string): { tone: "ok" | "warn"; text: string } | null {
   if (due === null || due <= 0n || amount === null || amount <= 0n) return null;
   if (amount < due) return { tone: "warn", text: `Kısmi tahsilat: ${formatMinor(due - amount, currency)} açık kalacak.` };
-  if (amount > due) return { tone: "warn", text: `Fazla tahsilat: ${formatMinor(amount - due, currency)} cari hesapta avans olarak kalacak.` };
+  if (amount > due) return { tone: "warn", text: `Fazla tahsilat: ${formatMinor(amount - due, currency)} cari hesapta alacak bakiyesi olarak kalacak.` };
   return { tone: "ok", text: "Cari bakiyesi kapanacak." };
 }
 
@@ -139,7 +140,7 @@ const TEXTS: Record<string, string> = {
   ALLOCATION_INVALID: "Dağıtım geçersiz: fatura bu cariye ait değil ya da aynı fatura iki kez seçildi. Listeyi yenileyin.",
   PAYMENT_EXCEEDS_REMAINING: "Bir faturaya kalan tutarından fazlası dağıtılamaz. Liste yenilendi; tutarları kontrol edin.",
   INVOICE_NOT_ISSUED: "Taslak faturaya dağıtım yapılamaz; önce faturayı kesin.",
-  ADVANCE_INSUFFICIENT: "Carinin dağıtılmamış avansı bu tutara yetmiyor. Liste yenilendi.",
+  ADVANCE_INSUFFICIENT: "Carinin eşleşmemiş alacak bakiyesi bu tutar için yetmiyor. Liste yenilendi.",
   ALLOCATION_REQUIRED: "Dağıtılacak en az bir fatura için tutar girin.",
   CURRENCY_MISMATCH: "Seçilen hesabın para birimi carinin para biriminden farklı. Kur çevirisi yapılmaz; aynı para biriminde bir hesap seçin.",
   ACCOUNT_REQUIRED: "Birden çok uygun hesap var; tahsilatın yazılacağı hesabı seçin.",
@@ -155,8 +156,15 @@ const TEXTS: Record<string, string> = {
 const UNCERTAIN_TEXT =
   "Bağlantı koptu ya da sunucu yanıt vermedi; işlem kaydedilmiş olabilir. Bilgiler kilitlendi: aynı işlemi yeniden gönderebilirsiniz, ikinci kez kaydedilmez.";
 
+// 409 LEDGER_PENDING / LEDGER_ISSUE (13 Kas 2026): sunucunun Türkçe metni gösterilir; yoksa bizimki.
+const LEDGER_TEXTS: Record<string, string> = {
+  LEDGER_PENDING: "Bazı kayıtlar cari hesaba işleniyor; eşleştirme birkaç dakika sonra açılır.",
+  LEDGER_ISSUE: "Bu caride muhasebe kaydı sorunlu bir belge var; eşleştirme için önce o belge düzeltilmeli.",
+};
+
 export function allocationErrorText(e: any): string {
   const code = e?.code;
+  if (code && LEDGER_TEXTS[code]) return (typeof e?.message === "string" && e.message.trim()) || LEDGER_TEXTS[code];
   if (code && TEXTS[code]) return TEXTS[code];
   const status = Number(e?.status);
   const partialOrPending = code === "MONEY_PARTIAL" || code === "MONEY_PENDING" || code === "OPERATION_PENDING";
@@ -167,7 +175,7 @@ export function allocationErrorText(e: any): string {
 const REPLAYED_TEXT = "Bu işlem zaten kaydedilmişti; ikinci kez işlenmedi.";
 const skippedText = (r: any) => {
   const n = Array.isArray(r?.skipped) ? r.skipped.length : 0;
-  return n ? [`${n} fatura bu sırada değiştiği için atlandı; tutarı avansta kaldı.`] : [];
+  return n ? [`${n} fatura bu sırada değiştiği için atlandı; tutarı alacak bakiyesinde kaldı.`] : [];
 };
 
 export function collectDoneTexts(r: any, currency: string): string[] {
@@ -178,10 +186,10 @@ export function collectDoneTexts(r: any, currency: string): string[] {
   const main =
     allocated > 0n
       ? advance > 0n
-        ? `Tahsilat kaydedildi: ${formatMinor(allocated, cur)} açık faturalara işlendi, ${formatMinor(advance, cur)} avans kaldı.`
+        ? `Tahsilat kaydedildi: ${formatMinor(allocated, cur)} açık faturalara işlendi, ${formatMinor(advance, cur)} alacak bakiyesinde kaldı.`
         : `Tahsilat kaydedildi: ${formatMinor(allocated, cur)} açık faturalara işlendi.`
       : advance > 0n
-        ? `Tahsilat avans olarak kaydedildi (${formatMinor(advance, cur)}).`
+        ? `Tahsilat faturalara işlenmedi; alacak bakiyesinde duruyor (${formatMinor(advance, cur)}).`
         : "Tahsilat kaydedildi.";
   return [main, ...skippedText(r)];
 }
@@ -189,6 +197,6 @@ export function collectDoneTexts(r: any, currency: string): string[] {
 export function allocateDoneTexts(r: any, total: bigint, currency: string): string[] {
   if (r?.replayed) return [REPLAYED_TEXT];
   const cur = r?.currency || currency;
-  const rest = r?.advance_remaining !== undefined && r?.advance_remaining !== null ? `; kalan avans ${money(r.advance_remaining, cur)}` : "";
-  return [`${formatMinor(total, cur)} faturalara işlendi${rest}.`, ...skippedText(r)];
+  const rest = r?.advance_remaining !== undefined && r?.advance_remaining !== null ? `; kalan alacak ${money(r.advance_remaining, cur)}` : "";
+  return [`${formatMinor(total, cur)} faturalarla eşleştirildi${rest}.`, ...skippedText(r)];
 }

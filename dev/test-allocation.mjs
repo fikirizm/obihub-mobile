@@ -84,12 +84,12 @@ t("tahsilat doğrulaması: elle dağıtım toplamı tutarı aşamaz, satır hata
 });
 t("avans dağıtımı doğrulaması: hata, boş, avansı aşan", () => {
   assert.equal(m.advanceAllocationError(m.buildAllocations(invs, {}), 1000n), "Dağıtılacak en az bir fatura için tutar girin.");
-  assert.equal(m.advanceAllocationError(m.buildAllocations(invs, { i1: "20,00" }), 1000n), "Dağıtım toplamı mevcut avansı aşamaz.");
+  assert.equal(m.advanceAllocationError(m.buildAllocations(invs, { i1: "20,00" }), 1000n), "Eşleştirme toplamı eşleşmemiş alacağı aşamaz.");
   assert.equal(m.advanceAllocationError(m.buildAllocations(invs, { i1: "10,00" }), 1000n), "");
 });
 t("bakiye notu: kısmi, fazla (avans), kapanır", () => {
   assert.deepEqual(m.balanceNote(50000n, 20000n, "TRY"), { tone: "warn", text: "Kısmi tahsilat: ₺300,00 açık kalacak." });
-  assert.deepEqual(m.balanceNote(50000n, 60000n, "TRY"), { tone: "warn", text: "Fazla tahsilat: ₺100,00 cari hesapta avans olarak kalacak." });
+  assert.deepEqual(m.balanceNote(50000n, 60000n, "TRY"), { tone: "warn", text: "Fazla tahsilat: ₺100,00 cari hesapta alacak bakiyesi olarak kalacak." });
   assert.deepEqual(m.balanceNote(50000n, 50000n, "TRY"), { tone: "ok", text: "Cari bakiyesi kapanacak." });
   assert.equal(m.balanceNote(0n, 100n, "TRY"), null);
   assert.equal(m.balanceNote(50000n, null, "TRY"), null);
@@ -97,7 +97,7 @@ t("bakiye notu: kısmi, fazla (avans), kapanır", () => {
 
 t("hata metinleri: dağıtım ve hesap kodları kendi metnimizle; CURRENCY_MISMATCH açık", () => {
   for (const [code, re] of [["ALLOCATION_EXCEEDS_AMOUNT", /aşıyor/], ["ALLOCATION_INVALID", /geçersiz/], ["PAYMENT_EXCEEDS_REMAINING", /kalan/], ["INVOICE_NOT_ISSUED", /[Tt]aslak/],
-    ["ADVANCE_INSUFFICIENT", /avans/i], ["ALLOCATION_REQUIRED", /en az bir/], ["CURRENCY_MISMATCH", /para birimi/], ["ACCOUNT_REQUIRED", /hesap/i], ["ACCOUNT_NONE_FOR_CURRENCY", /hesab/i], ["ACCOUNT_NOT_FOUND", /hesap/i], ["ACCOUNT_INACTIVE", /pasif/]]) {
+    ["ADVANCE_INSUFFICIENT", /alacak bakiyesi/], ["ALLOCATION_REQUIRED", /en az bir/], ["CURRENCY_MISMATCH", /para birimi/], ["ACCOUNT_REQUIRED", /hesap/i], ["ACCOUNT_NONE_FOR_CURRENCY", /hesab/i], ["ACCOUNT_NOT_FOUND", /hesap/i], ["ACCOUNT_INACTIVE", /pasif/]]) {
     assert.match(m.allocationErrorText(err(409, code)), re, code);
   }
   assert.equal(m.allocationErrorText(err(400, "OTHER", "Sunucu metni")), "Sunucu metni");
@@ -105,17 +105,28 @@ t("hata metinleri: dağıtım ve hesap kodları kendi metnimizle; CURRENCY_MISMA
 });
 
 t("tahsilat sonucu metni: dağıtılan + avans, atlanan, tekrar", () => {
-  assert.deepEqual(m.collectDoneTexts({ allocated_amount: "300.00", advance_amount: "50.00" }, "TRY"), ["Tahsilat kaydedildi: ₺300,00 açık faturalara işlendi, ₺50,00 avans kaldı."]);
+  assert.deepEqual(m.collectDoneTexts({ allocated_amount: "300.00", advance_amount: "50.00" }, "TRY"), ["Tahsilat kaydedildi: ₺300,00 açık faturalara işlendi, ₺50,00 alacak bakiyesinde kaldı."]);
   assert.deepEqual(m.collectDoneTexts({ allocated_amount: "300.00", advance_amount: "0.00" }, "TRY"), ["Tahsilat kaydedildi: ₺300,00 açık faturalara işlendi."]);
-  assert.deepEqual(m.collectDoneTexts({ allocated_amount: "0", advance_amount: "75.00" }, "TRY"), ["Tahsilat avans olarak kaydedildi (₺75,00)."]);
+  assert.deepEqual(m.collectDoneTexts({ allocated_amount: "0", advance_amount: "75.00" }, "TRY"), ["Tahsilat faturalara işlenmedi; alacak bakiyesinde duruyor (₺75,00)."]);
   assert.deepEqual(m.collectDoneTexts({ allocated_amount: "100.00", advance_amount: "0", skipped: [{ invoice_id: "i2" }] }, "TRY"),
-    ["Tahsilat kaydedildi: ₺100,00 açık faturalara işlendi.", "1 fatura bu sırada değiştiği için atlandı; tutarı avansta kaldı."]);
+    ["Tahsilat kaydedildi: ₺100,00 açık faturalara işlendi.", "1 fatura bu sırada değiştiği için atlandı; tutarı alacak bakiyesinde kaldı."]);
   assert.deepEqual(m.collectDoneTexts({ replayed: true }, "TRY"), ["Bu işlem zaten kaydedilmişti; ikinci kez işlenmedi."]);
 });
 t("avans dağıtımı sonucu metni", () => {
-  assert.deepEqual(m.allocateDoneTexts({ advance_remaining: "25.00" }, 30000n, "TRY"), ["₺300,00 faturalara işlendi; kalan avans ₺25,00."]);
-  assert.deepEqual(m.allocateDoneTexts({ skipped: [1, 2] }, 100n, "TRY"), ["₺1,00 faturalara işlendi.", "2 fatura bu sırada değiştiği için atlandı; tutarı avansta kaldı."]);
+  assert.deepEqual(m.allocateDoneTexts({ advance_remaining: "25.00" }, 30000n, "TRY"), ["₺300,00 faturalarla eşleştirildi; kalan alacak ₺25,00."]);
+  assert.deepEqual(m.allocateDoneTexts({ skipped: [1, 2] }, 100n, "TRY"), ["₺1,00 faturalarla eşleştirildi.", "2 fatura bu sırada değiştiği için atlandı; tutarı alacak bakiyesinde kaldı."]);
   assert.deepEqual(m.allocateDoneTexts({ replayed: true }, 100n, "TRY"), ["Bu işlem zaten kaydedilmişti; ikinci kez işlenmedi."]);
+});
+
+t("M2: LEDGER_PENDING / LEDGER_ISSUE: sunucu metni, yoksa kendi metnimiz", () => {
+  assert.equal(m.allocationErrorText(err(409, "LEDGER_PENDING", "Sunucu: kayıt işleniyor")), "Sunucu: kayıt işleniyor");
+  assert.match(m.allocationErrorText({ status: 409, code: "LEDGER_PENDING", message: "" }), /işleniyor/);
+  assert.match(m.allocationErrorText({ status: 409, code: "LEDGER_ISSUE", message: "" }), /sorunlu/);
+});
+t("M3: metinlerde 'avans' kalmadı (K10)", () => {
+  const all = [m.balanceNote(50000n, 60000n, "TRY").text, ...m.collectDoneTexts({ allocated_amount: "1", advance_amount: "1", skipped: [1] }, "TRY"),
+    ...m.allocateDoneTexts({ advance_remaining: "1", skipped: [1] }, 100n, "TRY"), m.allocationErrorText(err(409, "ADVANCE_INSUFFICIENT"))];
+  for (const x of all) assert.ok(!/avans/i.test(x), x);
 });
 
 console.log(`\n${n} test geçti`);
