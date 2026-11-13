@@ -6,7 +6,8 @@ import { useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, type } from "../../src/theme/tokens";
-import { getIntegrations, getOrdersPage } from "../../src/api";
+import { getIntegrations, getOrdersPage, getOrderStats, type OrderStats } from "../../src/api";
+import { groupCount, ORDER_GROUPS, type OrderGroupKey } from "../../src/order-filters";
 import { bulkDeleteOrders, canCreateHepsiJetShipment } from "../../src/api-siparis";
 import { createHepsiJetShipment } from "../../src/api";
 import { canManage } from "../../src/auth/permissions";
@@ -25,21 +26,9 @@ import { Chip, ChipRow } from "../../src/ui/Chip";
 import { SearchField } from "../../src/ui/SearchField";
 import type { Integration, Order } from "../../src/types";
 
-type FilterKey = "all" | "pending" | "processing" | "shipped" | "delivered" | "cancelled" | "deleted";
-
-// Süzgeç adları web (IntegrationOrdersPage STATUS_OPTIONS) ile aynı. "Bekleyen" ve "Kargoda" panel kartının
-// saydığı durumları kapsar (routers/dashboard.py); sunucu tek durum süzdüğü için durumlar ayrı çağrılarla birleştirilir.
-const FILTERS: { key: FilterKey; label: string; statuses: string[] }[] = [
-  { key: "all", label: "Tümü", statuses: [] },
-  { key: "pending", label: "Bekleyen", statuses: ["pending", "processing", "preparing", "payment_received"] },
-  { key: "shipped", label: "Kargoda", statuses: ["shipped", "in_transit", "intransit", "cargo", "kargoda"] },
-  { key: "delivered", label: "Tamamlandı", statuses: ["delivered", "completed"] },
-  { key: "cancelled", label: "İptal", statuses: ["cancelled"] },
-  // Web sekmeleri: "Gönderime Hazır" (processing) ve "Silinmiş" (deleted). "Bekleyen" panel kartıyla aynı sayımı korur,
-  // bu yüzden "Gönderime hazır" onun alt kümesidir.
-  { key: "deleted", label: "Silinmiş", statuses: ["deleted"] },
-];
-FILTERS.splice(2, 0, { key: "processing", label: "Gönderime hazır", statuses: ["processing"] });
+// Durum grupları ortak modülde (src/order-filters.ts): süzgeç sunucuda, sayılar /orders/stats'tan (mağaza seçiliyse o mağaza).
+type FilterKey = OrderGroupKey;
+const FILTERS = ORDER_GROUPS;
 
 const PER_PAGE = 30;
 // Panel'deki "3 gündür bekliyor" uyarısı sunucuda bu eşikle sayılır: durumu "pending", kaydı 3 günden eski.
@@ -242,6 +231,18 @@ export default function OrdersScreen() {
     fetchPage(1, "reset");
   }, [fetchPage]);
 
+  // Süzgeç çiplerindeki sayılar: tüm siparişler üzerinden (yüklenen sayfa değil); mağaza seçiliyse yalnız o mağaza.
+  const [stats, setStats] = useState<OrderStats | null>(null);
+  const loadStats = useCallback(() => {
+    if (!token) return;
+    getOrderStats(token, integrationId || undefined)
+      .then(setStats)
+      .catch(() => setStats(null));
+  }, [token, integrationId]);
+  useEffect(() => {
+    loadStats();
+  }, [loadStats]);
+
   // Web "Silinmişleri sil": yalnız "deleted" durumundaki siparişler kalıcı silinir; sunucu bir sonraki senkronda
   // yeniden içeri almaz (mezar kaydı). Ekranda yüklü olanlar silinir; liste sonra yeniden okunur.
   const deletedIds = filter === "deleted" && !staleOnly ? orders.filter((o) => o.status === "deleted").map((o) => o.id) : [];
@@ -333,6 +334,7 @@ export default function OrdersScreen() {
             key={f.key}
             testID={`orders-filter-${f.key}`}
             label={f.label}
+            count={groupCount(stats, f.key)}
             selected={!staleOnly && filter === f.key}
             onPress={() => {
               setStaleOnly(false);
@@ -371,7 +373,7 @@ export default function OrdersScreen() {
           onEndReached={() => {
             if (hasMore && !loadingMore && !loading) fetchPage(page + 1, "more");
           }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchPage(1, "refresh"); }} tintColor={colors.primary} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadStats(); fetchPage(1, "refresh"); }} tintColor={colors.primary} />}
           ListHeaderComponent={
             canPurge ? (
               <View style={[styles.purgeCard, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]} testID="orders-purge-card">

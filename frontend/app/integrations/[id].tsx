@@ -5,6 +5,8 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { getIntegrations, getOrders, getOrdersPage, getOrderStats } from "../../src/api";
+import { groupCount, ORDER_GROUPS, orderQuery, type OrderGroupKey } from "../../src/order-filters";
+import { Chip, ChipRow } from "../../src/ui/Chip";
 import { rememberOrderRow, storeSyncDays, storeSyncMessage, syncOrderByNumber, syncStoreOrders } from "../../src/api-siparis";
 import { FormField } from "../../src/ui/FormField";
 import type { OrderStats } from "../../src/api";
@@ -95,6 +97,15 @@ export default function IntegrationOrders() {
   const debouncedSearch = useDebounce(search.trim(), 350);
   // Sunucunun tüm siparişler üzerinden verdiği sayılar; alınamazsa null kalır ve "—" gösterilir.
   const [stats, setStats] = useState<OrderStats | null>(null);
+  // Durum süzgeci (kullanıcı isteği 13 Kas 2026): "Tümü" dışındaki grupta liste SUNUCUDAN, mağaza + durum (+ arama) ile
+  // sayfa sayfa gelir; yalnız yüklenen sayfayı süzmez.
+  const [group, setGroup] = useState<OrderGroupKey>("all");
+  const [groupItems, setGroupItems] = useState<Order[]>([]);
+  const [groupPage, setGroupPage] = useState(1);
+  const [groupPages, setGroupPages] = useState(1);
+  const [groupLoading, setGroupLoading] = useState(false);
+  const [groupMore, setGroupMore] = useState(false);
+  const groupSeq = useRef(0);
   // Aramada, ekrandaki son siparişlerin dışında kalan eşleşmeler sunucudan gelir.
   const [remoteHits, setRemoteHits] = useState<Order[]>([]);
   // Uzak sonuçların ait olduğu arama metni; metin değişince eski sonuçlar listeye karışmaz.
@@ -233,14 +244,44 @@ export default function IntegrationOrders() {
     }
   };
 
+  const fetchGroup = async (page: number) => {
+    if (!token || !integrationId || group === "all") return;
+    const seq = ++groupSeq.current;
+    if (page === 1) setGroupLoading(true);
+    else setGroupMore(true);
+    try {
+      const res = await getOrdersPage(token, { page, perPage: PAGE_SIZE, sortBy: "-order_date", ...orderQuery({ group, integrationId, search: debouncedSearch }) });
+      if (seq !== groupSeq.current) return;
+      setGroupItems((prev) => (page === 1 ? res.items : [...prev, ...res.items.filter((o) => !prev.some((p) => p.id === o.id))]));
+      setGroupPage(page);
+      setGroupPages(res.totalPages);
+    } catch (e: any) {
+      if (seq === groupSeq.current) toast(e?.message || "Siparişler yüklenemedi.", "error");
+    } finally {
+      if (seq === groupSeq.current) {
+        setGroupLoading(false);
+        setGroupMore(false);
+      }
+    }
+  };
+  useEffect(() => {
+    if (group === "all") {
+      groupSeq.current++;
+      setGroupItems([]);
+      return;
+    }
+    fetchGroup(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [group, debouncedSearch, token, integrationId]);
+
   const onRefresh = () => {
     setRefreshing(true);
     load(true);
+    if (group !== "all") fetchGroup(1);
   };
 
   const storeName = integration?.name || providerLabel(provider) || "Mağaza";
   const channelLabel = providerLabel(provider) || storeName;
-  const lastIndex = filtered.length - 1;
 
   // Kahraman kartındaki sayılar sunucunun mağaza özetinden gelir (Panel ve Siparişler ile aynı kaynak).
   // Özet alınamadıysa eldeki kayıtlardan tahmin yürütülmez; "—" gösterilir.
@@ -248,6 +289,9 @@ export default function IntegrationOrders() {
   const pendingText = stats ? String(Number(stats.pending || 0) + Number(stats.processing || 0)) : "—";
   const shippingText = stats ? String(stats.shipped || 0) : "—";
   const searching = search.trim().length > 0;
+  const grouped = group !== "all";
+  const listData = grouped ? groupItems : filtered;
+  const lastIndex = listData.length - 1;
   const hasOlder = !searching && orders.length >= PAGE_SIZE && (!stats || Number(stats.total || 0) > orders.length);
 
   const kindColor: Record<StatusKind, { fg: string; bg: string }> = {
@@ -314,6 +358,13 @@ export default function IntegrationOrders() {
       <SafeAnimatedView entering={FadeInDown.delay(140).duration(380)}>
         <SectionTitle title="Siparişler" />
         <SearchField testID="orders-search" value={search} onChangeText={setSearch} placeholder="Sipariş no veya müşteri ara" />
+        <View style={{ marginTop: spacing.sm }}>
+          <ChipRow>
+            {ORDER_GROUPS.map((g) => (
+              <Chip key={g.key} testID={`store-filter-${g.key}`} label={g.label} count={groupCount(stats, g.key)} selected={group === g.key} onPress={() => setGroup(g.key)} />
+            ))}
+          </ChipRow>
+        </View>
         <View style={styles.searchGap} />
       </SafeAnimatedView>
     </View>
@@ -321,11 +372,14 @@ export default function IntegrationOrders() {
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]}>
-      <StackHeader title={storeName} subtitle={`${searching || !stats ? filtered.length : stats.total || 0} sipariş`} />
+      <StackHeader
+        title={storeName}
+        subtitle={`${grouped ? groupCount(stats, group) ?? groupItems.length : searching || !stats ? filtered.length : stats.total || 0} sipariş`}
+      />
       <NetworkErrorBanner visible={isOffline} offline />
 
       <FlatList
-        data={loading ? [] : filtered}
+        data={loading || (grouped && groupLoading) ? [] : listData}
         keyExtractor={(o) => o.id}
         contentContainerStyle={styles.list}
         keyboardDismissMode="on-drag"
@@ -333,14 +387,18 @@ export default function IntegrationOrders() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         ListHeaderComponent={listHeader}
         ListFooterComponent={
-          hasOlder && !loading ? (
+          grouped ? (
+            groupPage < groupPages && !groupLoading ? (
+              <Button testID="store-group-more" variant="secondary" label="Daha fazla sipariş" busy={groupMore} onPress={() => fetchGroup(groupPage + 1)} style={{ marginTop: spacing.md }} />
+            ) : null
+          ) : hasOlder && !loading ? (
             <Text style={[type.caption, tabular, styles.olderNote, { color: colors.textTertiary }]}>
               En yeni {PAGE_SIZE} sipariş listeleniyor. Daha eski bir siparişi bulmak için arama kutusunu kullanın.
             </Text>
           ) : null
         }
         ListEmptyComponent={
-          loading ? (
+          loading || (grouped && groupLoading) ? (
             <RowsSkeleton surface={colors.surface} border={colors.borderSubtle} divider={colors.border} />
           ) : (
             <EmptyState
