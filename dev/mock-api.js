@@ -210,7 +210,7 @@ http
       }
     }
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -1283,7 +1283,14 @@ http
         if (!["starter", "growth", "enterprise"].includes(b.plan)) return send(res, 400, { detail: "Bu abonelik planı davet için aktif değil." });
         send(res, 200, { success: true, message: "Davet gönderildi.", invite_url: "https://app.obihub.com/davet/mock" + Date.now() });
       });
-    if (path === "/billing/trial-status") return send(res, 200, { plan: "pro", is_trial: false, billing_cycle: "monthly", expires_at: "2026-12-04T00:00:00Z", days_left: 23, subscription_status: "active" });
+    // /__mode?subDays=5 → bitişe 5 gün (yenileme bilgisi); -1 → süresi dolmuş.
+    if (path === "/billing/trial-status") {
+      if (state.subDays != null && state.subDays !== "") {
+        const d = Number(state.subDays);
+        return send(res, 200, { plan: "pro", is_trial: false, billing_cycle: "monthly", expires_at: new Date(Date.now() + d * 86400000).toISOString(), days_left: Math.max(0, Math.ceil(d)), subscription_status: d < 0 ? "expired" : "active" });
+      }
+      return send(res, 200, { plan: "pro", is_trial: false, billing_cycle: "monthly", expires_at: "2026-12-04T00:00:00Z", days_left: 23, subscription_status: "active" });
+    }
     if (path === "/usage/summary") return send(res, 200, { limits: { integrations: 5, products: 5000, orders_monthly: 3000 }, usage: { integrations: 3, products: 48, orders_monthly: 212 } });
     return send(res, 200, {});
   })

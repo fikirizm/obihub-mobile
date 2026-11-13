@@ -6,6 +6,8 @@ import { getTrialStatus, getUsageSummary } from "../src/api";
 import { useTheme } from "../src/theme/ThemeProvider";
 import { spacing, tabular, type } from "../src/theme/tokens";
 import { formatDate } from "../src/utils";
+import { renewalNotice } from "../src/subscription-ui";
+import { AlertIcon, ClockIcon } from "../src/components/Icons";
 import { StackHeader } from "../src/ui/Header";
 import { Card, ListRow, SectionTitle } from "../src/ui/ListRow";
 import type { TrialStatus, UsageSummary } from "../src/types";
@@ -44,6 +46,10 @@ export default function SubscriptionScreen() {
     <Text style={[type.callout, tabular, { color: tone || colors.textSecondary }]}>{children}</Text>
   );
   const days = trial?.days_left;
+  // Bitişe 14 gün ya da daha az kalınca yalnız bilgi (ödeme bağlantısı / fiyat yok: App Store kuralı).
+  const notice = renewalNotice(trial);
+  const tone = notice?.tone === "error" ? colors.error : notice?.tone === "warning" ? colors.warning : colors.info;
+  const toneBg = notice?.tone === "error" ? colors.errorBg : notice?.tone === "warning" ? colors.warningBg : colors.infoBg;
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="subscription-screen">
@@ -55,6 +61,15 @@ export default function SubscriptionScreen() {
           contentContainerStyle={{ paddingBottom: spacing.huge }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
         >
+          {notice ? (
+            <View testID="renewal-notice" accessibilityRole="alert" style={[styles.notice, { backgroundColor: toneBg, borderColor: colors.borderSubtle }]}>
+              {notice.tone === "error" ? <AlertIcon size={18} color={tone} /> : <ClockIcon size={18} color={tone} />}
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[type.bodyStrong, { color: colors.textPrimary }]}>{notice.title}</Text>
+                <Text style={[type.footnote, { color: colors.textSecondary, marginTop: 2 }]}>{notice.body}</Text>
+              </View>
+            </View>
+          ) : null}
           <SectionTitle title="Paket" />
           <Card style={styles.block}>
             <ListRow title="Paket" trailing={<Value>{trial?.is_trial ? "Deneme" : trial?.plan ? trial.plan.charAt(0).toLocaleUpperCase("tr-TR") + trial.plan.slice(1) : "-"}</Value>} />
@@ -87,4 +102,8 @@ export default function SubscriptionScreen() {
   );
 }
 
-const styles = StyleSheet.create({ wrap: { flex: 1 }, block: { marginHorizontal: spacing.lg } });
+const styles = StyleSheet.create({
+  wrap: { flex: 1 },
+  block: { marginHorizontal: spacing.lg },
+  notice: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start", marginHorizontal: spacing.lg, marginTop: spacing.md, padding: spacing.md, borderRadius: 16, borderWidth: 1 },
+});
