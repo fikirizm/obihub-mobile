@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { createScanGuard } from "../src/scan-guard";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../src/auth/AuthProvider";
@@ -45,7 +46,8 @@ const PAYMENTS: { value: PaymentType; label: string }[] = [
 function Scanner({ onCode }: { onCode: (code: string) => void }) {
   const { colors } = useTheme();
   const [permission, requestPermission] = useCameraPermissions();
-  const last = useRef<{ code: string; at: number }>({ code: "", at: 0 });
+  // Barkod çerçevede tutuldukça yeniden sayılmaz; çıkarılıp yeniden gösterilince sayılır (src/scan-guard.ts).
+  const guard = useRef(createScanGuard());
   if (Platform.OS === "web") return null;
   if (!permission) return null;
   if (!permission.granted) {
@@ -69,11 +71,7 @@ function Scanner({ onCode }: { onCode: (code: string) => void }) {
         facing="back"
         barcodeScannerSettings={{ barcodeTypes: [...BARCODE_TYPES] }}
         onBarcodeScanned={({ data }) => {
-          // Aynı barkod kamerada kaldıkça her karede yeniden okunur: 1,5 sn içinde tekrar sayılmaz.
-          const now = Date.now();
-          if (!data || (data === last.current.code && now - last.current.at < 1500)) return;
-          last.current = { code: data, at: now };
-          onCode(data);
+          if (guard.current.accept(String(data || ""), Date.now())) onCode(String(data));
         }}
       />
       <View pointerEvents="none" style={styles.frame} />
