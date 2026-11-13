@@ -95,15 +95,17 @@ t("f: ürün görseli alan adlarından bulunur; http(s) değilse yok", () => {
 t("g: açık alanlar varsa onlar (ara toplam, indirim, kargo, KDV)", () => {
   const b = m.amountBreakdown({ total_amount: 280, items: [{ total_price: 300, quantity: 2 }], discount_amount: 40, shipping_cost: 20, tax_amount: 46.67 });
   assert.deepEqual(b.rows.map((r) => [r.key, r.label, r.amount]), [
-    ["subtotal", "Ara toplam", 300], ["discount", "İndirim", -40], ["shipping", "Kargo", 20], ["tax", "KDV (dahil)", 46.67],
+    ["subtotal", "Ara toplam", 300], ["discount", "İndirim", -40], ["shipping", "Kargo", 20], ["tax", "KDV", 46.67],
   ]);
   assert.equal(b.total, 280);
 });
-t("g: alan yoksa fark: eksi → İndirim, artı → Kargo ve diğer; KDV satır oranlarından dahil hesaplanır", () => {
+t("g (PM düzeltmesi): alan yoksa tahmin yok — fark tek satır 'Fark (kargo/indirim)', vat_rate'ten KDV hesaplanmaz", () => {
   const d = m.amountBreakdown({ total_amount: 269.8, items: [{ unit_price: 149.9, quantity: 2, vat_rate: 20 }] });
-  assert.deepEqual(d.rows.map((r) => [r.key, r.amount]), [["subtotal", 299.8], ["discount", -30], ["tax", 44.97]]);
-  const s = m.amountBreakdown({ total_amount: 179.9, items: [{ total_price: 149.9, quantity: 1 }] });
-  assert.deepEqual(s.rows.map((r) => [r.key, r.label, r.amount]), [["subtotal", "Ara toplam", 149.9], ["shipping", "Kargo ve diğer", 30]]);
+  assert.deepEqual(d.rows.map((r) => [r.key, r.label, r.amount]), [["subtotal", "Ara toplam", 299.8], ["difference", "Fark (kargo/indirim)", -30]]);
+  const s = m.amountBreakdown({ total_amount: 179.9, items: [{ total_price: 149.9, quantity: 1, vat_rate: 20 }] });
+  assert.deepEqual(s.rows.map((r) => [r.key, r.label, r.amount]), [["subtotal", "Ara toplam", 149.9], ["difference", "Fark (kargo/indirim)", 30]]);
+  assert.ok(!s.rows.some((r) => r.key === "tax"));
+  assert.deepEqual(m.amountBreakdown({ total_amount: 299.8, items: [{ unit_price: 149.9, quantity: 2, vat_rate: 20 }] }).rows, []);
 });
 t("g: döküm toplamla aynıysa satır yok (yalnız genel toplam); ürünsüz siparişte döküm yok", () => {
   assert.deepEqual(m.amountBreakdown({ total_amount: 149.9, items: [{ unit_price: 149.9, quantity: 1 }] }).rows, []);

@@ -129,7 +129,9 @@ export function itemImage(it: AnyOrder, fallback?: string | null): string | null
 }
 
 // ---- g) Tutar dökümü (kuruş hesabıyla) ----
-export type AmountRow = { key: "subtotal" | "discount" | "shipping" | "tax"; label: string; amount: number };
+// PM 13 Kas 2026: kanaldan gelmeyen alan tahminle gösterilmez. KDV yalnız siparişte gerçek vergi alanı varsa;
+// indirim / kargo alanı yoksa toplam − kalemler farkı tek satır "Fark (kargo/indirim)".
+export type AmountRow = { key: "subtotal" | "discount" | "shipping" | "difference" | "tax"; label: string; amount: number };
 
 const minor = (v: unknown) => Math.round(Number(v || 0) * 100);
 const major = (k: number) => k / 100;
@@ -143,10 +145,11 @@ const firstNum = (o: AnyOrder, keys: string[]) => {
 
 export function amountBreakdown(o: AnyOrder): { rows: AmountRow[]; total: number } {
   const items: AnyOrder[] = Array.isArray(o?.items) ? o.items : [];
-  const lineK = items.map((it) =>
-    it?.total_price != null && it?.total_price !== "" ? minor(it.total_price) : Math.round(minor(it?.unit_price ?? it?.price) * Number(it?.quantity || 0))
+  const subK = items.reduce(
+    (a, it) =>
+      a + (it?.total_price != null && it?.total_price !== "" ? minor(it.total_price) : Math.round(minor(it?.unit_price ?? it?.price) * Number(it?.quantity || 0))),
+    0
   );
-  const subK = lineK.reduce((a, b) => a + b, 0);
   const totalK = minor(o?.total_amount) || subK;
   if (!items.length) return { rows: [], total: major(totalK) };
 
@@ -156,25 +159,11 @@ export function amountBreakdown(o: AnyOrder): { rows: AmountRow[]; total: number
   if (disc != null || ship != null) {
     if (disc != null) rows.push({ key: "discount", label: "İndirim", amount: -disc });
     if (ship != null) rows.push({ key: "shipping", label: "Kargo", amount: ship });
-  } else {
-    const diff = totalK - subK;
-    if (diff < 0) rows.push({ key: "discount", label: "İndirim", amount: major(diff) });
-    else if (diff > 0) rows.push({ key: "shipping", label: "Kargo ve diğer", amount: major(diff) });
+  } else if (totalK !== subK) {
+    rows.push({ key: "difference", label: "Fark (kargo/indirim)", amount: major(totalK - subK) });
   }
-
-  const taxField = firstNum(o, ["tax_amount", "vat_amount", "total_tax"]);
-  let taxK: number | null = taxField != null ? minor(taxField) : null;
-  if (taxK == null && items.some((it) => Number(it?.vat_rate) > 0)) {
-    // Kanal fiyatları KDV dahil gelir; içindeki KDV indirimli satır tutarı üzerinden değil, satır tutarından hesaplanır.
-    const share = subK > 0 ? totalK / subK : 1;
-    taxK = Math.round(
-      items.reduce((a, it, i) => {
-        const r = Number(it?.vat_rate) || 0;
-        return a + (r > 0 ? ((lineK[i] * share) * r) / (100 + r) : 0);
-      }, 0)
-    );
-  }
-  if (taxK) rows.push({ key: "tax", label: "KDV (dahil)", amount: major(taxK) });
+  const tax = firstNum(o, ["tax_amount", "vat_amount", "total_tax"]);
+  if (tax != null) rows.push({ key: "tax", label: "KDV", amount: tax });
 
   if (!rows.length) return { rows: [], total: major(totalK) };
   return { rows: [{ key: "subtotal", label: "Ara toplam", amount: major(subK) }, ...rows], total: major(totalK) };
