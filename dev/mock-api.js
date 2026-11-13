@@ -166,11 +166,19 @@ http
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
     const user = { id: "u1", email: "test@example.test", company_name: "Deneme A.Ş.", full_name: "Deneme Kullanıcı" };
+    // Giriş hata kodları: /__mode?loginErr=invalid|suspended|expired|locked (kalıcı; 0 ile kapanır)
+    if (path === "/auth/login" && state.loginErr && state.loginErr !== "0") {
+      const E = { invalid: [401, "INVALID_CREDENTIALS", "E-posta veya şifre hatalı"], suspended: [403, "ACCOUNT_SUSPENDED", "Abonelik erişimi duraklatıldı."], expired: [403, "SUBSCRIPTION_EXPIRED", "Aboneliğinizin süresi doldu."], locked: [429, "LOGIN_LOCKED", "Çok fazla deneme."] }[state.loginErr];
+      if (E) {
+        res.writeHead(E[0], { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Expose-Headers": "Retry-After", ...(E[0] === 429 ? { "Retry-After": "420" } : {}) });
+        return res.end(JSON.stringify({ code: E[1], detail: E[2] }));
+      }
+    }
     if (path === "/auth/login") return send(res, 200, { access_token: "test-token", token_type: "bearer", user });
     // Şifre sıfırlama (sunucu kuralı: en az 8, harf + rakam, e-postayla aynı değil → 400 PASSWORD_WEAK). /__mode?pwWeak=1 → bir kez zayıf say.
     if (path === "/auth/password-reset/request-code" && req.method === "POST") return send(res, 200, { success: true, message: "Kod gönderildi", expires_in: 600 });

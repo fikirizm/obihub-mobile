@@ -15,6 +15,7 @@ import { SafeAnimatedView } from "../src/components/SafeAnimatedView";
 import { router } from "expo-router";
 import Svg, { Defs, LinearGradient, Stop, Circle as SvgCircle } from "react-native-svg";
 import { useAuth } from "../src/auth/AuthProvider";
+import { loginErrorText } from "../src/login-errors";
 import { useTheme } from "../src/theme/ThemeProvider";
 import { hitTarget, radius, spacing, type } from "../src/theme/tokens";
 import { Button } from "../src/ui/Button";
@@ -59,9 +60,9 @@ export default function Index() {
       // Yönlendirmeyi yukarıdaki effect yapar; burada ikinci kez yapılmaz.
       await login(email.trim(), password);
     } catch (e: any) {
-      const msg = e?.message || "Giriş başarısız oldu.";
-      // Süresi dolan/duraklatılan abonelik: web'de giriş yapılıp ödeme tamamlanabilir; mobilde satın alma yok.
-      setError(e?.status === 403 ? `${msg} Aboneliğinizi ObiHub web panelinden yenileyebilirsiniz.` : msg);
+      // Sunucunun makine okunur kodu (INVALID_CREDENTIALS, ACCOUNT_SUSPENDED, LOGIN_LOCKED…) ile Türkçe metin;
+      // süresi dolan/duraklatılan abonelikte web'den yenileme yönlendirmesi (mobilde satın alma yok).
+      setError(loginErrorText(e).text);
     } finally {
       setSubmitting(false);
     }

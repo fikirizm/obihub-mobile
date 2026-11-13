@@ -24,7 +24,7 @@ export const API_BASE_URL =
   (process.env.EXPO_PUBLIC_OBIHUB_API_URL && String(process.env.EXPO_PUBLIC_OBIHUB_API_URL)) ||
   "https://api.obihub.app/api";
 
-type ApiError = { message: string; status: number; code?: string };
+type ApiError = { message: string; status: number; code?: string; retryAfter?: number };
 
 // Backend bu önekle başlayan 403 yanıtını abonelik kilidi için döndürür.
 const SUBSCRIPTION_LOCK_PREFIX = "Abonelik erişimi pasif.";
@@ -95,6 +95,9 @@ export async function request<T>(path: string, options: RequestInit = {}, token?
     // Kapalı kodlu hatalar ({code, detail} ya da detail: {code, message}) için kod da taşınır.
     const code = typeof data?.code === "string" ? data.code : typeof detail?.code === "string" ? detail.code : "";
     if (code) err.code = code;
+    // 429 yanıtlarında (ör. LOGIN_LOCKED) beklenecek süre saniye olarak.
+    const retryAfter = Number(res.headers.get("Retry-After"));
+    if (Number.isFinite(retryAfter) && retryAfter > 0) err.retryAfter = retryAfter;
     // Yalnızca oturumlu çağrılar: giriş ekranındaki hatalı şifre 401'i oturumu etkilemez.
     if (token) {
       if (res.status === 401) {
