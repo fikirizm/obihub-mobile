@@ -198,6 +198,11 @@ http
     const url = new URL(req.url, "http://x");
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
+    // Canlıyla aynı: HepsiJet entegrasyon kaydı değil, ayar (user_settings.hepsijet). /__mode?hj=0 → kurulu değil; hj=err → 500.
+    if (path === "/hepsijet/config") {
+      if (state.hj === "err") return send(res, 500, { detail: "Sunucu hatası" });
+      return send(res, 200, state.hj === "0" ? { configured: false } : { configured: true, username: "demo", company_name: "Örnek Butik", integration_id: "i1", integration_name: "WooCommerce" });
+    }
     // Deneme ürün görselleri (dev/img); dış görsel servisine bağımlı kalınmaz.
     const imgHit = url.pathname.match(/^\/__img\/([a-z0-9-]+\.png)$/);
     if (imgHit) {
@@ -369,7 +374,6 @@ http
       { id: "i1", name: "Deneme Mağaza", provider: "woocommerce", kind: "store", status: "success" },
       { id: "i2", name: "Trendyol", provider: "trendyol", kind: "marketplace", status: "success" },
       { id: "i3", name: "Hepsiburada", provider: "hepsiburada", kind: "marketplace", status: "failed" },
-      ...(state.hj === "0" ? [] : [{ id: "i4", name: "HepsiJet", provider: "hepsijet", kind: "cargo", status: "success" }]),
     ]);
     if (path === "/parasut/invoices")
       return send(res, 200, { invoices: Array.from({ length: 6 }, (_, i) => ({

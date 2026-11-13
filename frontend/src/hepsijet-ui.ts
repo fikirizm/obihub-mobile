@@ -1,16 +1,11 @@
 // HepsiJet ekranı kuralları (saf modül; birim testi dev/test-hepsijet-ui.mjs).
-// 13 Kas 2026 (kullanıcı isteği): HepsiJet alt sekmeden çıkıp Menü'ye taşındı; yalnız HepsiJet entegrasyonu kurulu ve etkin
-// firmada görünür (GET /integrations, provider "hepsijet"). Alıcı listesinden doğrudan silme yok; düzeltme/silme kaydın içinde.
+// 13 Kas 2026 (kullanıcı isteği): HepsiJet alt sekmeden çıkıp Menü'ye taşındı; yalnız HepsiJet kurulu firmada görünür.
+// Düzeltme (PM, aynı gün): HepsiJet entegrasyon kaydı DEĞİLDİR (ayar user_settings.hepsijet; canlıda provider "hepsijet"
+// kaydı yok). Görünürlük GET /hepsijet/config → { configured: true } ile; okunamazsa gizli.
+// Alıcı listesinden doğrudan silme yok; düzeltme/silme kaydın içinde.
 
-const INACTIVE = new Set(["deleted", "disabled", "inactive", "passive", "paused"]);
-
-export function hasHepsiJet(list: { provider?: unknown; status?: unknown; is_active?: unknown }[] | null | undefined): boolean {
-  return (Array.isArray(list) ? list : []).some(
-    (i) =>
-      String(i?.provider || "").trim().toLowerCase() === "hepsijet" &&
-      !INACTIVE.has(String(i?.status || "").trim().toLowerCase()) &&
-      i?.is_active !== false
-  );
+export function hepsiJetVisible(config: { configured?: unknown } | null | undefined): boolean {
+  return config?.configured === true;
 }
 
 export type RecipientForm = { full_name: string; phone: string; email: string; city: string; town: string; district: string; address_line: string };

@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect, type Href } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
-import { getIntegrations, request } from "../../src/api";
-import { hasHepsiJet } from "../../src/hepsijet-ui";
+import { request } from "../../src/api";
+import { hepsiJetVisible } from "../../src/hepsijet-ui";
 import { useNotifications } from "../../src/notifications/store";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing, type } from "../../src/theme/tokens";
@@ -31,15 +31,16 @@ export default function MenuScreen() {
       alive = false;
     };
   }, [token]);
-  // HepsiJet yalnız entegrasyonu kurulu ve etkin firmada görünür; Menü'ye her dönüşte yeniden okunur (okunamazsa gizli).
+  // HepsiJet yalnız kurulu firmada görünür (GET /hepsijet/config → configured); Menü'ye her dönüşte yeniden okunur,
+  // okunamazsa gizli. HepsiJet entegrasyon listesinde yer almaz.
   const [hepsijet, setHepsijet] = useState(false);
   useFocusEffect(
     useCallback(() => {
       if (!token) return;
       let alive = true;
-      getIntegrations(token)
-        .then((list) => alive && setHepsijet(hasHepsiJet(list as any)))
-        .catch(() => undefined);
+      request<any>("/hepsijet/config", { method: "GET" }, token)
+        .then((cfg) => alive && setHepsijet(hepsiJetVisible(cfg)))
+        .catch(() => alive && setHepsijet(false));
       return () => {
         alive = false;
       };

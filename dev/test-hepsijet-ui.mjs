@@ -16,20 +16,22 @@ const m = await import("data:text/javascript;base64," + Buffer.from(js).toString
 let n = 0;
 function t(name, fn) { fn(); n++; console.log("ok -", name); }
 
-t("HepsiJet entegrasyonu kurulu ve etkinse görünür", () => {
-  assert.equal(m.hasHepsiJet([{ provider: "woocommerce", status: "success" }, { provider: "hepsijet", status: "success" }]), true);
-  assert.equal(m.hasHepsiJet([{ provider: "HepsiJet", status: "active" }]), true);
-  assert.equal(m.hasHepsiJet([{ provider: "hepsijet" }]), true);
+// Düzeltme (PM 13 Kas 2026): HepsiJet bir entegrasyon kaydı değildir (ayar user_settings.hepsijet). Görünürlük
+// GET /hepsijet/config → { configured: true } ile belirlenir; /integrations listesine bakılmaz.
+t("GET /hepsijet/config configured:true → görünür", () => {
+  assert.equal(m.hepsiJetVisible({ configured: true, username: "u", company_name: "Fikirizm" }), true);
+  assert.equal(m.hepsiJetVisible({ configured: true }), true);
 });
-t("kurulu değilse ya da etkin değilse görünmez", () => {
-  assert.equal(m.hasHepsiJet([{ provider: "woocommerce", status: "success" }]), false);
-  for (const st of ["deleted", "disabled", "inactive", "passive", "paused"]) assert.equal(m.hasHepsiJet([{ provider: "hepsijet", status: st }]), false, st);
-  assert.equal(m.hasHepsiJet([{ provider: "hepsijet", status: "success", is_active: false }]), false);
-  assert.equal(m.hasHepsiJet(null), false);
-  assert.equal(m.hasHepsiJet([]), false);
+t("configured false, eksik, metin ya da okunamadı (null) → gizli", () => {
+  assert.equal(m.hepsiJetVisible({ configured: false }), false);
+  assert.equal(m.hepsiJetVisible({}), false);
+  assert.equal(m.hepsiJetVisible({ configured: "true" }), false);
+  assert.equal(m.hepsiJetVisible(null), false);
+  assert.equal(m.hepsiJetVisible(undefined), false);
 });
-t("hepsiburada ya da idefix HepsiJet sayılmaz", () => {
-  assert.equal(m.hasHepsiJet([{ provider: "hepsiburada", status: "success" }, { provider: "idefix", status: "success" }]), false);
+t("/integrations listesinde hepsijet olmaması sonucu etkilemez; eski liste kontrolü kaldırıldı", () => {
+  assert.equal(m.hepsiJetVisible({ configured: true, integration_id: null }), true);
+  assert.equal(m.hasHepsiJet, undefined);
 });
 
 const ok = { full_name: "Örnek Butik", phone: "0555 111 22 33", email: "", city: "İstanbul", town: "Kadıköy", district: "Moda", address_line: "Örnek Sk. 1" };
