@@ -457,6 +457,10 @@ export type TrialStatus = {
   expires_at?: string | null;
   days_left?: number | null;
   subscription_status?: string;
+  // 13 Kas 2026 sözleşmesi (docs/mobil-oturum-icin-notlar.md).
+  renewal?: { kind?: "trial" | "subscription"; phase?: "none" | "window" | "expired" | "suspended"; can_renew?: boolean; window_days?: number; days_left?: number; expires_at?: string | null } | null;
+  usage?: Record<string, number> | null;
+  limits?: Record<string, number> | null;
 };
 
 export type UsageSummary = {

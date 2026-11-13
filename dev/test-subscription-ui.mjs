@@ -54,4 +54,49 @@ t("iptal edilmiş ya da duraklatılmış abonelikte yenileme bilgisi yok", () =>
   assert.equal(m.renewalNotice({ expires_at: new Date(NOW + 3 * day).toISOString(), subscription_status: "suspended" }, NOW), null);
 });
 
+// Sözleşme (13 Kas 2026, docs/mobil-oturum-icin-notlar.md): trial-status.renewal {kind, phase, can_renew, window_days, days_left, expires_at}.
+const R = (renewal, extra = {}) => ({ subscription_status: "active", expires_at: new Date(NOW + 40 * day).toISOString(), renewal, ...extra });
+t("renewal varsa phase'e göre: window → göster (days_left sunucudan), none → gizle, suspended → gösterme", () => {
+  const w = m.renewalNotice(R({ kind: "subscription", phase: "window", days_left: 9, window_days: 14 }), NOW);
+  assert.equal(w.title, "Yenileme dönemi açıldı");
+  assert.equal(w.body, "Aboneliğinizin bitmesine 9 gün kaldı. Yenilemeyi app.obihub.app üzerinden yapabilirsiniz.");
+  assert.equal(w.tone, "info");
+  assert.equal(m.renewalNotice(R({ kind: "subscription", phase: "window", days_left: 2 }), NOW).tone, "warning");
+  assert.match(m.renewalNotice(R({ kind: "subscription", phase: "window", days_left: 0 }), NOW).body, /bugün sona eriyor/);
+  assert.equal(m.renewalNotice(R({ kind: "subscription", phase: "none", days_left: 3 }, { expires_at: new Date(NOW + 3 * day).toISOString() }), NOW), null);
+  assert.equal(m.renewalNotice(R({ kind: "subscription", phase: "suspended", days_left: 0 }), NOW), null);
+});
+t("renewal expired → kırmızı; deneme hesabında metin denemeye göre", () => {
+  const e = m.renewalNotice(R({ kind: "subscription", phase: "expired", days_left: 0 }), NOW);
+  assert.deepEqual([e.title, e.body, e.tone], ["Aboneliğinizin süresi doldu", "Yenilemeyi app.obihub.app üzerinden yapabilirsiniz.", "error"]);
+  const te = m.renewalNotice(R({ kind: "trial", phase: "expired", days_left: 0 }), NOW);
+  assert.equal(te.title, "Deneme süreniz doldu");
+  const tw = m.renewalNotice(R({ kind: "trial", phase: "window", days_left: 4 }), NOW);
+  assert.equal(tw.title, "Deneme süreniz bitiyor");
+  assert.match(tw.body, /^Deneme sürenizin bitmesine 4 gün kaldı\. Yenilemeyi app\.obihub\.app/);
+});
+t("renewal'da da ödeme bağlantısı / fiyat yok", () => {
+  for (const r of [{ kind: "subscription", phase: "window", days_left: 5, can_renew: true }, { kind: "trial", phase: "expired", days_left: 0, can_renew: true }]) {
+    const x = m.renewalNotice(R(r), NOW);
+    assert.ok(!/https?:|₺|TL|öde|satın al/i.test(`${x.title} ${x.body}`));
+    assert.equal(x.url, undefined);
+  }
+});
+
+// Kullanım çubukları: trial-status usage/limits (yoksa /usage/summary; entegrasyonda billable_integrations).
+t("kullanım çubukları: entegrasyon, ürün, aylık sipariş; oran ve renk", () => {
+  const rows = m.usageBars({ usage: { integrations: 3, products: 4100, orders_monthly: 3000 }, limits: { integrations: 5, products: 5000, orders_monthly: 3000 } }, null);
+  assert.deepEqual(rows.map((r) => [r.key, r.label, r.used, r.limit, r.ratio, r.tone]), [
+    ["integrations", "Entegrasyon", 3, 5, 0.6, "ok"],
+    ["products", "Ürün", 4100, 5000, 0.82, "warning"],
+    ["orders_monthly", "Aylık sipariş", 3000, 3000, 1, "error"],
+  ]);
+});
+t("kullanım: trial-status'ta yoksa /usage/summary (billable_integrations); limitsiz satır yok; sınırsız (0/null) gösterilmez; oran 1'i aşmaz", () => {
+  const rows = m.usageBars({}, { usage: { billable_integrations: 2, integrations: 9, products: 60 }, limits: { integrations: 1, products: 50 } });
+  assert.deepEqual(rows.map((r) => [r.key, r.used, r.limit, r.ratio]), [["integrations", 2, 1, 1], ["products", 60, 50, 1]]);
+  assert.deepEqual(m.usageBars({ usage: { products: 5 }, limits: { products: 0 } }, null), []);
+  assert.deepEqual(m.usageBars(null, null), []);
+});
+
 console.log(`\n${n} test geçti`);

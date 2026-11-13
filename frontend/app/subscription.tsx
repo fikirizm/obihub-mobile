@@ -6,19 +6,13 @@ import { getTrialStatus, getUsageSummary } from "../src/api";
 import { useTheme } from "../src/theme/ThemeProvider";
 import { spacing, tabular, type } from "../src/theme/tokens";
 import { formatDate } from "../src/utils";
-import { renewalNotice } from "../src/subscription-ui";
+import { renewalNotice, usageBars } from "../src/subscription-ui";
 import { AlertIcon, ClockIcon } from "../src/components/Icons";
 import { StackHeader } from "../src/ui/Header";
 import { Card, ListRow, SectionTitle } from "../src/ui/ListRow";
 import type { TrialStatus, UsageSummary } from "../src/types";
 
 const STATUS_LABELS: Record<string, string> = { active: "Etkin", trial: "Deneme", expired: "Süresi doldu", suspended: "Duraklatıldı", cancelled: "İptal edildi" };
-// Entegrasyon sınırına tabi sayaç `billable_integrations` alanıdır (muhasebe bağlantıları sayılmaz).
-const USAGE_ROWS: { key: string; label: string; usageKey?: string }[] = [
-  { key: "integrations", usageKey: "billable_integrations", label: "Entegrasyon" },
-  { key: "products", label: "Ürün" },
-  { key: "orders_monthly", label: "Aylık sipariş" },
-];
 
 // Abonelik yalnızca görüntülenir; satın alma ve paket değişikliği web panelinden yapılır.
 export default function SubscriptionScreen() {
@@ -48,6 +42,7 @@ export default function SubscriptionScreen() {
   const days = trial?.days_left;
   // Bitişe 14 gün ya da daha az kalınca yalnız bilgi (ödeme bağlantısı / fiyat yok: App Store kuralı).
   const notice = renewalNotice(trial);
+  const bars = usageBars(trial, usage);
   const tone = notice?.tone === "error" ? colors.error : notice?.tone === "warning" ? colors.warning : colors.info;
   const toneBg = notice?.tone === "error" ? colors.errorBg : notice?.tone === "warning" ? colors.warningBg : colors.infoBg;
 
@@ -80,14 +75,34 @@ export default function SubscriptionScreen() {
             ) : null}
           </Card>
 
-          {usage?.limits ? (
+          {bars.length ? (
             <>
               <SectionTitle title="Kullanım" />
               <Card style={styles.block}>
-                {USAGE_ROWS.filter((r) => usage.limits?.[r.key] != null).map((r, i) => {
-                  const used = Number(usage.usage?.[r.usageKey ?? r.key] ?? usage.usage?.[r.key] ?? 0);
-                  const limit = Number(usage.limits?.[r.key] || 0);
-                  return <ListRow key={r.key} divider={i > 0} title={r.label} trailing={<Value tone={limit > 0 && used >= limit ? colors.error : undefined}>{`${used} / ${limit}`}</Value>} />;
+                {bars.map((b, i) => {
+                  const fill = b.tone === "error" ? colors.error : b.tone === "warning" ? colors.warning : colors.primary;
+                  return (
+                    <View
+                      key={b.key}
+                      testID={`usage-${b.key}`}
+                      accessible
+                      accessibilityLabel={`${b.label}: ${b.used} / ${b.limit}`}
+                      style={[styles.bar, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+                    >
+                      <View style={styles.barHead}>
+                        <Text style={[type.bodyStrong, { color: colors.textPrimary }]}>{b.label}</Text>
+                        <Text style={[type.callout, tabular, { color: b.tone === "error" ? colors.error : colors.textSecondary }]}>
+                          {`${b.used.toLocaleString("tr-TR")} / ${b.limit.toLocaleString("tr-TR")}`}
+                        </Text>
+                      </View>
+                      <View style={[styles.track, { backgroundColor: colors.border }]}>
+                        <View style={[styles.fill, { width: `${Math.max(b.used > 0 ? 3 : 0, b.ratio * 100)}%`, backgroundColor: fill }]} />
+                      </View>
+                      {b.tone === "error" ? (
+                        <Text style={[type.caption, { color: colors.error, marginTop: 6 }]}>Sınıra ulaşıldı.</Text>
+                      ) : null}
+                    </View>
+                  );
                 })}
               </Card>
             </>
@@ -105,5 +120,9 @@ export default function SubscriptionScreen() {
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },
+  bar: { paddingHorizontal: spacing.md, paddingVertical: spacing.md },
+  barHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
+  track: { height: 8, borderRadius: 4, overflow: "hidden" },
+  fill: { height: 8, borderRadius: 4 },
   notice: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start", marginHorizontal: spacing.lg, marginTop: spacing.md, padding: spacing.md, borderRadius: 16, borderWidth: 1 },
 });
