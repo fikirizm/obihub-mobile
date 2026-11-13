@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { balanceListHint } from "../../src/cari-ui";
+import { balanceListHint, partyRouteParams } from "../../src/cari-ui";
 import { getPartiesCompat } from "../../src/api-gider";
 import { useDebounce } from "../../src/hooks/useDebounce";
 import { usePagedList } from "../../src/hooks/usePagedList";
@@ -227,25 +227,7 @@ export default function CustomersScreen() {
               amountColor={bal > 0 ? colors.success : bal < 0 ? colors.error : colors.textTertiary}
               meta={balanceListHint(bal)}
               onPress={() =>
-                router.push({
-                  pathname: "/customers/[id]",
-                  params: {
-                    id: p.id,
-                    name,
-                    balance: String(bal),
-                    // Eski uçta tahsilat yalnız kayıtlı caride; okuma modelinde satırın actions.collect alanı belirler.
-                    registered: p.actions.collect && (p.origin === "read_model" || p.source === "registered") ? "1" : "0",
-                    origin: p.origin,
-                    source: String(p.source || ""),
-                    ledger: p.actions.view_ledger ? "1" : "0",
-                    // C5: web CustomersPage actions — düzenle / sil / siparişler (ObiHub defterindeki carilerde web'den).
-                    edit: p.actions.edit && p.source !== "obihub" ? "1" : "0",
-                    del: p.actions.delete && p.source !== "obihub" ? "1" : "0",
-                    orders: p.actions.view_orders ? "1" : "0",
-                    // Okuma modelindeki eski carinin para birimi bilinmez; detay eski uçtan okur.
-                    currency: p.origin === "read_model" && p.source === "legacy" ? "" : p.currency || "TRY",
-                  },
-                })
+                router.push({ pathname: "/customers/[id]", params: partyRouteParams(p) })
               }
             />
           );

@@ -146,3 +146,30 @@ export function balanceHint(balance: number): string {
 export function balanceListHint(balance: number): string | undefined {
   return balance > 0 ? "Alacağınız var" : balance < 0 ? "Alacak bakiyesi" : undefined;
 }
+
+// Cari ekranının (/customers/[id]) parametreleri; cari listesi ve sipariş ayrıntısındaki "Cariye git" ortak kullanır.
+type PartyRow = {
+  id: string; name?: string; company_name?: string; full_name?: string; balance?: number | string; currency?: string;
+  source?: string; origin?: string; balanceAvailable?: boolean;
+  actions?: { collect?: boolean; view_ledger?: boolean; edit?: boolean; delete?: boolean; view_orders?: boolean };
+};
+export function partyRouteParams(p: PartyRow): { id: string } & Record<string, string> {
+  const a = p.actions || {};
+  const bal = p.balanceAvailable ? Number(p.balance || 0) : 0;
+  return {
+    id: String(p.id),
+    name: String(p.company_name || p.name || p.full_name || "Cari"),
+    balance: String(bal),
+    // Eski uçta tahsilat yalnız kayıtlı caride; okuma modelinde satırın actions.collect alanı belirler.
+    registered: a.collect && (p.origin === "read_model" || p.source === "registered") ? "1" : "0",
+    origin: String(p.origin || ""),
+    source: String(p.source || ""),
+    ledger: a.view_ledger ? "1" : "0",
+    // C5: düzenle / sil / siparişler (ObiHub defterindeki carilerde web'den).
+    edit: a.edit && p.source !== "obihub" ? "1" : "0",
+    del: a.delete && p.source !== "obihub" ? "1" : "0",
+    orders: a.view_orders ? "1" : "0",
+    // Okuma modelindeki eski carinin para birimi bilinmez; detay eski uçtan okur.
+    currency: p.origin === "read_model" && p.source === "legacy" ? "" : String(p.currency || "TRY"),
+  };
+}

@@ -32,6 +32,9 @@ export function DetailHero({
   children,
   style,
   testID,
+  onHeadPress,
+  headHint,
+  headTestID,
 }: {
   tone?: "blue" | "emerald" | "violet";
   leading?: React.ReactNode;
@@ -46,28 +49,54 @@ export function DetailHero({
   children?: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   testID?: string;
+  // Verilirse başlık satırı dokunulabilir olur (ör. sipariş özetinde müşteri → müşteri kartı); ipucu alt bilginin altında.
+  onHeadPress?: () => void;
+  headHint?: string;
+  headTestID?: string;
 }) {
+  const head = (
+    <>
+      {leading ? <View style={styles.leading}>{leading}</View> : null}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        {eyebrow ? (
+          <Text style={styles.eyebrow} numberOfLines={1}>
+            {eyebrow}
+          </Text>
+        ) : null}
+        <Text accessibilityRole="header" style={styles.title} numberOfLines={2}>
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text style={styles.subtitle} numberOfLines={2} selectable={!onHeadPress}>
+            {subtitle}
+          </Text>
+        ) : null}
+        {headHint ? (
+          <Text style={styles.headHint} numberOfLines={1}>
+            {headHint} ›
+          </Text>
+        ) : null}
+      </View>
+      {badge ? <View style={styles.badge}>{badge}</View> : null}
+    </>
+  );
   return (
     <SafeAnimatedView entering={FadeInDown.duration(380)}>
       <HeroCard tone={tone} style={style}>
-        <View testID={testID} style={styles.head}>
-          {leading ? <View style={styles.leading}>{leading}</View> : null}
-          <View style={{ flex: 1, minWidth: 0 }}>
-            {eyebrow ? (
-              <Text style={styles.eyebrow} numberOfLines={1}>
-                {eyebrow}
-              </Text>
-            ) : null}
-            <Text accessibilityRole="header" style={styles.title} numberOfLines={2}>
-              {title}
-            </Text>
-            {subtitle ? (
-              <Text style={styles.subtitle} numberOfLines={2} selectable>
-                {subtitle}
-              </Text>
-            ) : null}
-          </View>
-          {badge ? <View style={styles.badge}>{badge}</View> : null}
+        <View testID={testID}>
+          {onHeadPress ? (
+            <PressableScale
+              testID={headTestID}
+              onPress={onHeadPress}
+              accessibilityRole="button"
+              accessibilityLabel={`${title}${headHint ? `, ${headHint}` : ""}`}
+              style={styles.head}
+            >
+              {head}
+            </PressableScale>
+          ) : (
+            <View style={styles.head}>{head}</View>
+          )}
         </View>
 
         {value ? (
@@ -130,6 +159,7 @@ const styles = StyleSheet.create({
   eyebrow: { color: ON_HERO.soft, fontSize: 12, fontWeight: "600", marginBottom: 2 },
   title: { color: ON_HERO.text, fontSize: 18, lineHeight: 23, fontWeight: "700", letterSpacing: -0.3 },
   subtitle: { color: ON_HERO.soft, fontSize: 13, lineHeight: 18, marginTop: 2 },
+  headHint: { color: ON_HERO.text, fontSize: 12, fontWeight: "700", marginTop: 6, opacity: 0.9 },
   valueBlock: { marginTop: spacing.md },
   valueLabel: { color: ON_HERO.soft, fontSize: 12, fontWeight: "500" },
   value: { color: ON_HERO.text, fontSize: 34, lineHeight: 40, fontWeight: "800", letterSpacing: -1 },

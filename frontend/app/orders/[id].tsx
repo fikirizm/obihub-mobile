@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Linking, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Clipboard, Linking, Platform, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { printOrShare } from "../../src/pdf";
@@ -42,12 +42,33 @@ import {
 import { EmptyState } from "../../src/components/EmptyState";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
-import { AlertIcon, CheckIcon, ClockIcon, CloudIcon, FileTextIcon, PackageIcon, PrinterIcon, TruckIcon } from "../../src/components/Icons";
+import {
+  AlertIcon,
+  ArrowRightIcon,
+  BarcodeIcon,
+  CheckIcon,
+  ClockIcon,
+  CloudIcon,
+  CopyIcon,
+  FileTextIcon,
+  MailIcon,
+  MapPinIcon,
+  PackageIcon,
+  PhoneIcon,
+  PrinterIcon,
+  TruckIcon,
+  UserIcon,
+} from "../../src/components/Icons";
+import { amountBreakdown, currentStatusOption, customerContact, itemImage, matchParty, primaryAction, trackingRows } from "../../src/order-detail-ui";
+import { getPartiesCompat } from "../../src/api-gider";
+import { partyRouteParams } from "../../src/cari-ui";
+import type { PartyView } from "../../src/types";
 import { FadeInDown, SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { Button } from "../../src/ui/Button";
+import { PressableScale } from "../../src/components/KPICard";
 import { useFeedback } from "../../src/ui/Feedback";
 import { fetchOrderLabelFile, labelOptionsFor, orderDisplayCodes, orderHasPrintableLabel, type LabelTemplate } from "../../src/labels";
-import { Chip, ChipRow } from "../../src/ui/Chip";
+import { Chip } from "../../src/ui/Chip";
 import { StackHeader } from "../../src/ui/Header";
 import { Card, IconTile, ListRow, SectionTitle } from "../../src/ui/ListRow";
 import { DetailHero, type HeroStat } from "../../src/ui/DetailHero";
@@ -60,7 +81,15 @@ function DetailSkeleton() {
   const bar = { backgroundColor: colors.border, borderRadius: radius.xs };
   return (
     <View accessible accessibilityRole="progressbar" accessibilityLabel="Sipariş yükleniyor">
-      <View style={[styles.skHero, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}>
+      <View
+        style={[
+          styles.skHero,
+          {
+            backgroundColor: colors.surfaceElevated,
+            borderColor: colors.borderSubtle,
+          },
+        ]}
+      >
         <View style={styles.skRow}>
           <View style={[styles.skLogo, { backgroundColor: colors.border }]} />
           <View style={styles.flexText}>
@@ -75,14 +104,36 @@ function DetailSkeleton() {
           ))}
         </View>
       </View>
-      <View style={[styles.skBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]} />
+      <View
+        style={[
+          styles.skBtn,
+          {
+            backgroundColor: colors.surfaceElevated,
+            borderColor: colors.borderSubtle,
+          },
+        ]}
+      />
       <View style={[styles.skCard, { backgroundColor: colors.surface, borderColor: colors.borderSubtle }]}>
         {[0, 1, 2].map((i) => (
           <View
             key={i}
-            style={[styles.itemRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+            style={[
+              styles.itemRow,
+              i > 0 && {
+                borderTopWidth: StyleSheet.hairlineWidth,
+                borderTopColor: colors.border,
+              },
+            ]}
           >
-            <View style={[styles.itemImg, { backgroundColor: colors.surfaceMuted, borderColor: colors.borderSubtle }]} />
+            <View
+              style={[
+                styles.itemImg,
+                {
+                  backgroundColor: colors.surfaceMuted,
+                  borderColor: colors.borderSubtle,
+                },
+              ]}
+            />
             <View style={styles.flexText}>
               <View style={[bar, { height: 14, width: "78%" }]} />
               <View style={[bar, { height: 12, width: "44%", marginTop: spacing.xs }]} />
@@ -115,6 +166,10 @@ export default function OrderDetail() {
   const [shareBusy, setShareBusy] = useState(false);
   const [takeBusy, setTakeBusy] = useState(false);
   const [barcodeBusy, setBarcodeBusy] = useState<string | null>(null);
+  // Müşteri kartı: siparişin carisi (ad / e-posta / telefonla bulunursa) ve özetten karta kaydırma.
+  const [party, setParty] = useState<PartyView | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const customerY = useRef(0);
   const { toast, confirm } = useFeedback();
 
   const load = async (silent = false) => {
@@ -149,6 +204,33 @@ export default function OrderDetail() {
     load();
   }, [token, orderId]);
 
+  // Siparişte cari kimliği yok: carilerde müşteri adıyla aranır, e-posta / telefon / tek tam ad eşleşmesi kullanılır.
+  const customerName = String(order?.customer_name || "").trim();
+  useEffect(() => {
+    if (!token || customerName.length < 2) return;
+    let live = true;
+    getPartiesCompat(token, { search: customerName })
+      .then((r) => live && setParty(matchParty(order || {}, (r.items || []) as any) as PartyView | null))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [token, customerName]);
+
+  const copyText = (text: string, what: string) => {
+    try {
+      Clipboard.setString(text);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      toast(`${what} kopyalandı`, "success");
+    } catch {
+      toast("Kopyalanamadı.", "error");
+    }
+  };
+
+  const openLink = (url: string, failText: string) => {
+    Linking.openURL(url).catch(() => toast(failText, "error"));
+  };
+
   const provider = providerHint || (order ? String(order.integration_provider || order.provider || order.channel || "") : "");
 
   const channel = channelKeyOf(provider || order?.channel);
@@ -162,7 +244,10 @@ export default function OrderDetail() {
       setPrintStatus("Etiket alınıyor...");
       let file: { path: string; notice?: string };
       try {
-        file = await fetchOrderLabelFile(token, order.id, provider, { template, order });
+        file = await fetchOrderLabelFile(token, order.id, provider, {
+          template,
+          order,
+        });
       } catch (e: any) {
         toast(e?.message || "Bu sipariş için etiket alınamadı.", "error");
         setPrintStatus(null);
@@ -276,7 +361,10 @@ export default function OrderDetail() {
     setStatusBusy(next);
     try {
       const updated = await updateOrderStatus(token, order.id, next);
-      const merged = { ...mergeOrderDetail(updated, order), status: updated?.status || next };
+      const merged = {
+        ...mergeOrderDetail(updated, order),
+        status: updated?.status || next,
+      };
       setOrder(merged);
       rememberOrderRow(merged);
       await saveCache(`order_detail_${order.id}`, merged);
@@ -331,7 +419,10 @@ export default function OrderDetail() {
   const handleOpenInvoice = () => {
     if (!order) return;
     if (order.parasut_invoice_id) {
-      router.push({ pathname: "/invoices/[id]", params: { id: String(order.parasut_invoice_id) } });
+      router.push({
+        pathname: "/invoices/[id]",
+        params: { id: String(order.parasut_invoice_id) },
+      });
       return;
     }
     if (order.parasut_invoice_url) {
@@ -428,7 +519,12 @@ export default function OrderDetail() {
   const orderDateTime = formatOrderDateTime(order);
   // Özet kartında kısa tarih ("11 Kas"); tam tarih ve saat aşağıdaki satırda gösterilir.
   const orderTs = orderTimestamp(order);
-  const shortOrderDate = orderTs ? new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "short" }).format(new Date(orderTs)) : "-";
+  const shortOrderDate = orderTs
+    ? new Intl.DateTimeFormat("tr-TR", {
+        day: "numeric",
+        month: "short",
+      }).format(new Date(orderTs))
+    : "-";
   const cargoError = Boolean(order.cargo_error_message) && String(order.cargo_status || "") === "error";
   const inv = orderInvoiceState(order, channel);
   const closedOrder = ["cancelled", "deleted"].includes(String(order.status || "").toLowerCase());
@@ -438,12 +534,28 @@ export default function OrderDetail() {
     ? []
     : Array.from(new Set((order.cargo_barcodes || []).map((b) => String(b?.barcode || "").trim()).filter(Boolean)));
 
-  const shareTracking = async () => {
-    try {
-      await Share.share({ message: trackingNo });
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch {}
-  };
+  const contact = customerContact(order, Platform.OS);
+  const trackRows = trackingRows(trackingNo, hjBarcodes, canWriteOrder);
+  const breakdown = amountBreakdown(order);
+  const currentStatus = currentStatusOption(order.status, ORDER_STATUS_OPTIONS);
+  // Ekranda tek birincil (mavi) eylem: işleme al > fatura kes > gönderi oluştur > yazdır.
+  const primary = primaryAction({
+    takeNeeded,
+    canInvoice: canWriteOrder && inv.canCreate,
+    canShip: canCreateShipment,
+    canPrint: Boolean(cloudBarcodes) || Boolean(trackingNo),
+    closed: closedOrder,
+  });
+  const shipLabel = channel === "n11" ? "Etiketi hazırla" : "Gönderi oluştur";
+  const printOptions = primary === "print" ? labelOptions.slice(1) : labelOptions;
+  const showShipInCard = canCreateShipment && primary !== "ship";
+  const showLabelCard =
+    trackRows.length > 0 || printOptions.length > 0 || Boolean(cloudBarcodes) || showShipInCard || Boolean(printStatus) || cargoError;
+  const goCustomerCard = () =>
+    scrollRef.current?.scrollTo({
+      y: Math.max(0, customerY.current - spacing.md),
+      animated: true,
+    });
 
   const heroStats: HeroStat[] = [
     { label: "Adet", value: String(totalQty) },
@@ -466,11 +578,18 @@ export default function OrderDetail() {
       />
 
       <ScrollView
-        contentContainerStyle={{ paddingTop: spacing.xs, paddingBottom: spacing.huge }}
+        ref={scrollRef}
+        contentContainerStyle={{
+          paddingTop: spacing.xs,
+          paddingBottom: spacing.huge,
+        }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => { setRefreshing(true); load(true); }}
+            onRefresh={() => {
+              setRefreshing(true);
+              load(true);
+            }}
             tintColor={colors.primary}
           />
         }
@@ -484,6 +603,9 @@ export default function OrderDetail() {
           }
           eyebrow="Müşteri"
           title={order.customer_name || "-"}
+          onHeadPress={goCustomerCard}
+          headHint="Müşteri bilgileri"
+          headTestID="hero-customer"
           subtitle={`#${displayOrderNo(order)} · ${providerLabel(provider)} · ${relativeDateLabel(order)}`}
           value={totalText}
           valueLabel="Toplam"
@@ -501,7 +623,13 @@ export default function OrderDetail() {
         {isOffline ? (
           <View
             accessibilityRole="alert"
-            style={[styles.notice, { backgroundColor: colors.warningBg, borderColor: colors.borderSubtle }]}
+            style={[
+              styles.notice,
+              {
+                backgroundColor: colors.warningBg,
+                borderColor: colors.borderSubtle,
+              },
+            ]}
           >
             <CloudIcon size={16} color={colors.warning} />
             <Text style={[type.footnote, styles.flexText, { color: colors.textPrimary }]}>
@@ -512,7 +640,16 @@ export default function OrderDetail() {
 
         {takeNeeded ? (
           <SafeAnimatedView entering={FadeInDown.delay(50).duration(380)}>
-            <View style={[styles.takeCard, { backgroundColor: colors.amberSoft, borderColor: colors.borderSubtle }]} testID="take-card">
+            <View
+              style={[
+                styles.takeCard,
+                {
+                  backgroundColor: colors.amberSoft,
+                  borderColor: colors.borderSubtle,
+                },
+              ]}
+              testID="take-card"
+            >
               <View style={styles.takeHead}>
                 <ClockIcon size={18} color={colors.amber} />
                 <View style={styles.flexText}>
@@ -527,78 +664,262 @@ export default function OrderDetail() {
           </SafeAnimatedView>
         ) : null}
 
-        <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)}>
-          <Button
-            testID="print-btn"
-            label={labelOptions.length > 1 ? `Yazdır · ${labelOptions[0].label}` : "Yazdır"}
-            // İşleme alınmamış siparişte birincil eylem "İşleme al"dır; yazdırma ikincil görünür.
-            variant={takeNeeded ? "secondary" : "primary"}
-            icon={<PrinterIcon size={18} color={takeNeeded ? colors.textPrimary : "#FFFFFF"} />}
-            busy={printBusy === labelOptions[0].template}
-            disabled={Boolean(printBusy)}
-            onPress={() => handlePrint(labelOptions[0].template)}
-            style={styles.primaryBtn}
-          />
-          {labelOptions.slice(1).map((opt) => (
-            <Button
-              key={opt.template}
-              testID={`print-${opt.template}-btn`}
-              label={opt.label}
-              variant="secondary"
-              icon={<PrinterIcon size={16} color={colors.textPrimary} />}
-              busy={printBusy === opt.template}
-              disabled={Boolean(printBusy)}
-              onPress={() => handlePrint(opt.template)}
-              style={styles.secondaryPrintBtn}
-            />
-          ))}
-          <View style={styles.actions}>
-            {cloudBarcodes ? (
+        {primary && primary !== "take" ? (
+          <SafeAnimatedView entering={FadeInDown.delay(60).duration(380)}>
+            {primary === "invoice" ? (
               <Button
-                testID="cloud-btn"
-                label="Uzaktan yazdır"
-                variant="secondary"
-                icon={<CloudIcon size={16} color={colors.textPrimary} />}
-                busy={cloudBusy}
-                onPress={handleCloud}
-                style={styles.flexBtn}
+                testID="invoice-create-btn"
+                label="Fatura kes"
+                icon={<FileTextIcon size={18} color="#FFFFFF" />}
+                busy={invoiceBusy}
+                onPress={handleCreateInvoice}
+                style={styles.primaryBtn}
               />
-            ) : null}
-            {canCreateShipment ? (
+            ) : primary === "ship" ? (
               <Button
                 testID="create-shipment-btn"
-                label={channel === "n11" ? "Etiketi hazırla" : "Gönderi oluştur"}
-                variant="secondary"
-                icon={<TruckIcon size={16} color={colors.textPrimary} />}
+                label={shipLabel}
+                icon={<TruckIcon size={18} color="#FFFFFF" />}
                 busy={shipBusy}
                 onPress={handleCreateShipment}
-                style={styles.flexBtn}
+                style={styles.primaryBtn}
               />
-            ) : null}
-          </View>
+            ) : (
+              <Button
+                testID="print-btn"
+                label={labelOptions.length > 1 ? `Yazdır · ${labelOptions[0].label}` : "Etiketi yazdır"}
+                icon={<PrinterIcon size={18} color="#FFFFFF" />}
+                busy={printBusy === labelOptions[0].template}
+                disabled={Boolean(printBusy)}
+                onPress={() => handlePrint(labelOptions[0].template)}
+                style={styles.primaryBtn}
+              />
+            )}
+          </SafeAnimatedView>
+        ) : null}
 
-          {printStatus ? (
-            <View
-              accessibilityLiveRegion="polite"
-              style={[styles.printStatusRow, { backgroundColor: colors.primarySoft, borderColor: colors.borderSubtle }]}
-            >
-              <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{printStatus}</Text>
+        {/* Konum ScrollView içeriğine göre ölçülür (özetteki müşteri alanından buraya kaydırılır). */}
+        <View testID="customer-card" onLayout={(e) => (customerY.current = e.nativeEvent.layout.y)}>
+          <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)}>
+            <View>
+              <SectionTitle title="Müşteri" />
+              <Card style={styles.block}>
+                <ListRow
+                  testID="customer-name-row"
+                  leading={
+                    <IconTile tint={colors.primarySoft}>
+                      <UserIcon size={18} color={colors.primary} />
+                    </IconTile>
+                  }
+                  title={contact.name}
+                  subtitle={party ? "Cari kaydı var" : contact.hasAny ? `${providerLabel(provider)} müşterisi` : "Kanal iletişim bilgisi göndermedi"}
+                  onPress={
+                    party
+                      ? () =>
+                          router.push({
+                            pathname: "/customers/[id]",
+                            params: partyRouteParams(party),
+                          })
+                      : undefined
+                  }
+                  accessibilityLabel={party ? `${contact.name}, cariye git` : undefined}
+                  trailing={
+                    party ? (
+                      <View testID="customer-party-link" style={[styles.pill, { backgroundColor: colors.primarySoft }]}>
+                        <Text style={[type.caption, { color: colors.primary, fontWeight: "700" }]}>Cariye git</Text>
+                        <ArrowRightIcon size={14} color={colors.primary} />
+                      </View>
+                    ) : undefined
+                  }
+                />
+                {contact.phone ? (
+                  <ListRow
+                    divider
+                    testID="customer-phone"
+                    leading={
+                      <IconTile tint={colors.successBg}>
+                        <PhoneIcon size={18} color={colors.success} />
+                      </IconTile>
+                    }
+                    title="Telefon"
+                    subtitle={contact.phone.text}
+                    onPress={() => openLink(contact.phone!.href, "Arama başlatılamadı.")}
+                    accessibilityLabel={`Telefon ${contact.phone.text}, aramak için dokunun`}
+                    trailing={
+                      <View style={[styles.pill, { backgroundColor: colors.successBg }]}>
+                        <Text style={[type.caption, { color: colors.success, fontWeight: "700" }]}>Ara</Text>
+                      </View>
+                    }
+                  />
+                ) : null}
+                {contact.email ? (
+                  <ListRow
+                    divider
+                    testID="customer-email"
+                    leading={
+                      <IconTile tint={colors.infoBg}>
+                        <MailIcon size={18} color={colors.info} />
+                      </IconTile>
+                    }
+                    title="E-posta"
+                    subtitle={contact.email.text}
+                    onPress={() => openLink(contact.email!.href, "E-posta uygulaması açılamadı.")}
+                    accessibilityLabel={`E-posta ${contact.email.text}, yazmak için dokunun`}
+                    trailing={
+                      <View style={[styles.pill, { backgroundColor: colors.infoBg }]}>
+                        <Text style={[type.caption, { color: colors.info, fontWeight: "700" }]}>Yaz</Text>
+                      </View>
+                    }
+                  />
+                ) : null}
+                {contact.address ? (
+                  <View testID="customer-address" style={[styles.addressRow, { borderTopColor: colors.border }]}>
+                    <View style={styles.addressHead}>
+                      <IconTile tint={colors.amberSoft}>
+                        <MapPinIcon size={18} color={colors.amber} />
+                      </IconTile>
+                      <View style={styles.flexText}>
+                        <Text style={[type.bodyStrong, { color: colors.textPrimary }]}>Teslimat adresi</Text>
+                        <Text style={[type.footnote, { color: colors.textSecondary, marginTop: 2 }]} selectable>
+                          {contact.address.text}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.addressActions}>
+                      <Button
+                        testID="customer-address-copy"
+                        size="sm"
+                        variant="secondary"
+                        label="Kopyala"
+                        icon={<CopyIcon size={14} color={colors.textPrimary} />}
+                        onPress={() => copyText(contact.address!.text, "Adres")}
+                        style={styles.flexBtn}
+                      />
+                      <Button
+                        testID="customer-address-map"
+                        size="sm"
+                        variant="secondary"
+                        label="Haritada aç"
+                        icon={<MapPinIcon size={14} color={colors.textPrimary} />}
+                        onPress={() => openLink(contact.address!.mapsUrl, "Harita açılamadı.")}
+                        style={styles.flexBtn}
+                      />
+                    </View>
+                  </View>
+                ) : null}
+              </Card>
             </View>
-          ) : null}
+          </SafeAnimatedView>
+        </View>
 
-          {cargoError ? (
-            <View
-              accessibilityRole="alert"
-              style={[styles.notice, { backgroundColor: colors.errorBg, borderColor: colors.borderSubtle }]}
-            >
-              <AlertIcon size={16} color={colors.error} />
-              <Text style={[type.footnote, styles.flexText, { color: colors.error }]}>
-                Son kargo denemesi: {order.cargo_error_message}
-              </Text>
-            </View>
-          ) : null}
-        </SafeAnimatedView>
+        {showLabelCard ? (
+          <SafeAnimatedView entering={FadeInDown.delay(80).duration(380)}>
+            <SectionTitle title="Kargo ve etiket" />
+            <Card style={styles.block}>
+              {trackRows.map((r, idx) => (
+                <ListRow
+                  key={r.code}
+                  divider={idx > 0}
+                  testID={r.kind === "tracking" ? "tracking-row" : `barcode-${r.code}`}
+                  leading={
+                    <IconTile tint={r.kind === "hepsijet" ? colors.surfaceMuted : colors.infoBg}>
+                      {r.kind === "hepsijet" ? <BarcodeIcon size={18} color={colors.textSecondary} /> : <TruckIcon size={18} color={colors.info} />}
+                    </IconTile>
+                  }
+                  title={r.title}
+                  subtitle={r.code}
+                  onPress={() => copyText(r.code, r.kind === "hepsijet" ? "Barkod" : "Takip numarası")}
+                  accessibilityLabel={`${r.title} ${r.code}, kopyalamak için dokunun`}
+                  trailing={
+                    <View style={styles.rowActions}>
+                      <View style={[styles.iconPill, { backgroundColor: colors.primarySoft }]}>
+                        <CopyIcon size={14} color={colors.primary} />
+                      </View>
+                      {r.cancellable ? (
+                        <PressableScale
+                          testID={`barcode-delete-${r.code}`}
+                          onPress={barcodeBusy ? undefined : () => handleDeleteBarcode(r.code)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${r.code} gönderisini iptal et`}
+                          hitSlop={6}
+                          style={[styles.pill, { backgroundColor: colors.errorBg, opacity: barcodeBusy && barcodeBusy !== r.code ? 0.5 : 1 }]}
+                        >
+                          {barcodeBusy === r.code ? (
+                            <ActivityIndicator size="small" color={colors.error} />
+                          ) : (
+                            <Text style={[type.caption, { color: colors.error, fontWeight: "700" }]}>İptal et</Text>
+                          )}
+                        </PressableScale>
+                      ) : null}
+                    </View>
+                  }
+                />
+              ))}
+              {printOptions.length > 0 || cloudBarcodes || showShipInCard ? (
+                <View
+                  style={[
+                    styles.cardActions,
+                    trackRows.length > 0 && {
+                      borderTopWidth: StyleSheet.hairlineWidth,
+                      borderTopColor: colors.border,
+                    },
+                  ]}
+                >
+                  {printOptions.map((opt, i) => (
+                    <Button
+                      key={opt.template}
+                      testID={i === 0 && primary !== "print" ? "print-btn" : `print-${opt.template}-btn`}
+                      size="sm"
+                      variant="secondary"
+                      label={labelOptions.length > 1 ? opt.label : "Yazdır"}
+                      icon={<PrinterIcon size={14} color={colors.textPrimary} />}
+                      busy={printBusy === opt.template}
+                      disabled={Boolean(printBusy)}
+                      onPress={() => handlePrint(opt.template)}
+                      style={[styles.gridBtn, opt.label.length > 16 && labelOptions.length > 1 && styles.fullBtn]}
+                    />
+                  ))}
+                  {cloudBarcodes ? (
+                    <Button
+                      testID="cloud-btn"
+                      size="sm"
+                      label="Uzaktan yazdır"
+                      variant="secondary"
+                      icon={<CloudIcon size={14} color={colors.textPrimary} />}
+                      busy={cloudBusy}
+                      onPress={handleCloud}
+                      style={styles.gridBtn}
+                    />
+                  ) : null}
+                  {showShipInCard ? (
+                    <Button
+                      testID="create-shipment-btn"
+                      size="sm"
+                      label={shipLabel}
+                      variant="secondary"
+                      icon={<TruckIcon size={14} color={colors.textPrimary} />}
+                      busy={shipBusy}
+                      onPress={handleCreateShipment}
+                      style={styles.gridBtn}
+                    />
+                  ) : null}
+                </View>
+              ) : null}
+              {printStatus ? (
+                <View accessibilityLiveRegion="polite" style={[styles.cardNotice, { backgroundColor: colors.primarySoft }]}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{printStatus}</Text>
+                </View>
+              ) : null}
+              {cargoError ? (
+                <View accessibilityRole="alert" style={[styles.cardNotice, { backgroundColor: colors.errorBg }]}>
+                  <AlertIcon size={16} color={colors.error} />
+                  <Text style={[type.footnote, styles.flexText, { color: colors.error }]}>Son kargo denemesi: {order.cargo_error_message}</Text>
+                </View>
+              ) : null}
+            </Card>
+          </SafeAnimatedView>
+        ) : null}
 
         <SafeAnimatedView entering={FadeInDown.delay(90).duration(380)}>
           <SectionTitle title="Fatura" />
@@ -630,13 +951,14 @@ export default function OrderDetail() {
               }
             />
           </Card>
-          {canWriteOrder && (inv.canCreate || inv.canShare) ? (
+          {canWriteOrder && ((inv.canCreate && primary !== "invoice") || inv.canShare) ? (
             <View style={styles.actions}>
-              {inv.canCreate ? (
+              {inv.canCreate && primary !== "invoice" ? (
                 <Button
                   testID="invoice-create-btn"
                   label="Fatura kes"
-                  icon={<FileTextIcon size={16} color="#FFFFFF" />}
+                  variant="secondary"
+                  icon={<FileTextIcon size={16} color={colors.textPrimary} />}
                   busy={invoiceBusy}
                   onPress={handleCreateInvoice}
                   style={styles.flexBtn}
@@ -659,17 +981,23 @@ export default function OrderDetail() {
         {canChangeStatus ? (
           <SafeAnimatedView entering={FadeInDown.delay(105).duration(380)}>
             <SectionTitle title="Durumu değiştir" />
-            <ChipRow>
-              {ORDER_STATUS_OPTIONS.map((opt) => (
-                <Chip
-                  key={opt.value}
-                  testID={`status-${opt.value}`}
-                  label={statusBusy === opt.value ? `${opt.label}…` : opt.label}
-                  selected={order.status === opt.value}
-                  onPress={() => handleStatusChange(opt.value)}
-                />
-              ))}
-            </ChipRow>
+            <View style={styles.statusWrap} testID="status-chips">
+              {ORDER_STATUS_OPTIONS.map((opt) => {
+                const isCurrent = currentStatus === opt.value;
+                return (
+                  <Chip
+                    key={opt.value}
+                    testID={`status-${opt.value}`}
+                    label={statusBusy === opt.value ? `${opt.label}…` : isCurrent ? `✓ ${opt.label}` : opt.label}
+                    selected={isCurrent}
+                    onPress={isCurrent ? undefined : () => handleStatusChange(opt.value)}
+                  />
+                );
+              })}
+            </View>
+            <Text style={[type.caption, styles.statusHint, { color: colors.textTertiary }]}>
+              {currentStatus ? "Yeni durumu seçin; onaydan sonra kaydedilir." : `Mevcut durum: ${displayOrderStatus(order, provider)}`}
+            </Text>
           </SafeAnimatedView>
         ) : null}
 
@@ -686,52 +1014,6 @@ export default function OrderDetail() {
               subtitle={`${relativeDateLabel(order)} · ${providerLabel(provider)}`}
               trailing={<Text style={[type.callout, tabular, { color: colors.textPrimary }]}>{orderDateTime}</Text>}
             />
-            {trackingNo ? (
-              <ListRow
-                divider
-                leading={
-                  <IconTile tint={colors.infoBg}>
-                    <TruckIcon size={18} color={colors.info} />
-                  </IconTile>
-                }
-                title="Kargo takip numarası"
-                subtitle={trackingNo}
-                onPress={shareTracking}
-                accessibilityLabel={`Kargo takip numarası ${trackingNo}, kopyalamak için dokunun`}
-                trailing={
-                  <View style={[styles.copyPill, { backgroundColor: colors.primarySoft }]}>
-                    <Text style={[type.caption, { color: colors.primary, fontWeight: "600" }]}>Kopyala</Text>
-                  </View>
-                }
-              />
-            ) : null}
-            {hjBarcodes.map((bc) => (
-              <ListRow
-                key={bc}
-                divider
-                testID={`barcode-${bc}`}
-                leading={
-                  <IconTile tint={colors.surfaceMuted}>
-                    <TruckIcon size={18} color={colors.textSecondary} />
-                  </IconTile>
-                }
-                title="HepsiJet barkodu"
-                subtitle={bc}
-                trailing={
-                  canWriteOrder ? (
-                    <Button
-                      testID={`barcode-delete-${bc}`}
-                      size="sm"
-                      variant="ghost"
-                      label={barcodeBusy === bc ? "…" : "İptal et"}
-                      busy={barcodeBusy === bc}
-                      disabled={Boolean(barcodeBusy)}
-                      onPress={() => handleDeleteBarcode(bc)}
-                    />
-                  ) : undefined
-                }
-              />
-            ))}
           </Card>
         </SafeAnimatedView>
 
@@ -754,42 +1036,58 @@ export default function OrderDetail() {
               </View>
             ) : (
               items.map((it, idx) => {
-                const img0 = it?.images?.[0];
-                const img0Url = typeof img0 === "object" ? (img0?.url ?? img0?.src ?? "") : (img0 ?? "");
-                const img = String(
-                  it?.image_url || it?.imageUrl || it?.pictureUrl || it?.picture_url ||
-                  it?.image || it?.picture || it?.img || it?.thumbnail ||
-                  it?.src || it?.url || img0Url || ""
-                ).trim();
-                const valid = /^https?:\/\//i.test(img);
-                const displayName = (
-                  it?.product_name || it?.name || it?.sku || it?.barcode || it?.product_id || "Ürün"
-                ).trim();
+                const img = itemImage(it);
+                const displayName = (it?.product_name || it?.name || it?.sku || it?.barcode || it?.product_id || "Ürün").trim();
                 const genericNames = ["ürün", "urun", "product", "bilinmeyen"];
                 const isGenericName = genericNames.includes(displayName.toLowerCase());
-                const unitPrice = Number(it?.unit_price || it?.price || (it?.total_price && it?.quantity ? Number(it.total_price) / Math.max(1, Number(it.quantity)) : 0) || 0);
+                const unitPrice = Number(
+                  it?.unit_price ||
+                    it?.price ||
+                    (it?.total_price && it?.quantity ? Number(it.total_price) / Math.max(1, Number(it.quantity)) : 0) ||
+                    0,
+                );
                 return (
                   <View
                     key={`${it.sku || it.product_name || idx}-${idx}`}
-                    style={[styles.itemRow, idx > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+                    style={[
+                      styles.itemRow,
+                      idx > 0 && {
+                        borderTopWidth: StyleSheet.hairlineWidth,
+                        borderTopColor: colors.border,
+                      },
+                    ]}
                   >
-                    <View style={[styles.itemImg, { backgroundColor: colors.surfaceMuted, borderColor: colors.borderSubtle }]}>
-                      {valid ? (
+                    <View
+                      style={[
+                        styles.itemImg,
+                        {
+                          backgroundColor: colors.surfaceMuted,
+                          borderColor: colors.borderSubtle,
+                        },
+                      ]}
+                    >
+                      {img ? (
                         <ExpoImage source={{ uri: img }} style={styles.itemImgFill} contentFit="cover" transition={200} />
                       ) : (
                         <PackageIcon size={22} color={colors.textTertiary} />
                       )}
                     </View>
                     <View style={styles.flexText}>
-                      <Text style={[type.bodyStrong, { color: isGenericName ? colors.textSecondary : colors.textPrimary }]} numberOfLines={2}>
+                      <Text
+                        style={[
+                          type.bodyStrong,
+                          {
+                            color: isGenericName ? colors.textSecondary : colors.textPrimary,
+                          },
+                        ]}
+                        numberOfLines={2}
+                      >
                         {displayName}
                       </Text>
                       <Text style={[type.caption, { color: colors.textTertiary, marginTop: 2 }]} numberOfLines={1}>
                         {it.sku || it.barcode ? `SKU: ${it.sku || it.barcode}` : "SKU: -"}
                       </Text>
-                      <Text style={[type.footnote, tabular, { color: colors.textSecondary, marginTop: 2 }]}>
-                        Birim: {formatTry(unitPrice)}
-                      </Text>
+                      <Text style={[type.footnote, tabular, { color: colors.textSecondary, marginTop: 2 }]}>Birim: {formatTry(unitPrice)}</Text>
                     </View>
                     <View style={[styles.qtyBadge, { backgroundColor: colors.primarySoft }]}>
                       <Text style={[type.callout, tabular, { color: colors.primary, fontWeight: "700" }]}>x{it.quantity || 1}</Text>
@@ -798,16 +1096,41 @@ export default function OrderDetail() {
                 );
               })
             )}
-            <View style={[styles.totalRow, { backgroundColor: colors.surfaceMuted, borderTopColor: colors.border }]}>
+            {breakdown.rows.length > 0 ? (
+              <View testID="amount-breakdown" style={[styles.breakdown, { borderTopColor: colors.border }]}>
+                {breakdown.rows.map((r) => (
+                  <View key={r.key} style={styles.breakdownRow}>
+                    <Text style={[type.footnote, { color: colors.textSecondary }]}>{r.label}</Text>
+                    <Text
+                      style={[
+                        type.callout,
+                        tabular,
+                        {
+                          color: r.key === "discount" ? colors.success : colors.textPrimary,
+                          fontWeight: "600",
+                        },
+                      ]}
+                    >
+                      {r.amount < 0 ? `−${formatTry(-r.amount)}` : formatTry(r.amount)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            <View
+              style={[
+                styles.totalRow,
+                {
+                  backgroundColor: colors.surfaceMuted,
+                  borderTopColor: colors.border,
+                },
+              ]}
+            >
               <View style={styles.flexText}>
                 <Text style={[type.bodyStrong, { color: colors.textPrimary }]}>Genel toplam</Text>
                 <Text style={[type.caption, tabular, { color: colors.textTertiary, marginTop: 1 }]}>{totalQty} adet</Text>
               </View>
-              <Text
-                style={[type.title, tabular, styles.totalValue, { color: colors.textPrimary }]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-              >
+              <Text style={[type.title, tabular, styles.totalValue, { color: colors.textPrimary }]} numberOfLines={1} adjustsFontSizeToFit>
                 {totalText}
               </Text>
             </View>
@@ -819,13 +1142,25 @@ export default function OrderDetail() {
 }
 
 const styles = StyleSheet.create({
-  takeCard: { marginHorizontal: spacing.lg, marginTop: spacing.md, marginBottom: spacing.xs, padding: spacing.md, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, gap: spacing.sm },
+  takeCard: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: spacing.sm,
+  },
   takeHead: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start" },
   takeBtn: { alignSelf: "stretch" },
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },
   flexText: { flex: 1, minWidth: 0 },
-  heroLogo: { padding: 2, borderRadius: radius.md + 2, backgroundColor: ON_HERO.text },
+  heroLogo: {
+    padding: 2,
+    borderRadius: radius.md + 2,
+    backgroundColor: ON_HERO.text,
+  },
   heroStatusRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -839,8 +1174,12 @@ const styles = StyleSheet.create({
   heroStatusLabel: { color: ON_HERO.soft, fontSize: 12, fontWeight: "500" },
   heroStatusBadge: { flexShrink: 1, minWidth: 0 },
   primaryBtn: { marginHorizontal: spacing.lg, marginTop: spacing.md },
-  secondaryPrintBtn: { marginHorizontal: spacing.lg, marginTop: spacing.sm },
-  actions: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginTop: spacing.sm },
+  actions: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+  },
   flexBtn: { flex: 1, minWidth: 0, paddingHorizontal: spacing.xs },
   notice: {
     flexDirection: "row",
@@ -853,24 +1192,114 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
   },
-  printStatusRow: {
+
+  copyPill: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+  },
+  pill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+  },
+  iconPill: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rowActions: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  addressRow: {
+    padding: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: spacing.sm,
+  },
+  addressHead: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+  },
+  addressActions: { flexDirection: "row", gap: spacing.sm },
+  cardActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  fullBtn: { flexBasis: "100%" },
+  gridBtn: {
+    flexGrow: 1,
+    flexBasis: "45%",
+    minWidth: 0,
+    paddingHorizontal: spacing.xs,
+  },
+  cardNotice: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.xs,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: radius.md,
-    borderWidth: 1,
   },
-  copyPill: { paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: radius.pill },
-  countPill: { paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radius.pill },
-  emptyRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md },
-  itemRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
-  itemImg: { width: 56, height: 56, borderRadius: radius.md, borderWidth: 1, overflow: "hidden", alignItems: "center", justifyContent: "center" },
+  statusWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+  },
+  statusHint: { paddingHorizontal: spacing.lg, marginTop: spacing.xs },
+  breakdown: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  breakdownRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  countPill: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+  },
+  emptyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  itemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  itemImg: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   itemImgFill: { width: "100%", height: "100%" },
-  qtyBadge: { paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: radius.pill },
+  qtyBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+  },
   totalRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -882,9 +1311,26 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: radius.lg - 1,
   },
   totalValue: { flexShrink: 1, textAlign: "right", maxWidth: "62%" },
-  skHero: { marginHorizontal: spacing.lg, marginTop: spacing.xs, padding: spacing.lg, borderRadius: radius.xxl, borderWidth: 1 },
+  skHero: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.xs,
+    padding: spacing.lg,
+    borderRadius: radius.xxl,
+    borderWidth: 1,
+  },
   skRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   skLogo: { width: 44, height: 44, borderRadius: radius.md },
-  skBtn: { height: 50, marginHorizontal: spacing.lg, marginTop: spacing.md, borderRadius: radius.md, borderWidth: 1 },
-  skCard: { marginHorizontal: spacing.lg, marginTop: spacing.xl, borderRadius: radius.lg, borderWidth: 1 },
+  skBtn: {
+    height: 50,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+  },
+  skCard: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.xl,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+  },
 });

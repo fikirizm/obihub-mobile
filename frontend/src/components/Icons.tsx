@@ -308,3 +308,34 @@ export const UserIcon = ({ size = 24, color = "#0F172A", strokeWidth = 2 }: Icon
     <Path d="M4.5 20.5c1-3.6 4-5.5 7.5-5.5s6.500 1.900 7.500 5.500" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
   </Svg>
 );
+
+export const PhoneIcon = ({ size = 24, color = "#0F172A", strokeWidth = 2 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M5 4h3.5l1.8 4.4-2.3 1.4a11 11 0 0 0 6.2 6.2l1.4-2.3L20 15.5V19a1.5 1.5 0 0 1-1.6 1.5C10.6 20 4 13.4 3.5 5.6A1.5 1.5 0 0 1 5 4Z"
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
+
+export const MapPinIcon = ({ size = 24, color = "#0F172A", strokeWidth = 2 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11Z" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round" />
+    <Circle cx={12} cy={10} r={2.3} stroke={color} strokeWidth={strokeWidth} />
+  </Svg>
+);
+
+export const BarcodeIcon = ({ size = 24, color = "#0F172A", strokeWidth = 2 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path d="M4 6v12M7.5 6v12M11 6v12M14 6v12M17 6v12M20 6v12" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+  </Svg>
+);
+
+export const CopyIcon = ({ size = 24, color = "#0F172A", strokeWidth = 2 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Rect x={8.5} y={8.5} width={11.5} height={11.5} rx={2.5} stroke={color} strokeWidth={strokeWidth} />
+    <Path d="M15.5 5.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h.5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+  </Svg>
+);

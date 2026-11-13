@@ -36,6 +36,17 @@ const orders = Array.from({ length: 74 }, (_, i) => {
 // o8 ve o16 mağazada silinmiş.
 Object.assign(orders[0], { cargo_barcodes: [{ barcode: "HJ100200300" }, { barcode: "HJ100200301" }], cargo_tracking: "HJ100200301" });
 Object.assign(orders[1], { trendyol_status: "Created" });
+// Sipariş ayrıntısı premium turu (PM 13 Kas 2026): o1 müşteri iletişimi + c1 carisiyle eşleşir, ürün görseli, KDV ve indirim;
+// o2 (Trendyol) yalnız teslimat adresi (pazaryeri telefon / e-posta göndermez).
+Object.assign(orders[0], {
+  customer_name: "Elif Kaya", customer_phone: "0555 111 22 33", customer_email: "elif.kaya@example.test",
+  shipping_address: "Moda Cad. No:12 D:4\nKadıköy / İstanbul", total_amount: 419.7,
+  items: [
+    { product_name: "Seramik Kupa", sku: "SKU-1", quantity: 2, unit_price: 149.9, total_price: 299.8, vat_rate: 20, image_url: "http://localhost:8799/__img/urun-1.png" },
+    { product_name: "Bambu Altlık", sku: "SKU-2", quantity: 1, unit_price: 149.9, total_price: 149.9, vat_rate: 20, image_url: "http://localhost:8799/__img/urun-2.png" },
+  ],
+});
+Object.assign(orders[1], { shipping_address: "Atatürk Mah. 1203 Sk. No:5\nBornova / İzmir" });
 Object.assign(orders[4], { parasut_invoice_id: "inv1", invoice_number: "OBI2026000123" });
 orders[7].status = "deleted";
 orders[15].status = "deleted";
@@ -170,6 +181,17 @@ http
     const url = new URL(req.url, "http://x");
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
+    // Deneme ürün görselleri (dev/img); dış görsel servisine bağımlı kalınmaz.
+    const imgHit = url.pathname.match(/^\/__img\/([a-z0-9-]+\.png)$/);
+    if (imgHit) {
+      try {
+        const buf = require("fs").readFileSync(require("path").join(__dirname, "img", imgHit[1]));
+        res.writeHead(200, { "Content-Type": "image/png", "Access-Control-Allow-Origin": "*" });
+        return res.end(buf);
+      } catch {
+        return send(res, 404, { detail: "yok" });
+      }
+    }
     if (url.pathname === "/__mode") {
       for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);

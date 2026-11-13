@@ -106,4 +106,15 @@ t("M7: bakiye ipucu: eksi bakiyede 'Alacak bakiyesi'", () => {
   assert.equal(m.balanceListHint(0), undefined);
 });
 
+t("partyRouteParams: cari listesi ve sipariş ayrıntısı aynı parametrelerle cari ekranını açar", () => {
+  const base = { id: "c1", name: "Elif Kaya", balance: 4725, currency: "TRY", source: "registered", origin: "customers", balanceAvailable: true,
+    actions: { collect: true, view_ledger: true, edit: true, delete: false, view_orders: true } };
+  assert.deepEqual(m.partyRouteParams(base), { id: "c1", name: "Elif Kaya", balance: "4725", registered: "1", origin: "customers", source: "registered", ledger: "1", edit: "1", del: "0", orders: "1", currency: "TRY" });
+  const legacy = { ...base, origin: "read_model", source: "legacy", balanceAvailable: false, company_name: "Kaya Ltd." };
+  const r = m.partyRouteParams(legacy);
+  assert.equal(r.name, "Kaya Ltd."); assert.equal(r.balance, "0"); assert.equal(r.currency, ""); assert.equal(r.registered, "1");
+  assert.equal(m.partyRouteParams({ ...base, source: "obihub", origin: "read_model" }).edit, "0");
+  assert.equal(m.partyRouteParams({ ...base, source: "orders" }).registered, "0");
+});
+
 console.log(`\n${n} test geçti`);
