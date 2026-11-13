@@ -140,7 +140,24 @@ function send(res, status, body) {
     "Access-Control-Allow-Headers": "*",
     "Access-Control-Allow-Methods": "*",
   });
-  res.end(JSON.stringify(body));
+  res.end(demoText(JSON.stringify(body)));
+}
+
+// Pazarlama ekran görüntüleri için demo modu (/__mode?demo=1): yanıtlardaki kişi, firma, mağaza ve ürün adları
+// "Demo / Örnek" adlarla değişir. Veri yapısı ve tutarlar aynı kalır.
+const DEMO_PRODUCTS = ["Seramik Kupa", "Pamuk Havlu", "Bambu Kesme Tahtası", "Cam Saklama Kabı", "Keten Masa Örtüsü", "Termos Matara", "Ahşap Servis Tabağı", "Aromalı Mum", "Örgü Battaniye", "Bakır Cezve"];
+const DEMO_MAP = [
+  ["Ayşe Yılmaz", "Örnek Butik"], ["Mehmet Demir", "Demo Kırtasiye"], ["Elif Kaya", "Örnek Kozmetik"], ["Can Öztürk", "Demo Elektronik Ltd."],
+  ["Zeynep Arslan", "Örnek Ev Tekstili"], ["Burak Şahin", "Demo Spor"], ["Selin Aydın", "Örnek Kafe"], ["Acme GmbH", "Demo Export GmbH"],
+  ["Tedarikçi A.Ş.", "Örnek Tedarik A.Ş."], ["Acme Ticaret A.Ş.", "Örnek Toptan A.Ş."], ["Acar Lojistik", "Demo Lojistik"],
+  ["Kargo Lojistik A.Ş.", "Demo Kargo A.Ş."], ["Ofis Kırtasiye", "Örnek Ofis"], ["Ambalaj Ltd.", "Demo Ambalaj Ltd."],
+  ["Deneme Kullanıcı", "Demo Ticaret A.Ş."], ["Deneme A.Ş.", "Demo Ticaret A.Ş."], ["Deneme Mağaza", "Demo Mağaza"],
+];
+function demoText(text) {
+  if (state.demo !== "1") return text;
+  let t = text.replace(/Deneme Ürün ?(\d*)/g, (_, n) => `Örnek ${DEMO_PRODUCTS[(Number(n || 1) - 1) % DEMO_PRODUCTS.length]}`);
+  for (const [a, b] of DEMO_MAP) t = t.split(a).join(b);
+  return t.replace(/test@example\.test/g, "demo@obihub.app");
 }
 
 http
@@ -149,7 +166,7 @@ http
     const path = url.pathname.replace(/^\/api/, "");
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -589,7 +606,7 @@ http
     const readBody = (cb) => { let raw = ""; req.on("data", (c) => (raw += c)); req.on("end", () => { console.log("WRITE", path, raw); cb(JSON.parse(raw || "{}")); }); };
     // --- Muhasebe farkları (P5). r2'de "Farkı al" 409 ITEM_OUTDATED döner (eski kayıt yolu denensin).
     if (path === "/stock/reconciliation" && req.method === "GET")
-      return send(res, 200, { items: recon, open_count: recon.length, owner: { owner: "obihub", program: "bizimhesap", label: "ObiHub" }, last_run: null });
+      return send(res, 200, { items: state.demo === "1" ? [] : recon, open_count: state.demo === "1" ? 0 : recon.length, owner: { owner: "obihub", program: "bizimhesap", label: "ObiHub" }, last_run: null });
     if (req.method === "POST" && (path === "/stock/reconciliation/apply" || path === "/stock/reconciliation/dismiss"))
       return readBody((b) => {
         const ids = b.item_ids || [];
