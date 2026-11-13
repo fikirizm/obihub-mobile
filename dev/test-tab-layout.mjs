@@ -43,4 +43,22 @@ t("Panel yönlendirmesi değişmedi: rozet dashboard rotasını açar", () => {
   assert.equal(m.CENTER_TAB, "dashboard");
 });
 
+t("rozet: görünür 'Panel' yazısı yok; erişilebilirlik etiketi 'Panel' kalır (kullanıcı isteği)", () => {
+  assert.equal(m.CENTER_BADGE.showsLabel, false);
+  assert.equal(m.TAB_LABELS.dashboard, "Panel");
+});
+t("rozet geometrisi: çubuğa taşma azaldı ama sıfır değil; çubuğun içinde kalır; yan simgelerle aynı hizada", () => {
+  const g = m.badgeGeometry();
+  assert.ok(g.lift > 0 && g.lift < 34, `lift ${g.lift}`); // önceki taşma 34 pt
+  assert.ok(g.lift >= 6, "taşma tamamen yok olmasın");
+  assert.ok(g.bottom <= m.CENTER_BADGE.barH - 6, `alt ${g.bottom}`); // ana çubuk / güvenli alan payı
+  const sideIconCenter = (m.CENTER_BADGE.barH - 51) / 2 + 16; // yan sekme: 32 pt simge + 4 + 15 pt yazı bloğu, dikeyde ortalı
+  assert.ok(Math.abs(g.centerY - sideIconCenter) <= 3, `merkez ${g.centerY} / yan ${sideIconCenter}`);
+});
+t("kavis rozeti çevreler: üstte rozet ile kenar arasında boşluk", () => {
+  const g = m.badgeGeometry();
+  assert.ok(g.humpTop < g.top, "kavis rozetin üstünden yüksekte");
+  assert.ok(g.top - g.humpTop >= 5 && g.top - g.humpTop <= 10);
+});
+
 console.log(`\n${n} test geçti`);

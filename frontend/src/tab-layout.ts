@@ -25,3 +25,15 @@ export function tabOrder(access: { integrations: boolean }): TabName[] {
   const s = tabSlots(access);
   return [...s.left, s.center, ...s.right].filter((x): x is TabName => x !== null);
 }
+
+// Ortadaki rozet (kullanıcı, 13 Kas 2026: "Panel yazmana gerek yok… icon azıcık daha aşağı inebilir").
+// Görünür yazı yok (erişilebilirlik etiketi "Panel" kalır). Rozet merkezi yan sekme simgeleriyle aynı hizada; çubuk üst kenarının
+// biraz üstüne taşar ve çubuk kenarı rozetle eş merkezli yumuşak bir kavisle yükselerek onu sarar.
+export const CENTER_BADGE = { size: 60, barH: 58, lift: 11, notchR: 37, showsLabel: false } as const;
+
+export function badgeGeometry() {
+  const { size, lift, notchR } = CENTER_BADGE;
+  const top = -lift; // rozet üst kenarı (çubuk üst kenarına göre; negatif = yukarıda)
+  const centerY = size / 2 - lift;
+  return { lift, top, bottom: size - lift, centerY, humpTop: centerY - notchR };
+}

@@ -10,7 +10,7 @@ import { canAccess } from "../../src/auth/permissions";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import type { Palette } from "../../src/theme/tokens";
 import { BagIcon, HomeIcon, MenuIcon, PlugIcon, WalletIcon } from "../../src/components/Icons";
-import { TAB_LABELS, tabSlots, type TabName } from "../../src/tab-layout";
+import { badgeGeometry, CENTER_BADGE, TAB_LABELS, tabSlots, type TabName } from "../../src/tab-layout";
 
 const MARK = require("../../assets/obihub/obihub-mark.png");
 
@@ -24,10 +24,12 @@ const SIDE_TABS: Record<Exclude<TabName, "dashboard">, { Icon: typeof HomeIcon; 
 };
 // Marka gradyanı (lacivert → mavi → camgöbeği → yeşil), logodaki renklerle.
 const BRAND = ["#1E3A8A", "#2563EB", "#0EA5B7", "#22C55E"];
-const BADGE = 60; // rozet çapı
-const BAR_H = 58; // çubuk içerik yüksekliği (güvenli alan hariç)
-const NOTCH_R = BADGE / 2 + 7; // oyuk yarıçapı
-const LIFT = 34; // rozetin çubuk üst kenarından yukarı taşma miktarı (merkez kenarın 4 pt üstünde)
+const BADGE = CENTER_BADGE.size; // rozet çapı
+const BAR_H = CENTER_BADGE.barH; // çubuk içerik yüksekliği (güvenli alan hariç)
+const NOTCH_R = CENTER_BADGE.notchR; // kavis yarıçapı (rozetle eş merkezli)
+const LIFT = CENTER_BADGE.lift; // rozetin çubuk üst kenarından yukarı taşma miktarı
+const GEO = badgeGeometry();
+const HUMP = Math.ceil(-GEO.humpTop) + 2; // kavisin çubuk üstüne yükseldiği alan (SVG bu kadar yukarıdan başlar)
 
 function luminance(hex: string) {
   const n = parseInt(hex.slice(1), 16);
@@ -142,34 +144,32 @@ function CenterBadge({ active, onPress }: { active: boolean; onPress: () => void
             <Image source={MARK} style={styles.mark} resizeMode="contain" tintColor="#FFFFFF" accessible={false} />
           </View>
         </Animated.View>
-        <Text numberOfLines={1} style={[styles.label, styles.centerLabel, { color: active ? colors.textPrimary : colors.textTertiary, fontWeight: active ? "700" : "500" }]}>
-          {TAB_LABELS.dashboard}
-        </Text>
       </Pressable>
     </View>
   );
 }
 
-// Çubuk zemini: ortada rozet için yumuşak oyuk (SVG). Genişlik ölçülünce çizilir.
+// Çubuk zemini (SVG): üst kenar ortada rozetle eş merkezli yumuşak bir kavisle yükselir ve rozeti sarar.
 function BarShape({ width, height, fill, stroke }: { width: number; height: number; fill: string; stroke: string }) {
   if (!width) return null;
   const cx = width / 2;
   const r = NOTCH_R;
-  // Oyuk rozetle eş merkezli: merkez çubuk üst kenarının (y=0) cy kadar üstünde; rozetin çevresinde eşit boşluk halkası kalır.
-  const cy = BADGE / 2 - LIFT; // rozet merkezinin y'si (negatif = kenarın üstünde)
-  const half = Math.sqrt(Math.max(r * r - cy * cy, 0)); // oyuğun üst kenarı kestiği yarı genişlik
-  const inner = Math.sqrt(Math.max(r * r - (cy - 4) * (cy - 4), 0)); // y=4'teki yarı genişlik (yumuşatma bitişi)
-  const fil = 9;
+  const cy = GEO.centerY + HUMP; // SVG içindeki rozet merkezi (SVG, çubuğun HUMP pt üstünden başlar)
+  const top = HUMP; // çubuk üst kenarının SVG içindeki y'si
+  const half = Math.sqrt(Math.max(r * r - (cy - top) * (cy - top), 0)); // kavisin kenarla kesiştiği yarı genişlik
+  const lift4 = top - 4;
+  const inner = Math.sqrt(Math.max(r * r - (cy - lift4) * (cy - lift4), 0)); // kenarın 4 pt üstündeki yarı genişlik
+  const fil = 12;
   const d = [
-    `M0,0`,
-    `L${cx - half - fil},0`,
-    `Q${cx - half},0 ${cx - inner},4`,
-    `A${r},${r} 0 0 0 ${cx + inner},4`,
-    `Q${cx + half},0 ${cx + half + fil},0`,
-    `L${width},0 L${width},${height} L0,${height} Z`,
+    `M0,${top}`,
+    `L${cx - half - fil},${top}`,
+    `Q${cx - half},${top} ${cx - inner},${lift4}`,
+    `A${r},${r} 0 0 1 ${cx + inner},${lift4}`,
+    `Q${cx + half},${top} ${cx + half + fil},${top}`,
+    `L${width},${top} L${width},${height + HUMP} L0,${height + HUMP} Z`,
   ].join(" ");
   return (
-    <Svg width={width} height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
+    <Svg width={width} height={height + HUMP} style={{ position: "absolute", left: 0, top: -HUMP }} pointerEvents="none">
       <Path d={d} fill={fill} stroke={stroke} strokeWidth={StyleSheet.hairlineWidth * 2} />
     </Svg>
   );
@@ -253,13 +253,13 @@ export default function TabsLayout() {
 }
 
 const styles = StyleSheet.create({
-  bar: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 6, backgroundColor: "transparent" },
+  bar: { flexDirection: "row", alignItems: "flex-end", paddingHorizontal: 6, backgroundColor: "transparent", overflow: "visible" },
   tabBtn: { flex: 1, alignItems: "center", justifyContent: "center", height: BAR_H, gap: 4 },
   pill: { width: 48, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
   label: { fontSize: 12, letterSpacing: 0.1 },
   centerSlot: { width: BADGE + 28, height: BAR_H, alignItems: "center", overflow: "visible" },
   centerPress: { alignItems: "center", marginTop: -LIFT, width: BADGE + 28 },
-  glow: { position: "absolute", top: -BADGE / 2 + 6, width: BADGE * 2, height: BADGE * 2, alignItems: "center", justifyContent: "center" },
+  glow: { position: "absolute", top: -BADGE / 2 + 4, width: BADGE * 2, height: BADGE * 2, alignItems: "center", justifyContent: "center" },
   // Gölge dış katmanda: iOS, kırpma (overflow hidden) yapan katmanda gölge çizmez.
   badgeWrap: { width: BADGE, height: BADGE, borderRadius: BADGE / 2, alignItems: "center", justifyContent: "center", shadowColor: "#1D4ED8", shadowOpacity: 0.45, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 10 },
   ring: { position: "absolute", width: BADGE + 12, height: BADGE + 12, borderRadius: (BADGE + 12) / 2, borderWidth: 2 },
@@ -273,6 +273,4 @@ const styles = StyleSheet.create({
     borderWidth: 3,
   },
   mark: { width: 30, height: 26 },
-  // Etiket, yan sekmelerin etiketleriyle aynı hizada ve oyuğun altında.
-  centerLabel: { marginTop: 13 },
 });
