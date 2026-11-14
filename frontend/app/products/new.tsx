@@ -6,6 +6,7 @@ import { router } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { createProduct } from "../../src/api-urun-stok";
+import { SKU_HINT, createErrorText, skuProblem } from "../../src/product-form";
 import { getUiCapabilities } from "../../src/api-gider";
 import { markCatalogDirty, rememberCatalog } from "../../src/catalogCache";
 import { isUncertainWrite } from "../../src/api-finans";
@@ -51,7 +52,7 @@ export default function NewProductScreen() {
       name: tried && !name.trim() ? "Ürün adını girin." : name.length > 255 ? "Ad en çok 255 karakter olabilir." : undefined,
       price: tried && price === null ? "Geçerli bir fiyat girin: en çok 2 ondalık, ör. 1.234,56." : undefined,
       stock: tried && stock === null ? "Tam sayı girin, ör. 12." : undefined,
-      sku: sku.length > 64 ? "SKU en çok 64 karakter olabilir." : undefined,
+      sku: skuProblem(sku, tried) ?? undefined,
       barcode: barcode.length > 64 ? "Barkod en çok 64 karakter olabilir." : undefined,
     }),
     [tried, name, price, stock, sku, barcode]
@@ -59,7 +60,7 @@ export default function NewProductScreen() {
 
   const submit = async () => {
     setTried(true);
-    if (!token || sending.current || !name.trim() || price === null || stock === null || errors.sku || errors.barcode) return;
+    if (!token || sending.current || !name.trim() || !sku.trim() || price === null || stock === null || skuProblem(sku, true) || errors.barcode) return;
     sending.current = true;
     setBusy(true);
     try {
@@ -79,7 +80,7 @@ export default function NewProductScreen() {
         setUncertain(true);
         markCatalogDirty();
         toast("Sonuç alınamadı. Ürün oluşmuş olabilir; listeyi kontrol edin.", "error");
-      } else toast(e?.message || "Ürün oluşturulamadı.", "error");
+      } else toast(createErrorText(e), "error");
     } finally {
       sending.current = false;
       setBusy(false);
@@ -129,7 +130,7 @@ export default function NewProductScreen() {
           <SectionTitle title="Ürün bilgileri" />
           <View style={styles.form}>
             <FormField testID="np-name" label="Ürün adı" value={name} onChangeText={setName} maxLength={255} error={errors.name} />
-            <FormField testID="np-sku" label="SKU" value={sku} onChangeText={setSku} autoCapitalize="characters" autoCorrect={false} maxLength={64} error={errors.sku} hint="Boş bırakılabilir; önerilen kod otomatik verildi." />
+            <FormField testID="np-sku" label="SKU" value={sku} onChangeText={setSku} autoCapitalize="characters" autoCorrect={false} maxLength={64} error={errors.sku} hint={SKU_HINT} />
             <FormField testID="np-barcode" label="Barkod (isteğe bağlı)" value={barcode} onChangeText={setBarcode} autoCapitalize="none" autoCorrect={false} keyboardType="number-pad" maxLength={64} error={errors.barcode} />
           </View>
 
