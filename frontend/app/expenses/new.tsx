@@ -10,6 +10,7 @@ import { router } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { newIdempotencyKey } from "../../src/api";
+import { LEGACY_DUPLICATE, legacyAckValid } from "../../src/api-iceri-al";
 import {
   buildManualPayload,
   confirmManualPurchase,
@@ -215,12 +216,16 @@ export default function ManualExpenseScreen() {
   const stockOwner = caps.inventoryOwner?.owner || null;
   const built = useMemo(() => buildManualPayload(f), [f]);
   const bodyKey = built.body ? JSON.stringify(built.body) : "";
-  const debouncedKey = useDebounce(bodyKey, 500);
+  // Olası mükerrer eski kayıt kabulü: verildiği andaki belge alanlarına bağlı; alanlar değişince düşer.
+  const [ack, setAck] = useState<{ on: boolean; key: string }>({ on: false, key: "" });
+  const ackOn = legacyAckValid(ack.on, ack.key, bodyKey);
+  const requestKey = bodyKey && ackOn ? `${bodyKey}|ack` : bodyKey;
+  const debouncedKey = useDebounce(requestKey, 500);
   // DRAFT_CHANGED sonrası aynı gövdeyle önizleme yeniden istenir (gövde değişmediği için anahtar tek başına tetiklemez).
   const [refreshNonce, setRefreshNonce] = useState(0);
 
   useEffect(() => {
-    if (!token || !built.body || debouncedKey !== bodyKey) {
+    if (!token || !built.body || debouncedKey !== requestKey) {
       if (!built.body) {
         seq.current += 1;
         setPv({ status: "idle", data: null, message: "", key: "" });
@@ -228,12 +233,12 @@ export default function ManualExpenseScreen() {
       return;
     }
     const my = ++seq.current;
-    setPv((p) => ({ ...p, status: "loading", key: bodyKey }));
-    previewManualPurchase(token, built.body, draftRef.current)
+    setPv((p) => ({ ...p, status: "loading", key: requestKey }));
+    previewManualPurchase(token, ackOn ? { ...built.body, legacy_duplicate_ack: true } : built.body, draftRef.current)
       .then((data) => {
         if (my !== seq.current) return;
         if (data.draftId) draftRef.current = data.draftId;
-        setPv({ status: "ready", data, message: "", key: bodyKey });
+        setPv({ status: "ready", data, message: "", key: requestKey });
       })
       .catch((e) => {
         if (my !== seq.current) return;
@@ -241,12 +246,13 @@ export default function ManualExpenseScreen() {
           draftRef.current = null;
           keyRef.current = newIdempotencyKey("mpur");
         }
-        setPv({ status: "error", data: null, message: manualErrorText(e, "Toplam şu anda hesaplanamadı. Biraz sonra yeniden deneyin."), key: bodyKey });
+        setPv({ status: "error", data: null, message: manualErrorText(e, "Toplam şu anda hesaplanamadı. Biraz sonra yeniden deneyin."), key: requestKey });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedKey, token, refreshNonce]);
 
-  const fresh = pv.status === "ready" && pv.key === bodyKey;
+  const fresh = pv.status === "ready" && pv.key === requestKey;
+  const showLegacyAck = (fresh && pv.data?.legacyDuplicate === true) || ackOn;
   const canConfirm = fresh && pv.data?.canConfirm === true && !saving && !outcome?.final;
   const stock = fresh ? pv.data?.stock || null : null;
   const hasProductLine = f.lines.some((l) => l.kind === "product");
@@ -529,6 +535,27 @@ export default function ManualExpenseScreen() {
                   <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{x.t}</Text>
                 </View>
               ))}
+            </View>
+          ) : null}
+          {showLegacyAck ? (
+            <View testID="legacy-duplicate-ack" style={[styles.notice, { flexDirection: "column", alignItems: "stretch", gap: spacing.sm, backgroundColor: colors.warningBg }]}>
+              <View style={{ flexDirection: "row", gap: spacing.xs, alignItems: "flex-start" }}>
+                <AlertIcon size={16} color={colors.amber} />
+                <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{LEGACY_DUPLICATE.text}</Text>
+              </View>
+              <PressableScale
+                testID="legacy-duplicate-ack-input"
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: ackOn, disabled: saving }}
+                accessibilityLabel={LEGACY_DUPLICATE.ackLabel}
+                onPress={saving ? undefined : () => setAck(ackOn ? { on: false, key: "" } : { on: true, key: bodyKey })}
+                style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 4 }}
+              >
+                <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 2, alignItems: "center", justifyContent: "center", borderColor: ackOn ? colors.primary : colors.border, backgroundColor: ackOn ? colors.primary : colors.surface }}>
+                  {ackOn ? <CheckIcon size={14} color="#FFFFFF" /> : null}
+                </View>
+                <Text style={[type.callout, { color: colors.textPrimary, fontWeight: "600", flex: 1 }]}>{LEGACY_DUPLICATE.ackLabel}</Text>
+              </PressableScale>
             </View>
           ) : null}
           {pv.status === "error" ? (

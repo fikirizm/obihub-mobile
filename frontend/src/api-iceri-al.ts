@@ -37,8 +37,10 @@ export type ImportArgs = {
   supplierId: string | null;
   warehouseId: string | null;
   form: ImportForm;
+  // POSSIBLE_LEGACY_DUPLICATE uyarısının açık kabulü ("Bu farklı bir fatura"); seçim özetinin parçası, yalnız true iken gönderilir.
+  legacyAck: boolean;
 };
-export const INITIAL_ARGS: ImportArgs = { mode: "expense_only", lineChoices: [], createSupplier: false, supplierId: null, warehouseId: null, form: EMPTY_FORM };
+export const INITIAL_ARGS: ImportArgs = { mode: "expense_only", lineChoices: [], createSupplier: false, supplierId: null, warehouseId: null, form: EMPTY_FORM, legacyAck: false };
 
 // web model.js payload()
 export function importPayload(a: ImportArgs, withForm: boolean) {
@@ -49,6 +51,7 @@ export function importPayload(a: ImportArgs, withForm: boolean) {
     create_supplier: a.supplierId ? false : a.createSupplier,
     line_choices: a.lineChoices,
   };
+  if (a.legacyAck === true) body.legacy_duplicate_ack = true;
   if (withForm) {
     body.payment_state = a.form.payment_state || "payable";
     body.due_date = a.form.due_date || null;
@@ -149,7 +152,12 @@ const DOCUMENT: Record<string, string> = {
 const IMPORT_STATE: Record<string, string> = {
   DUPLICATE_DOCUMENT: "Bu fatura için daha önce oluşturulmuş bir kayıt var; ikinci kez içeri alınamaz.",
   OPEN_IMPORT_EXISTS: "Bu fatura için daha önce açılmış bir içeri alma kaydı var; durumu netleşmeden yeniden alınamaz.",
-  LEGACY_DEBT_EXISTS: "Bu fatura için ObiHub'da daha önce açılmış bir borç kaydı var; mevcut gider faturası kaydını kullanın.",
+  LEGACY_DEBT_EXISTS: "Bu fatura için ObiHub'da daha önce açılmış bir borç kaydı var. İkinci kez borç oluşturulmaz; mevcut gider faturası kaydını kullanın.",
+  // 14 Kas 2026 sözleşmesi: ödenmiş eski Paraşüt aktarımı satırı (web reasonTexts.js LEGACY_RECORD).
+  LEGACY_RECORD_EXISTS: "Bu fatura daha önce eski aktarımla ObiHub'a kaydedilmiş ve ödenmiş. İkinci kez borç ve gider oluşturulmaz; mevcut gider faturası kaydını kullanın.",
+  // Muhasebe kapısı (web reasonTexts.js ACCOUNTING_GATE): sistem hazırlığı değil, firmanın durumu.
+  ACCOUNTING_NOT_ACTIVE: "Muhasebe ayarlarınız bu firmada henüz etkin değil; fatura önizlenebilir ama içeri alınamaz. Destek ekibimizle iletişime geçin.",
+  EXPENSE_MODULE_DISABLED: "ObiHub ön muhasebesi bu firmada kapalı; fatura gider ve borç olarak içeri alınamaz. Ayarlar'dan açabilirsiniz.",
   DUPLICATE_MANUAL_DOCUMENT: "Bu fatura elle girilmiş; önce o kaydı ters kaydedin ya da bu faturayı atlayın.",
   PRIOR_IMPORT_FAILED: "Bu fatura için önceki içeri alma denemesi tamamlanamadı; inceleme bitene kadar yeniden alınamaz.",
 };
@@ -163,7 +171,25 @@ const SYSTEM_HINT: Record<string, string> = {
   WAREHOUSE_INDEX_NOT_READY: "Depo listesi şu an kullanılamıyor.",
 };
 
-export type Issue = { kind: "fix" | "document" | "state" | "notice" | "warning" | "system"; text: string; line: number | null; step?: number };
+export type Issue = { kind: "fix" | "document" | "state" | "notice" | "warning" | "ack" | "system"; text: string; line: number | null; step?: number };
+
+// Olası mükerrer (POSSIBLE_LEGACY_DUPLICATE, review_items): onayı engeller, açık kabulle kalkar (web reasonTexts.js LEGACY_DUPLICATE).
+export const LEGACY_DUPLICATE = {
+  key: "POSSIBLE_LEGACY_DUPLICATE",
+  text: "Aynı tedarikçiden aynı gün aynı tutarda eski aktarımla kaydedilmiş, numarası farklı bir fatura var. Farklı bir faturaysa onaylayıp devam edin.",
+  ackLabel: "Bu farklı bir fatura; içeri almaya devam et",
+};
+export const hasLegacyDuplicate = (items: unknown) =>
+  Array.isArray(items) && items.some((i: any) => String(i?.key || "") === LEGACY_DUPLICATE.key);
+// Elle alış: kabul, verildiği andaki belge alanlarıyla geçerlidir; alanlar değişince düşer.
+export const legacyAckValid = (ack: boolean, ackKey: string, currentKey: string) => ack === true && ackKey === currentKey;
+
+// Onay (confirm) 409 ret kodları: sunucu Türkçe açıklama göndermediyse ya da açıklama genelse (web reasonTexts.js CONFIRM_REASON_TEXT).
+const CONFIRM_REASON_TEXT: Record<string, string> = {
+  EXPENSE_MODULE_DISABLED: "ObiHub ön muhasebesi bu firmada kapalı; fatura içeri alınmadı. Ayarlar'dan açabilirsiniz.",
+  APPLY_OWNERSHIP_UNKNOWN: "Muhasebe ayarlarınız bu işlem için henüz hazır değil. Destek ekibimizle iletişime geçin.",
+  ACCOUNTING_NOT_ACTIVE: "Muhasebe ayarlarınız bu firmada henüz etkin değil; fatura içeri alınmadı. Destek ekibimizle iletişime geçin.",
+};
 
 function classifyIssue(key: string, detail: unknown): Omit<Issue, "line"> {
   if (key === "TAX_TYPE_UNSUPPORTED" && /^[0-9]{4}$/.test(String(detail || ""))) return { kind: "document", text: `Bu faturada desteklenmeyen vergi türü var: vergi kodu ${detail}.` };
@@ -171,6 +197,7 @@ function classifyIssue(key: string, detail: unknown): Omit<Issue, "line"> {
     const d = typeof detail === "string" ? detail.trim() : "";
     return { kind: "warning", text: /[ığüşöçİĞÜŞÖÇ]|[.!?]$/.test(d) && d.length < 240 ? d : "Aynı numaralı elle girilmiş bir fatura olabilir; kontrol edin." };
   }
+  if (key === LEGACY_DUPLICATE.key) return { kind: "ack", text: LEGACY_DUPLICATE.text };
   if (FIX[key]) return { kind: "fix", step: FIX[key][0], text: FIX[key][1] };
   if (IMPORT_STATE[key]) return { kind: "state", text: IMPORT_STATE[key] };
   if (DOCUMENT[key]) return { kind: "document", text: DOCUMENT[key] };
@@ -215,7 +242,12 @@ export function confirmOutcome(res: any): ImportOutcome {
 // Ağ hatası / 5xx: istek sunucuya ulaşmış olabilir → "başarısız" denmez, durum sorulur.
 export function confirmErrorOutcome(err: any): ImportOutcome {
   const status = Number(err?.status || 0);
-  if (status === 409 || status === 422) return { status: "REJECTED", detail: turkish(err?.message) ? String(err.message).trim() : null, alreadyImported: false };
+  if (status === 409 || status === 422) {
+    // Sunucunun Türkçe açıklaması önceliklidir (bilinmeyen kodda da); yoksa bilinen ret kodunun sabit metni; ham kod asla.
+    let detail: string | null = turkish(err?.message) ? String(err.message).trim() : null;
+    if (!detail) for (const c of [err?.reason, err?.code]) if (typeof c === "string" && CONFIRM_REASON_TEXT[c]) { detail = CONFIRM_REASON_TEXT[c]; break; }
+    return { status: "REJECTED", detail, alreadyImported: false };
+  }
   if (status === 429) return { status: "REJECTED", detail: "Çok sık deneme yapıldı; biraz bekleyip yeniden deneyin.", alreadyImported: false };
   if (status === 404) return { status: "REJECTED", detail: "İçeri alma bu hesapta şu an kullanılamıyor.", alreadyImported: false };
   return { status: "UNKNOWN", detail: null, alreadyImported: false };

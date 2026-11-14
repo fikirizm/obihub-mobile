@@ -15,6 +15,7 @@ import {
   confirmQuickImport,
   EMPTY_CHOICE,
   getQuickImportCapability,
+  LEGACY_DUPLICATE,
   getQuickImportCategories,
   getQuickImportStatus,
   INITIAL_ARGS,
@@ -257,6 +258,8 @@ export default function IncomingImportScreen() {
   const allFixes = issues.filter((i) => i.kind === "fix");
   const fixes = allFixes.filter((f, i) => f.line == null || allFixes.findIndex((g) => g.line === f.line) === i);
   const blocking = issues.filter((i) => i.kind === "document" || i.kind === "state" || i.kind === "system");
+  // Olası mükerrer eski kayıt: açık kabul kutusu (kabul edilince önizleme legacy_duplicate_ack ile yenilenir, madde kalkar).
+  const showLegacyAck = issues.some((i) => i.kind === "ack") || args.legacyAck;
   const ready = !stale && !loading && decision?.status === "FAST_READY" && decision?.business_ready === true && !issues.some((i) => i.kind !== "notice");
   const canSave = confirmOn && decision?.confirmation_available === true && decision?.can_confirm === true && ready && !confirming && mayWrite;
   // Kullanıcı tedarikçiyi seçtikten sonra durum "matched" olur; seçim görünür ve değiştirilebilir kalsın.
@@ -673,10 +676,32 @@ export default function IncomingImportScreen() {
           </SafeAnimatedView>
         ) : null}
 
-        {issues.filter((x) => x.kind !== "fix" && !(blocking[0] && x === blocking[0])).length ? (
+        {showLegacyAck ? (
+          <View testID="legacy-duplicate-ack" style={[styles.notice, styles.ackBox, { backgroundColor: colors.warningBg }]}>
+            <View style={{ flexDirection: "row", gap: spacing.xs, alignItems: "flex-start" }}>
+              <AlertIcon size={16} color={colors.amber} />
+              <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{LEGACY_DUPLICATE.text}</Text>
+            </View>
+            <PressableScale
+              testID="legacy-duplicate-ack-input"
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: args.legacyAck, disabled: loading || confirming }}
+              accessibilityLabel={LEGACY_DUPLICATE.ackLabel}
+              onPress={loading || confirming ? undefined : () => load({ ...args, legacyAck: !args.legacyAck })}
+              style={styles.ackRow}
+            >
+              <View style={[styles.ackBoxMark, { borderColor: args.legacyAck ? colors.primary : colors.border, backgroundColor: args.legacyAck ? colors.primary : colors.surface }]}>
+                {args.legacyAck ? <CheckIcon size={14} color="#FFFFFF" /> : null}
+              </View>
+              <Text style={[type.callout, { color: colors.textPrimary, fontWeight: "600", flex: 1 }]}>{LEGACY_DUPLICATE.ackLabel}</Text>
+            </PressableScale>
+          </View>
+        ) : null}
+
+        {issues.filter((x) => x.kind !== "fix" && x.kind !== "ack" && !(blocking[0] && x === blocking[0])).length ? (
           <View style={{ marginTop: spacing.sm }}>
             {issues
-              .filter((x) => x.kind !== "fix" && !(blocking[0] && x === blocking[0]))
+              .filter((x) => x.kind !== "fix" && x.kind !== "ack" && !(blocking[0] && x === blocking[0]))
               .map((x, i) => (
                 <View key={i} style={[styles.notice, { backgroundColor: x.kind === "notice" ? colors.infoBg : x.kind === "warning" ? colors.warningBg : colors.errorBg }]}>
                   <AlertIcon size={16} color={x.kind === "notice" ? colors.info : x.kind === "warning" ? colors.amber : colors.error} />
@@ -701,6 +726,9 @@ export default function IncomingImportScreen() {
 }
 
 const styles = StyleSheet.create({
+  ackBox: { flexDirection: "column", alignItems: "stretch", gap: spacing.sm },
+  ackRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 4 },
+  ackBoxMark: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, alignItems: "center", justifyContent: "center" },
   wrap: { flex: 1 },
   pad: { paddingHorizontal: spacing.lg },
   block: { marginHorizontal: spacing.lg },

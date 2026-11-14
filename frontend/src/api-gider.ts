@@ -586,6 +586,8 @@ export type ManualPreview = {
   totals: { taxable: string; vat: string; withholding: string; other_taxes: string; payable: string } | null;
   blockers: string[];
   reviews: string[];
+  // POSSIBLE_LEGACY_DUPLICATE (review_items): onayı engeller; açık kabul (legacy_duplicate_ack) önizleme gövdesine girer.
+  legacyDuplicate: boolean;
   stock: { entry: boolean; warehouseId: string; warehouses: { id: string; name: string }[] } | null;
 };
 
@@ -607,7 +609,8 @@ export async function previewManualPurchase(token: string, body: Record<string, 
       ? { taxable: String(t.taxable ?? "0"), vat: String(t.vat ?? "0"), withholding: String(t.withholding ?? "0"), other_taxes: String(t.other_taxes ?? "0"), payable: String(t.payable ?? "0") }
       : null,
     blockers: (Array.isArray(d?.blocker_items) ? d.blocker_items : []).map(itemText),
-    reviews: (Array.isArray(d?.review_items) ? d.review_items : []).map(itemText),
+    reviews: (Array.isArray(d?.review_items) ? d.review_items : []).filter((it: any) => it?.key !== "POSSIBLE_LEGACY_DUPLICATE").map(itemText),
+    legacyDuplicate: (Array.isArray(d?.review_items) ? d.review_items : []).some((it: any) => it?.key === "POSSIBLE_LEGACY_DUPLICATE"),
     stock: st
       ? {
           entry: st.entry === true,

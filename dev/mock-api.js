@@ -215,7 +215,7 @@ http
       }
     }
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -1164,11 +1164,13 @@ http
         for (const l of b.lines || []) { const net = Number(l.quantity) * Number(l.unit_price) - Number(l.discount || 0); taxable += net; vat += net * Number(l.vat_rate) / 100; }
         const hasProduct = (b.lines || []).some((l) => l.kind === "product");
         const dup = String(b.document_number || "").toUpperCase() === "DUP-1";
+        // DUP-2: olası mükerrer eski kayıt; legacy_duplicate_ack: true ile kalkar.
+        const legacyDup = String(b.document_number || "").toUpperCase() === "DUP-2" && b.legacy_duplicate_ack !== true;
         send(res, 200, {
-          draft_id: b.draft_id || "d1", can_confirm: !dup, decision_digest: "dg-" + Math.round(taxable * 100),
+          draft_id: b.draft_id || "d1", can_confirm: !dup && !legacyDup, decision_digest: "dg-" + Math.round(taxable * 100),
           totals: { taxable: taxable.toFixed(2), vat: vat.toFixed(2), withholding: "0.00", other_taxes: "0.00", payable: (taxable + vat).toFixed(2) },
           blocker_items: dup ? [{ key: "DUPLICATE_MANUAL_DOCUMENT", detail: "Bu belge numarasıyla kayıtlı bir gider faturası var." }] : [],
-          review_items: [],
+          review_items: legacyDup ? [{ key: "POSSIBLE_LEGACY_DUPLICATE", detail: "Aynı tedarikçiden aynı gün aynı tutarda eski aktarımla kaydedilmiş, numarası farklı bir fatura var." }] : [],
           ...(hasProduct ? { stock: { owner: "obihub", entry: true, warehouse_id: "w1", warehouses: [{ id: "w1", name: "Ana depo" }, { id: "w2", name: "Mağaza" }] } } : {}),
         });
       });
@@ -1229,12 +1231,17 @@ http
         const whNeeded = stock && lines[0].stock.eligible;
         const whIssues = whNeeded && !b.warehouse_id ? [{ key: "WAREHOUSE_REQUIRED", line_index: 0 }] : [];
         const supIssues = supplierChosen ? [] : ["SUPPLIER_NOT_MATCHED"];
-        const anyIssue = supIssues.length || lines.some((l) => l.issues.length) || whIssues.length;
+        // 14 Kas 2026 sözleşmesi (/__mode?iaGate=…): dup → POSSIBLE_LEGACY_DUPLICATE (kabulle kalkar); legacy → LEGACY_RECORD_EXISTS;
+        // acct → ACCOUNTING_NOT_ACTIVE; disabled → EXPENSE_MODULE_DISABLED; confirm409 → onayda 409 EXPENSE_MODULE_DISABLED.
+        const gate = state.iaGate || "";
+        const gateBlock = { legacy: "LEGACY_RECORD_EXISTS", acct: "ACCOUNTING_NOT_ACTIVE", disabled: "EXPENSE_MODULE_DISABLED" }[gate];
+        if (gate === "dup" && b.legacy_duplicate_ack !== true) whIssues.push({ key: "POSSIBLE_LEGACY_DUPLICATE", line_index: null, detail: "Aynı tedarikçiden aynı gün aynı tutarda eski aktarımla kaydedilmiş, numarası farklı bir fatura var. Farklı bir faturaysa onaylayıp devam edin." });
+        const anyIssue = supIssues.length || lines.some((l) => l.issues.length) || whIssues.length || gateBlock;
         const decision = {
           status: anyIssue ? "REVIEW_REQUIRED" : "FAST_READY", business_ready: true, confirmation_available: true, can_confirm: !anyIssue,
           preview_fingerprint: "fp1", choices_digest: "cd-" + JSON.stringify(lc).length, decision_digest: "dd1",
           document_summary: { document_number: "GIB2026000077", issue_date: "2026-11-10", currency: "TRY", taxable: "1200.00", vat_total: "240.00", payable: "1440.00" },
-          blocker_items: [], review_items: whIssues,
+          blocker_items: gateBlock ? [{ key: gateBlock, line_index: null }] : [], review_items: whIssues,
           document_view: {
             version: "dv1",
             document: { number: "GIB2026000077", issue_date: "2026-11-10", currency: "TRY", legal_payable: "1440.00", computed_payable: "1440.00", document_issues: [] },
@@ -1251,6 +1258,8 @@ http
         if (qm[2] === "preview") return send(res, 200, decision);
         console.log("WRITE", path, raw);
         if (anyIssue) return send(res, 409, { code: "CHOICES_CHANGED", detail: "Seçimler değişti; önizlemeyi yenileyin." });
+        if (gate === "dup" && b.legacy_duplicate_ack !== true) return send(res, 409, { status: "REJECTED", reason: "QUICK_CONFIRMATION_STALE", detail: "Önizleme değişti; yeniden önizleyin." });
+        if (gate === "confirm409") return send(res, 409, { status: "REJECTED", reason: "EXPENSE_MODULE_DISABLED", detail: "Bir hata oluştu" });
         importState[qm[1]] = "applied";
         return send(res, 200, { status: "APPLIED", result: { invoice_id: "ex1" } });
       });
