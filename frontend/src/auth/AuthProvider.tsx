@@ -50,11 +50,8 @@ const USER_KEY = "obihub_user";
 const REFRESH_KEY = "obihub_refresh_token";
 const SEEN_ORDER_IDS_KEY = "obihub_seen_order_ids";
 const ORDERS_CHANNEL_ID = "orders";
-// Özgün "yeni sipariş" sesi (assets/obihub/yeni-siparis.wav, 1,6 sn). Android kanal sesi oluşturulduktan sonra değişmez:
-// eski kanal (cha_ching) bir kez silinip yeni sesle kurulur.
-const ORDER_SOUND = "yeni-siparis.wav";
-const ORDERS_CHANNEL_VERSION_KEY = "obihub_orders_channel_v";
-const ORDERS_CHANNEL_VERSION = "2";
+// Kullanıcı kararı (15 Kas 2026): mevcut sipariş sesi (cha_ching.wav) kalır; ön planda, arka planda ve kilit ekranında bu çalar.
+const ORDER_SOUND = "cha_ching.wav";
 const PUSH_PROMPT_KEY = "obihub_push_prompt_dismissed_at";
 const BG_TASK_NAME = "obihub-order-poll";
 const PARASUT_CONNECTED_KEY = "obihub_parasut_connected";
@@ -545,11 +542,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         await hydrateNotifications();
         if (Platform.OS === "android") {
-          const chv = await Storage.getItemAsync(ORDERS_CHANNEL_VERSION_KEY).catch(() => null);
-          if (chv !== ORDERS_CHANNEL_VERSION) {
-            await Notifications.deleteNotificationChannelAsync(ORDERS_CHANNEL_ID).catch(() => {});
-            await Storage.setItemAsync(ORDERS_CHANNEL_VERSION_KEY, ORDERS_CHANNEL_VERSION).catch(() => {});
-          }
           await Notifications.setNotificationChannelAsync(ORDERS_CHANNEL_ID, {
             name: "Yeni Siparişler",
             description: "Yeni sipariş geldiğinde bildirim",

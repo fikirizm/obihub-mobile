@@ -56,8 +56,7 @@
         "expo-notifications",
         {
           "sounds": [
-            "./assets/obihub/cha_ching.wav",
-            "./assets/obihub/yeni-siparis.wav"
+            "./assets/obihub/cha_ching.wav"
           ],
           "icon": "./assets/images/icon.png",
           "color": "#22C55E"
