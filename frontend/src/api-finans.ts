@@ -180,81 +180,37 @@ export async function searchInvoiceCustomers(token: string, search: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Yeni satış faturası (taslak) — POST /local-invoices (backend/routers/local_invoices.py:379)
-// Web gövdesi: frontend/src/pages/ObiHubInvoicesPage.js:480-493 (buildPayload), kalem: :78-86 (newLine)
-// Sunucu faturayı her zaman "taslak" durumunda açar ve tutarları kalemlerden kendisi hesaplar.
+// Satış faturası — G2 sözleşmesi (docs/pm/tasarim/g2-satis-faturasi-sozlesmesi.md). Gövde src/document-form.ts'te kurulur
+// (web lib/documentForm.js ile aynı). POST /local-invoices (yeni, create_key ile idempotent) ve PUT /local-invoices/{id} (tüm form).
 // ---------------------------------------------------------------------------
-export type InvoiceLineInput = {
-  product_id: string | null;
-  product_name: string;
-  quantity: number;
-  unit_price: number; // KDV hariç
-  vat_rate: number;
+export type DocumentMeta = {
+  stock: { owner: string | null; default_mode: "with_document" | "none"; warehouses: { id: string; name: string }[] };
+  withholding: { rate: number; label: string }[];
 };
 
-export type InvoiceCreateInput = {
-  customer_id: string | null;
-  customer_name: string;
-  customer_tax_no?: string;
-  customer_tax_office?: string;
-  customer_address?: string;
-  issue_date: string;
-  due_date: string;
-  notes?: string;
-  lines: InvoiceLineInput[];
-};
-
-// Kuruşa yarım-yukarı yuvarlama (sunucudaki ROUND_HALF_UP ile aynı sonuç; kayan nokta payı için küçük düzeltme).
-export function round2(n: number) {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
+export async function getDocumentMeta(token: string): Promise<DocumentMeta | null> {
+  try {
+    const m = await request<any>("/documents/meta?type=sales", { method: "GET" }, token);
+    const st = m && typeof m.stock === "object" && m.stock ? m.stock : {};
+    const wh = Array.isArray(m?.withholding) ? m.withholding.filter((w: any) => Number.isFinite(Number(w?.rate))).map((w: any) => ({ rate: Number(w.rate), label: String(w.label || `${Number(w.rate) / 10}/10`) })) : [];
+    return {
+      stock: { owner: st.owner || null, default_mode: st.default_mode === "none" ? "none" : "with_document", warehouses: Array.isArray(st.warehouses) ? st.warehouses : [] },
+      withholding: wh,
+    };
+  } catch {
+    return null;
+  }
 }
 
-// Önizleme toplamları sunucunun kuralıyla hesaplanır (backend/routers/local_invoices.py:_compute_invoice_amounts):
-// satır tutarı = miktar × birim fiyat (kuruşa yuvarlanır), KDV = satır KDV'lerinin toplamı (kuruşa yuvarlanır).
-export function invoiceTotals(lines: InvoiceLineInput[]) {
-  const lineTotals = lines.map((l) => round2(Number(l.quantity || 0) * Number(l.unit_price || 0)));
-  const subtotal = round2(lineTotals.reduce((s, v) => s + v, 0));
-  const vat_amount = round2(lines.reduce((s, l, i) => s + (lineTotals[i] * Number(l.vat_rate || 0)) / 100, 0));
-  return { lineTotals, subtotal, vat_amount, total: round2(subtotal + vat_amount) };
+// POST /documents/preview (yazmaz): sunucunun onayladığı toplamlar, satır tutarları, stok uyarıları.
+export async function previewDocument(token: string, body: unknown) {
+  return request<any>("/documents/preview", { method: "POST", body: JSON.stringify(body) }, token);
 }
 
-function invoiceBody(input: InvoiceCreateInput) {
-  const totals = invoiceTotals(input.lines);
-  const body = {
-    customer_id: input.customer_id,
-    customer_name: input.customer_name.trim(),
-    customer_tax_no: input.customer_tax_no || "",
-    customer_tax_office: input.customer_tax_office || "",
-    customer_address: input.customer_address || "",
-    issue_date: input.issue_date,
-    due_date: input.due_date,
-    currency: "TRY",
-    notes: (input.notes || "").trim(),
-    invoice_type: "satis",
-    items: input.lines.map((l, i) => ({
-      product_id: l.product_id,
-      product_name: l.product_name.trim(),
-      description: "",
-      quantity: l.quantity,
-      unit_price: l.unit_price,
-      vat_rate: l.vat_rate,
-      discount_percent: 0,
-      line_total: totals.lineTotals[i],
-    })),
-    subtotal: totals.subtotal,
-    vat_amount: totals.vat_amount,
-    total: totals.total,
-  };
-  return body;
-}
-
-export async function createLocalInvoice(token: string, input: InvoiceCreateInput) {
-  return request<LocalInvoice>("/local-invoices", { method: "POST", body: JSON.stringify(invoiceBody(input)) }, token);
-}
-
-// C4 — web SalesInvoiceFormOS: düzenleme PUT /local-invoices/{id} (aynı gövde). Silme DELETE.
-export async function updateLocalInvoice(token: string, id: string, input: InvoiceCreateInput) {
-  return request<LocalInvoice>(`/local-invoices/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(invoiceBody(input)) }, token);
+export async function saveSalesDocument(token: string, body: unknown, id?: string) {
+  return id
+    ? request<LocalInvoice>(`/local-invoices/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }, token)
+    : request<LocalInvoice>("/local-invoices", { method: "POST", body: JSON.stringify(body) }, token);
 }
 
 export async function deleteLocalInvoice(token: string, id: string) {

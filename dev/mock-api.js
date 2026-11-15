@@ -1041,9 +1041,55 @@ http
     }
     if (path === "/local-invoices/summary") return send(res, 200, { total_remaining: localInvoices.filter((i) => i.currency === "TRY" && i.status !== "taslak").reduce((n, i) => n + i.remaining_amount, 0), overdue_amount: 6200, overdue_count: 1, scalar_currency: "TRY", by_currency: { USD: { total_remaining: localInvoices.filter((i) => i.currency === "USD").reduce((n, i) => n + i.remaining_amount, 0), overdue_amount: 0 } } });
     // Yeni satış faturası: her zaman taslak açılır, tutarlar kalemlerden hesaplanır (backend/routers/local_invoices.py create_invoice)
+    // G2: belge meta ve önizleme (sahte hesap; gerçek kural backend/documents/totals.py). P1 gövdesi create_key ile idempotent.
+    if (path === "/documents/meta")
+      return send(res, 200, { vat_rates: [0, 1, 10, 20], units: [{ code: "ADET", label: "Adet" }], withholding: [20, 30, 40, 50, 70, 90, 100].map((rate) => ({ code: null, label: `${rate / 10}/10`, rate })),
+        tax_codes: [{ code: "0071", label: "ÖTV", types: ["rate", "amount"] }, { code: "4080", label: "ÖİV", types: ["rate"] }, { code: "0059", label: "Konaklama vergisi", types: ["rate"] }],
+        doc_taxes: { stopaj_rates: [20, 17, 15, 10, 5, 3], accommodation_rates: [0, 1] }, stock: { owner: "obihub", default_mode: "with_document", warehouses: [{ id: "w1", name: "Ana depo" }] } });
+    if (path === "/documents/preview" && req.method === "POST")
+      return readBody((b) => {
+        const f2 = (n) => (Math.round((n + Number.EPSILON) * 100) / 100).toFixed(2);
+        const L = (b.lines || []).map((l) => {
+          const gross = Number(l.quantity) * Number(l.unit_price);
+          const d = l.discount ? (l.discount.type === "percentage" ? (gross * Number(l.discount.value)) / 100 : Number(l.discount.value)) : 0;
+          return { l, gross, d, net: gross - d };
+        });
+        const net0 = L.reduce((n, x) => n + x.net, 0);
+        const dd = b.doc_discount ? (b.doc_discount.type === "percentage" ? (net0 * Number(b.doc_discount.value)) / 100 : Number(b.doc_discount.value)) : 0;
+        let vat = 0, ot = 0, wh = 0;
+        const lines = L.map((x) => {
+          const share = net0 ? (dd * x.net) / net0 : 0;
+          const net = x.net - share;
+          const taxes = (x.l.other_taxes || []).reduce((n, t) => n + (t.type === "rate" ? (net * Number(t.value)) / 100 : Number(t.value)), 0);
+          const otv = (x.l.other_taxes || []).filter((t) => t.code === "0071").reduce((n, t) => n + (t.type === "rate" ? (net * Number(t.value)) / 100 : Number(t.value)), 0);
+          const v = ((net + otv) * Number(x.l.vat_rate)) / 100;
+          const w = b.withholding_all && !x.l.withholding && v > 0 ? b.withholding_all : x.l.withholding;
+          const lw = w ? (v * Number(w.rate)) / 100 : 0;
+          vat += v; ot += taxes; wh += lw;
+          return { line_key: x.l.line_key, line_net: f2(net), line_vat: f2(v), line_total: f2(net + taxes + v), line_discount: f2(x.d), doc_discount_share: f2(share), line_withholding: f2(lw), line_other_taxes: f2(taxes) };
+        });
+        const gross = L.reduce((n, x) => n + x.gross, 0), ld = L.reduce((n, x) => n + x.d, 0), sub = net0 - dd;
+        const totals = { gross: f2(gross), line_discount: f2(ld), doc_discount: f2(dd), discount: f2(ld + dd), subtotal: f2(sub), other_taxes: f2(ot), vat: f2(vat), withholding: f2(wh) };
+        let total = sub + ot + vat;
+        if (b.accommodation_tax_rate != null) { const a = (sub * Number(b.accommodation_tax_rate)) / 100; totals.accommodation_tax = f2(a); total += a; }
+        let st = 0;
+        if (b.stopaj_rate) { st = (sub * Number(b.stopaj_rate)) / 100; totals.stopaj = f2(st); }
+        totals.total = f2(total); totals.payable = f2(total - wh - st);
+        send(res, 200, { lines, totals, profit: null, stock_warnings: [], warnings: [] });
+      });
     if (path === "/local-invoices" && req.method === "POST")
       return readBody((b) => {
         if (!Array.isArray(b.items) || b.items.length === 0) return send(res, 400, { detail: "Faturada en az bir satır olmalı" });
+        console.log("WRITE /local-invoices", JSON.stringify(b).slice(0, 600));
+        if (b.create_key) {
+          const prev = localInvoices.find((i) => i.create_key === b.create_key);
+          if (prev) return send(res, 200, prev);
+          const inv = { id: "li" + Date.now(), doc_schema: 1, create_key: b.create_key, invoice_number: "", invoice_type: "satis", status: "taslak", display_status: "taslak", money_state: "not_issued",
+            customer_id: b.customer_id, customer_name: b.customer_name, document_name: b.document_name || null, issue_date: b.issue_date, due_date: b.due_date, currency: "TRY", subtotal: 0, discount_amount: 0, vat_amount: 0, total: 0, paid_amount: 0, remaining_amount: 0,
+            stopaj_rate: b.stopaj_rate || null, accommodation_tax_rate: b.accommodation_tax_rate ?? null, stock_mode: b.stock_mode, items: b.items, payments: [], voided_payments: [] };
+          localInvoices.unshift(inv);
+          return send(res, 200, inv);
+        }
         const r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
         const items = b.items.map((it) => ({ ...it, line_total: r2(Number(it.quantity) * Number(it.unit_price) * (1 - Number(it.discount_percent || 0) / 100)) }));
         const subtotal = r2(items.reduce((n, it) => n + it.line_total, 0));
