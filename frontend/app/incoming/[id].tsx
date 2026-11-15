@@ -9,7 +9,7 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { getIncomingInvoicePdf } from "../../src/api";
 import { getUiCapabilities, respondInbox } from "../../src/api-gider";
-import { getCashAccounts } from "../../src/api";
+import { getPickableAccounts } from "../../src/api";
 import { respondDoneText } from "../../src/inbox-ui";
 import { RespondSheet } from "../../src/components/RespondSheet";
 import {
@@ -360,7 +360,7 @@ export default function IncomingImportScreen() {
   const [payAccounts, setPayAccounts] = useState<{ id: string; name: string }[] | null>(null);
   useEffect(() => {
     if (!token || args.form.payment_state !== "paid" || payAccounts) return;
-    getCashAccounts(token)
+    getPickableAccounts(token)
       .then((rows: any[]) =>
         setPayAccounts(rows.filter((a) => a?.id && String(a.currency || "TRY").toUpperCase() === "TRY" && a.is_active !== false).map((a) => ({ id: String(a.id), name: String(a.name || "Hesap") })))
       )

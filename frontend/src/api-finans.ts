@@ -2,7 +2,8 @@
 // İstek gövdeleri web panelindeki formlarla aynıdır (kaynak dosya ve satır her işlevin üstünde yazılıdır).
 import { API_BASE_URL, request } from "./api";
 import { bytesToBase64 } from "./inbox-ui";
-import type { CashAccount, LocalInvoice, Party } from "./types";
+import type { CashAccount, CashEntry, LocalInvoice, Party } from "./types";
+import { accountsPath, movementsPath, type AccountStatus, type MovementFilter } from "./kasa-ui";
 import { isUncertainWrite, moneyRetryable, sendKeyedMoney, type KeyedMoneyOutcome } from "./money-retry";
 import { collectionPath, orderInvoiceLabel, type Collection } from "./collection-actions";
 
@@ -456,4 +457,50 @@ export async function getInvoicePdf(token: string, id: string): Promise<{ base64
     throw new Error("Fatura PDF'i alınamadı.");
   }
   return { base64: bytesToBase64(new Uint8Array(await res.arrayBuffer())) };
+}
+
+// ---------------------------------------------------------------------------
+// D-15 Kasa listesi ve hesap yönetimi (docs/pm/tasarim/D-15.md)
+// ---------------------------------------------------------------------------
+export type AccountsList = {
+  items: CashAccount[];
+  groups?: { key?: string; label?: string; count?: number; account_ids?: string[] }[];
+  counts?: { active?: number; archived?: number };
+  totals_by_currency?: Record<string, number>;
+  archived_totals_by_currency?: Record<string, number>;
+};
+
+export async function getAccountsList(token: string, status: AccountStatus = "active"): Promise<AccountsList> {
+  const d = await request<any>(accountsPath(status), { method: "GET" }, token);
+  return { ...(d && typeof d === "object" ? d : {}), items: Array.isArray(d?.items) ? d.items : [] };
+}
+
+export async function archiveAccount(token: string, id: string, confirmNonzeroBalance = false) {
+  return request<CashAccount>(`/finance/accounts/${encodeURIComponent(id)}/archive`, { method: "POST", body: JSON.stringify({ confirm_nonzero_balance: confirmNonzeroBalance }) }, token);
+}
+export async function unarchiveAccount(token: string, id: string) {
+  return request<CashAccount>(`/finance/accounts/${encodeURIComponent(id)}/unarchive`, { method: "POST" }, token);
+}
+export async function deleteAccount(token: string, id: string) {
+  return request<{ status: string; id: string }>(`/finance/accounts/${encodeURIComponent(id)}`, { method: "DELETE" }, token);
+}
+
+export type MovementsPage = {
+  account?: CashAccount;
+  items: CashEntry[];
+  undone_items?: CashEntry[];
+  next_cursor?: string | null;
+  has_more?: boolean;
+  total?: number;
+  running_balance_available?: boolean;
+  totals?: { currency?: string; in?: number; out?: number; net?: number; count?: number; before_opening?: { in?: number; out?: number; count?: number } };
+};
+
+export async function getAccountMovements(token: string, accountId: string, f: MovementFilter = {}): Promise<MovementsPage> {
+  const d = await request<any>(movementsPath(accountId, f), { method: "GET" }, token);
+  return {
+    ...(d && typeof d === "object" ? d : {}),
+    items: Array.isArray(d?.items) ? d.items : [],
+    undone_items: Array.isArray(d?.undone_items) ? d.undone_items : [],
+  };
 }

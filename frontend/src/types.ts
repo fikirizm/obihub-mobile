@@ -332,6 +332,13 @@ export type CashAccount = {
   active?: boolean;
   archived?: boolean;
   is_deleted?: boolean;
+  // D-15: grup (parasut | obihub), aynalı hesap salt okunur, sunucunun düğme kararı, açılış tarihi.
+  group?: string;
+  read_only?: boolean;
+  opening_balance?: number;
+  opening_balance_date?: string | null;
+  actions?: { add_movement?: boolean; transfer?: boolean; edit?: boolean; archive?: boolean; unarchive?: boolean; delete?: boolean } | null;
+  mirror?: { provider?: string; synced_at?: string } | null;
 };
 
 export type CashEntry = {
@@ -342,8 +349,15 @@ export type CashEntry = {
   category?: string;
   description?: string;
   counterparty_name?: string;
-  running_balance?: number;
+  running_balance?: number | null;
   related_account_name?: string;
+  // D-15 hareket listesi
+  direction?: "in" | "out" | string;
+  before_opening?: boolean;
+  category_name?: string;
+  source?: { type?: string; label?: string; source_id?: string | null } | null;
+  source_type?: string;
+  created_at?: string;
 };
 
 export type Party = {

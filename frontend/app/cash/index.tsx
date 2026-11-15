@@ -4,7 +4,10 @@ import { router, useFocusEffect } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { getCashAccounts } from "../../src/api";
+import { getAccountsList, type AccountsList } from "../../src/api-finans";
+import { accountSections, archivedNote, currencyTotals, tabCounts, type AccountStatus } from "../../src/kasa-ui";
+import { mirrorBadge } from "../../src/mirror";
+import { Chip, ChipRow } from "../../src/ui/Chip";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatMoney } from "../../src/utils";
@@ -24,11 +27,6 @@ const ACCOUNT_TYPES: Record<string, string> = {
   credit_card: "Kredi kartı",
   marketplace: "Pazaryeri",
   other: "Diğer",
-};
-
-const isTry = (a: CashAccount) => {
-  const cur = String(a.currency || "TRY").toUpperCase();
-  return cur === "TRY" || cur === "TRL";
 };
 
 // Hesap türüne göre simge: nakit ve banka yeşil, kart ve diğerleri mavi tonda.
@@ -78,7 +76,9 @@ export default function CashScreen() {
   const { token, user } = useAuth();
   const { colors } = useTheme();
   const mayWrite = canManage(user, "billing");
-  const [accounts, setAccounts] = useState<CashAccount[]>([]);
+  const [status, setStatus] = useState<AccountStatus>("active");
+  const [list, setList] = useState<AccountsList>({ items: [] });
+  const accounts: CashAccount[] = list.items;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +86,7 @@ export default function CashScreen() {
   const load = useCallback(async () => {
     if (!token) return;
     try {
-      setAccounts(await getCashAccounts(token));
+      setList(await getAccountsList(token, status));
       setError(null);
     } catch (e: any) {
       setError(e?.message || "Hesaplar yüklenemedi.");
@@ -94,7 +94,7 @@ export default function CashScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [token]);
+  }, [token, status]);
 
   // Yeni hesap ya da virman ekranından dönüldüğünde bakiyeler tazelenir.
   useFocusEffect(
@@ -103,15 +103,36 @@ export default function CashScreen() {
     }, [load])
   );
 
-  const tryAccounts = accounts.filter(isTry);
-  const foreignCount = accounts.length - tryAccounts.length;
-  const tryTotal = tryAccounts.reduce((sum, a) => sum + (Number(a.balance) || 0), 0);
+  // D-15: toplamlar para birimi başına (TRY büyük, diğerleri altta); arşiv sekmesinde toplam kartı yok.
+  const totals = currencyTotals(list);
+  const tryTotal = totals.find((x) => x.currency === "TRY")?.amount ?? 0;
+  const foreign = totals.filter((x) => x.currency !== "TRY");
+  const counts = tabCounts(list);
+  const archNote = status === "active" ? archivedNote(list, formatMoney) : null;
+  const sections = accountSections(list);
+  const writable = accounts.filter((a) => a.read_only !== true && a.actions?.transfer !== false);
+  const switchTab = (next: AccountStatus) => {
+    if (next === status) return;
+    setLoading(true);
+    setStatus(next);
+  };
+  const tabs = (
+    <ChipRow>
+      <Chip testID="cash-tab-active" label={`Aktif${counts.active ? ` · ${counts.active}` : ""}`} selected={status === "active"} onPress={() => switchTab("active")} />
+      <Chip testID="cash-tab-archived" label={`Arşiv${counts.archived ? ` · ${counts.archived}` : ""}`} selected={status === "archived"} onPress={() => switchTab("archived")} />
+    </ChipRow>
+  );
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="cash-screen">
       <StackHeader title="Kasa ve bankalar" subtitle={loading ? undefined : `${accounts.length} hesap`} />
       {loading ? (
         <LoadingSkeleton />
+      ) : accounts.length === 0 && status === "archived" ? (
+        <View style={{ flex: 1 }}>
+          {tabs}
+          <EmptyState icon={<WalletIcon size={30} color={colors.textTertiary} />} title="Arşivde hesap yok" description="Arşivlediğiniz hesaplar burada görünür; hareketleri korunur." />
+        </View>
       ) : accounts.length === 0 ? (
         <EmptyState
           icon={<WalletIcon size={30} color={colors.textTertiary} />}
@@ -125,33 +146,41 @@ export default function CashScreen() {
           contentContainerStyle={{ paddingBottom: spacing.huge, paddingTop: spacing.xs }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
         >
-          {tryAccounts.length > 0 ? (
+          {counts.archived > 0 || status === "archived" ? tabs : null}
+          {status === "active" && totals.length > 0 ? (
             <SafeAnimatedView entering={FadeInDown.duration(380)}>
               <HeroCard tone="emerald">
                 <View
                   accessible
-                  accessibilityLabel={`Toplam TL bakiyesi: ${formatMoney(tryTotal, "TRY")}, ${tryAccounts.length} TL hesabı`}
+                  accessibilityLabel={`Net bakiye: ${totals.map((x) => formatMoney(x.amount, x.currency)).join(", ")}`}
                 >
-                  <Text style={styles.heroLabel}>Toplam bakiye (TL)</Text>
+                  <Text style={styles.heroLabel}>Net bakiye (TL)</Text>
                   <Text testID="cash-total-balance" style={[styles.heroValue, tabular]} numberOfLines={1} adjustsFontSizeToFit>
                     {formatMoney(tryTotal, "TRY")}
                   </Text>
                   <View style={styles.heroFoot}>
-                    <Text style={[styles.heroFootText, tabular]}>{tryAccounts.length} TL hesabı</Text>
-                    {foreignCount > 0 ? <Text style={[styles.heroFootText, { flex: 1, textAlign: "right" }]} numberOfLines={2}>Dövizli hesaplar hariç</Text> : null}
+                    <Text style={[styles.heroFootText, tabular]}>{`${accounts.length} hesap`}</Text>
+                    {foreign.length > 0 ? (
+                      <Text testID="cash-foreign-totals" style={[styles.heroFootText, tabular, { flex: 1, textAlign: "right" }]} numberOfLines={2}>
+                        {foreign.map((x) => formatMoney(x.amount, x.currency)).join(" · ")}
+                      </Text>
+                    ) : null}
                   </View>
                 </View>
               </HeroCard>
             </SafeAnimatedView>
           ) : null}
 
-          {mayWrite ? (
+          {archNote ? (
+            <Text testID="cash-archived-note" style={[type.caption, { color: colors.textTertiary, marginHorizontal: spacing.lg, marginTop: spacing.sm }]}>{archNote}</Text>
+          ) : null}
+          {mayWrite && status === "active" ? (
             <SafeAnimatedView entering={FadeInDown.delay(40).duration(380)} style={styles.actions}>
               <Button
                 testID="cash-transfer"
                 label="Virman"
                 icon={<RefreshIcon size={16} color={ON_HERO.text} />}
-                disabled={accounts.length < 2}
+                disabled={writable.length < 2}
                 onPress={() => router.push("/cash/transfer")}
                 style={{ flex: 1 }}
               />
@@ -167,16 +196,18 @@ export default function CashScreen() {
           ) : null}
 
           <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)}>
-            <SectionTitle title="Hesaplar" />
+            {sections.map((sec) => (
+            <View key={sec.key}>
+            <SectionTitle title={sec.title} />
             <Card style={styles.block}>
-              {accounts.map((a, i) => (
+              {sec.items.map((a, i) => (
                 <ListRow
                   key={a.id}
                   testID={`cash-account-${a.id}`}
                   divider={i > 0}
                   leading={<AccountTile accountType={a.account_type} />}
                   title={a.name}
-                  subtitle={[ACCOUNT_TYPES[String(a.account_type)] || a.account_type, a.bank_name].filter(Boolean).join(" · ")}
+                  subtitle={[ACCOUNT_TYPES[String(a.account_type)] || a.account_type, a.bank_name, mirrorBadge(a) ? "Paraşüt" : null, a.archived ? "Arşivde" : null].filter(Boolean).join(" · ")}
                   trailing={
                     <Text
                       style={[type.bodyStrong, tabular, styles.amount, { color: Number(a.balance) < 0 ? colors.error : colors.textPrimary }]}
@@ -191,7 +222,9 @@ export default function CashScreen() {
                 />
               ))}
             </Card>
-            {mayWrite && accounts.length < 2 ? (
+            </View>
+            ))}
+            {mayWrite && status === "active" && writable.length < 2 ? (
               <Text style={[type.caption, { color: colors.textTertiary, marginHorizontal: spacing.lg, marginTop: spacing.sm }]}>
                 Virman için en az iki hesap gerekir.
               </Text>

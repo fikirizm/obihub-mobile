@@ -2,12 +2,13 @@ import React, { useCallback, useEffect, useState } from "react";
 import { isReadOnly, mirrorBadge } from "../../src/mirror";
 import { InlineEmpty } from "../../src/components/InlineEmpty";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { createCashEntry, getCashAccount, newIdempotencyKey } from "../../src/api";
-import { moneyRetryable } from "../../src/api-finans";
+import { archiveAccount, deleteAccount, getAccountMovements, moneyRetryable, unarchiveAccount, type MovementsPage } from "../../src/api-finans";
+import { accountActions, archiveError, DELETE_CONFIRM_TEXT, ARCHIVE_CONFIRM_TEXT, movementRow, movementTotals } from "../../src/kasa-ui";
 import { todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
@@ -81,14 +82,29 @@ export default function CashAccountScreen() {
   const [entries, setEntries] = useState<CashEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [busy, setBusy] = useState<"income" | "expense" | null>(null);
+  const [busy, setBusy] = useState<"income" | "expense" | "archive" | "unarchive" | "delete" | null>(null);
+  // D-15: imleçli hareket listesi; eski sunucuda (404/405) tek seferlik hesap detayı.
+  const [page, setPage] = useState<Omit<MovementsPage, "items"> | null>(null);
+  const [undone, setUndone] = useState<CashEntry[]>([]);
+  const [more, setMore] = useState(false);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
     try {
-      const res = await getCashAccount(token, id);
-      setAccount(res.account);
-      setEntries(res.entries);
+      try {
+        const res = await getAccountMovements(token, id);
+        const detail = res.account ? null : await getCashAccount(token, id);
+        setAccount(res.account || detail?.account || null);
+        setEntries(res.items);
+        setUndone(res.undone_items || []);
+        setPage(res);
+      } catch (e: any) {
+        if (![404, 405].includes(Number(e?.status)) || e?.code === "ACCOUNT_NOT_FOUND") throw e;
+        const res = await getCashAccount(token, id);
+        setAccount(res.account);
+        setEntries(res.entries);
+        setPage(null);
+      }
     } catch {
       // Yüklenemezse eldeki kayıt kalır.
     } finally {
@@ -96,6 +112,60 @@ export default function CashAccountScreen() {
       setRefreshing(false);
     }
   }, [token, id]);
+
+  const loadMore = async () => {
+    if (!token || !page?.next_cursor || more) return;
+    setMore(true);
+    try {
+      const res = await getAccountMovements(token, id, { cursor: page.next_cursor });
+      setEntries((prev) => [...prev, ...res.items.filter((r) => !prev.some((p) => p.id === r.id))]);
+      setPage({ ...res, totals: page.totals ?? res.totals });
+    } catch (e: any) {
+      toast(e?.message || "Hareketler yüklenemedi.", "error");
+    } finally {
+      setMore(false);
+    }
+  };
+
+  const lifecycle = async (kind: "archive" | "unarchive" | "delete") => {
+    if (!token || !account || busy) return;
+    if (kind !== "unarchive") {
+      const ok = await confirm(
+        kind === "archive"
+          ? { title: "Hesap arşivlensin mi?", message: ARCHIVE_CONFIRM_TEXT, confirmLabel: "Arşivle" }
+          : { title: "Hesap silinsin mi?", message: DELETE_CONFIRM_TEXT, confirmLabel: "Sil", destructive: true }
+      );
+      if (!ok) return;
+    }
+    setBusy(kind);
+    try {
+      if (kind === "archive") {
+        try {
+          await archiveAccount(token, account.id);
+        } catch (e: any) {
+          const r = archiveError(e, formatMoney);
+          if (!r.confirm) throw e;
+          const again = await confirm({ title: "Bakiye sıfır değil", message: r.text, confirmLabel: "Yine de arşivle" });
+          if (!again) return;
+          await archiveAccount(token, account.id, true);
+        }
+        toast("Hesap arşivlendi.", "success");
+      } else if (kind === "unarchive") {
+        await unarchiveAccount(token, account.id);
+        toast("Hesap arşivden çıkarıldı.", "success");
+      } else {
+        await deleteAccount(token, account.id);
+        toast("Hesap silindi.", "success");
+        router.back();
+        return;
+      }
+      await load();
+    } catch (e: any) {
+      toast(archiveError(e, formatMoney).text, "error");
+    } finally {
+      setBusy(null);
+    }
+  };
 
   useEffect(() => {
     load();
@@ -117,7 +187,7 @@ export default function CashAccountScreen() {
           break;
         } catch (e: any) {
           if (!moneyRetryable(e)) {
-            toast(e?.message || "Kaydedilemedi.", "error");
+            toast(archiveError(e, formatMoney).text || "Kaydedilemedi.", "error");
             break;
           }
           const again = await confirm({
@@ -135,6 +205,9 @@ export default function CashAccountScreen() {
   };
 
   const cur = account?.currency;
+  const acts = account ? accountActions(account) : null;
+  const totals = page ? movementTotals(page) : null;
+  const total = typeof page?.total === "number" ? page.total : entries.length;
   const negative = Number(account?.balance) < 0;
   const typeLabel = account ? ACCOUNT_TYPES[String(account.account_type)] || account.account_type : undefined;
   const heroSubtitle = account ? [[typeLabel, account.bank_name].filter(Boolean).join(" · "), account.iban].filter(Boolean).join("\n") : "";
@@ -192,7 +265,12 @@ export default function CashAccountScreen() {
               <Text style={[type.footnote, { color: colors.textSecondary }]}>Bu hesap Paraşüt'ten geliyor; hareketleri Paraşüt'te girin.</Text>
             </View>
           ) : null}
-          {canManage(user, "billing") && !isReadOnly(account) && (account as any)?.actions?.add_movement !== false ? (
+          {account.archived ? (
+            <View testID="cash-archived-notice" style={[styles.mirrorNote, { backgroundColor: colors.warningBg }]}>
+              <Text style={[type.footnote, { color: colors.textSecondary }]}>Bu hesap arşivde; yeni hareket yazılamaz. Hareketler ve bakiye korunur.</Text>
+            </View>
+          ) : null}
+          {canManage(user, "billing") && !isReadOnly(account) && acts?.addMovement ? (
             <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)} style={styles.actions}>
               <Button testID="cash-add-income" label="Gelir ekle" busy={busy === "income"} disabled={Boolean(busy)} onPress={() => add("income")} style={{ flex: 1 }} />
               <Button testID="cash-add-expense" label="Gider ekle" variant="secondary" busy={busy === "expense"} disabled={Boolean(busy)} onPress={() => add("expense")} style={{ flex: 1 }} />
@@ -202,8 +280,27 @@ export default function CashAccountScreen() {
           <SafeAnimatedView entering={FadeInDown.delay(140).duration(380)}>
             <SectionTitle
               title="Hareketler"
-              action={entries.length > 0 ? <Text style={[type.caption, tabular, { color: colors.textTertiary }]}>{entries.length} kayıt</Text> : undefined}
+              action={total > 0 ? <Text style={[type.caption, tabular, { color: colors.textTertiary }]}>{total} kayıt</Text> : undefined}
             />
+            {totals && totals.count > 0 ? (
+              <Card style={[styles.block, styles.totals]}>
+                <View style={styles.totalCol}>
+                  <Text style={[type.caption, { color: colors.textTertiary }]}>Giriş</Text>
+                  <Text testID="cash-total-in" style={[type.bodyStrong, tabular, { color: colors.success }]} numberOfLines={1} adjustsFontSizeToFit>{formatMoney(totals.in, cur)}</Text>
+                </View>
+                <View style={styles.totalCol}>
+                  <Text style={[type.caption, { color: colors.textTertiary }]}>Çıkış</Text>
+                  <Text testID="cash-total-out" style={[type.bodyStrong, tabular, { color: colors.textPrimary }]} numberOfLines={1} adjustsFontSizeToFit>{formatMoney(totals.out, cur)}</Text>
+                </View>
+                <View style={styles.totalCol}>
+                  <Text style={[type.caption, { color: colors.textTertiary }]}>Net</Text>
+                  <Text testID="cash-total-net" style={[type.bodyStrong, tabular, { color: totals.net < 0 ? colors.error : colors.textPrimary }]} numberOfLines={1} adjustsFontSizeToFit>{formatMoney(totals.net, cur)}</Text>
+                </View>
+              </Card>
+            ) : null}
+            {totals?.beforeNote ? (
+              <Text testID="cash-before-opening-note" style={[type.caption, styles.note, { color: colors.textTertiary }]}>{`${totals.beforeNote}${account.opening_balance_date ? ` Açılış tarihi: ${formatDate(account.opening_balance_date)}.` : ""}`}</Text>
+            ) : null}
             {entries.length === 0 ? (
               <Card style={styles.block}>
                 <InlineEmpty
@@ -215,29 +312,71 @@ export default function CashAccountScreen() {
             ) : (
               <Card style={styles.block}>
                 {entries.map((e, i) => {
-                  const incoming = e.entry_type === "income" || e.entry_type === "transfer_in";
+                  const row = movementRow(e);
+                  const incoming = row.incoming;
                   return (
                     <ListRow
                       key={e.id}
+                      testID={`cash-move-${i}`}
                       divider={i > 0}
                       leading={
                         <IconTile tint={incoming ? colors.successBg : colors.errorBg}>
                           {incoming ? <TrendUpIcon size={18} color={colors.success} /> : <TrendDownIcon size={18} color={colors.error} />}
                         </IconTile>
                       }
-                      title={e.description || e.counterparty_name || e.category || ENTRY_LABELS[e.entry_type] || "Hareket"}
-                      subtitle={[ENTRY_LABELS[e.entry_type], e.related_account_name, formatDate(e.entry_date)].filter(Boolean).join(" · ")}
+                      title={e.description || e.counterparty_name || e.category_name || e.source?.label || ENTRY_LABELS[e.entry_type] || "Hareket"}
+                      subtitle={[row.typeLabel, e.related_account_name, e.counterparty_name && e.description ? e.counterparty_name : null, formatDate(e.entry_date)].filter(Boolean).join(" · ")}
+                      meta={row.tag ? `${row.tag} · bakiyeyi etkilemez` : undefined}
                       trailing={
-                        <Text style={[type.bodyStrong, tabular, styles.amount, { color: incoming ? colors.success : colors.textPrimary }]} numberOfLines={1} adjustsFontSizeToFit>
-                          {incoming ? "+" : "-"}
-                          {formatMoney(e.amount, cur)}
-                        </Text>
+                        <View style={styles.amountCol}>
+                          <Text style={[type.bodyStrong, tabular, styles.amount, { color: row.tag ? colors.textTertiary : incoming ? colors.success : colors.textPrimary }]} numberOfLines={1} adjustsFontSizeToFit>
+                            {incoming ? "+" : "-"}
+                            {formatMoney(e.amount, cur)}
+                          </Text>
+                          {row.balance != null && !row.tag ? (
+                            <Text style={[type.caption, tabular, { color: colors.textTertiary }]} numberOfLines={1}>{`Bakiye ${formatMoney(row.balance, cur)}`}</Text>
+                          ) : null}
+                        </View>
                       }
                     />
                   );
                 })}
               </Card>
             )}
+            {page?.has_more && page.next_cursor ? (
+              <View style={[styles.block, { marginTop: spacing.sm }]}>
+                <Button testID="cash-more" variant="secondary" size="sm" label="Daha fazla hareket" busy={more} onPress={loadMore} />
+              </View>
+            ) : null}
+            {undone.length > 0 ? (
+              <>
+                <SectionTitle title="Geri alınanlar" />
+                <Card style={styles.block}>
+                  {undone.map((e, i) => (
+                    <ListRow
+                      key={`u-${e.id}-${i}`}
+                      testID={`cash-undone-${i}`}
+                      divider={i > 0}
+                      title={e.description || e.counterparty_name || ENTRY_LABELS[e.entry_type] || "Hareket"}
+                      subtitle={[(e as any).undone_kind === "payment_voided" ? "Ödeme silindi" : "Geri alındı", formatDate(e.entry_date)].filter(Boolean).join(" · ")}
+                      trailing={
+                        <Text style={[type.callout, tabular, styles.amount, { color: colors.textTertiary, textDecorationLine: "line-through" }]} numberOfLines={1}>
+                          {formatMoney(e.amount, cur)}
+                        </Text>
+                      }
+                    />
+                  ))}
+                </Card>
+                <Text style={[type.caption, styles.note, { color: colors.textTertiary }]}>Geri alınan hareketler bakiyeye girmez.</Text>
+              </>
+            ) : null}
+            {canManage(user, "billing") && acts && (acts.archive || acts.unarchive || acts.remove) ? (
+              <View style={[styles.block, { marginTop: spacing.xl, gap: spacing.xs }]}>
+                {acts.archive ? <Button testID="cash-archive" variant="secondary" label="Hesabı arşivle" busy={busy === "archive"} disabled={Boolean(busy)} onPress={() => lifecycle("archive")} /> : null}
+                {acts.unarchive ? <Button testID="cash-unarchive" variant="secondary" label="Arşivden çıkar" busy={busy === "unarchive"} disabled={Boolean(busy)} onPress={() => lifecycle("unarchive")} /> : null}
+                {acts.remove ? <Button testID="cash-delete" variant="ghost" label="Hesabı sil" busy={busy === "delete"} disabled={Boolean(busy)} onPress={() => lifecycle("delete")} /> : null}
+              </View>
+            ) : null}
           </SafeAnimatedView>
         </ScrollView>
       )}
@@ -252,6 +391,10 @@ const styles = StyleSheet.create({
   actions: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md, marginHorizontal: spacing.lg },
   empty: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   amount: { maxWidth: 150, textAlign: "right" },
+  amountCol: { alignItems: "flex-end", gap: 2 },
+  note: { marginHorizontal: spacing.lg, marginTop: spacing.xs },
+  totals: { flexDirection: "row", padding: spacing.md, gap: spacing.sm, marginBottom: spacing.sm },
+  totalCol: { flex: 1, gap: 2 },
   heroTile: { width: 44, height: 44, borderRadius: radius.md, alignItems: "center", justifyContent: "center", backgroundColor: ON_HERO.faint },
   heroPill: { paddingHorizontal: spacing.xs, paddingVertical: 3, borderRadius: radius.pill, backgroundColor: ON_HERO.faint },
   heroPillText: { color: ON_HERO.text, fontSize: 12, fontWeight: "600" },

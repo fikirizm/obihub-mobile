@@ -7,7 +7,7 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } fr
 import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { getCashAccounts, newIdempotencyKey } from "../../src/api";
+import { getPickableAccounts, newIdempotencyKey } from "../../src/api";
 import { accountsForCurrency, editCollection } from "../../src/api-finans";
 import { decimalText, istanbulToday } from "../../src/api-gider";
 import {
@@ -93,7 +93,7 @@ export default function CollectionEditScreen() {
   useEffect(() => {
     if (!token) return;
     let on = true;
-    getCashAccounts(token)
+    getPickableAccounts(token)
       .then((items) => on && setAccounts(accountsForCurrency(items, currency)))
       .catch(() => on && setAccounts([]));
     return () => {

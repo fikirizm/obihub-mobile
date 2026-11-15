@@ -3,7 +3,7 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } fr
 import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { getCashAccounts, newIdempotencyKey } from "../../src/api";
+import { getPickableAccounts, newIdempotencyKey } from "../../src/api";
 import { createTransfer, moneyRetryable } from "../../src/api-finans";
 import { todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -47,7 +47,7 @@ export default function TransferScreen() {
     if (!token) return;
     setLoading(true);
     try {
-      const rows = await getCashAccounts(token);
+      const rows = await getPickableAccounts(token);
       setAccounts(rows);
       setFromId((prev) => (rows.some((a) => a.id === prev) ? prev : rows[0]?.id || ""));
       setError(null);

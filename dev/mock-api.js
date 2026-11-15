@@ -85,6 +85,18 @@ const tySource = [
   ...Array.from({ length: 30 }, (_, i) => ({ id: `ty-x${i}`, name: `Trendyol Ürünü ${i + 1}`, sku: `TY-${i + 1}`, barcode: `86999${String(i).padStart(8, "0")}` })),
 ];
 
+// D-15 (/__mode?kasa=1): gruplu liste, arşiv, imleçli hareketler, açılış tarihi öncesi satırlar.
+const kasaExtra = [
+  { id: "prs-77", name: "Paraşüt Akbank", account_type: "bank", currency: "TRY", balance: 4200, group: "parasut", read_only: true, mirror: { provider: "parasut", synced_at: "2026-11-15T09:00:00Z" } },
+  { id: "a-usd", name: "Dolar Hesabı", account_type: "bank", currency: "USD", balance: 1250, bank_name: "İş Bankası" },
+  { id: "a-arch", name: "Eski Banka", account_type: "bank", currency: "TRY", balance: 500, archived: true },
+  { id: "a-empty", name: "Boş Kasa", account_type: "cash", currency: "TRY", balance: 0 },
+];
+const kasaMoves = Array.from({ length: 62 }, (_, i) => {
+  const day = 62 - i; // en yeni önce
+  const inc = i % 3 !== 0;
+  return { id: `mv-${i}`, entry_date: `2026-${day > 31 ? "10" : "11"}-${String(((day - 1) % 31) + 1).padStart(2, "0")}`, entry_type: i % 7 === 0 ? "transfer_out" : inc ? "income" : "expense", direction: i % 7 === 0 ? "out" : inc ? "in" : "out", amount: 100 + i * 5, description: i % 7 === 0 ? "Bankaya aktarım" : inc ? `Satış tahsilatı ${i}` : "Kırtasiye", related_account_name: i % 7 === 0 ? "Garanti Ticari" : "", counterparty_name: inc && i % 2 ? "Deniz Ltd" : "", source: { type: "manual", label: "Elle girilen hareket" }, running_balance: i >= 58 ? null : 12450.75 - i * 40, before_opening: i >= 58 };
+});
 const accounts = [
   { id: "a1", name: "Nakit Kasa", account_type: "cash", currency: "TRY", balance: 12450.75, is_default: true },
   { id: "a2", name: "Garanti Ticari", account_type: "bank", currency: "TRY", balance: 86320.1, bank_name: "Garanti BBVA", iban: "TR330006100519786457841326" },
@@ -275,7 +287,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -359,9 +371,9 @@ http
     }
     if (state.session === "expired") return send(res, 401, { detail: "Token süresi dolmuş" });
     // D-30 ekip üyesi denemesi (/__mode?member=1): mali müşavir (her modül görüntüle, ayarlar yok).
-    if (path === "/auth/me" && state.member) return send(res, 200, { ...user, role: "member", full_name: "Ece Yılmaz" });
+    if (path === "/auth/me" && state.member && state.member !== "0") return send(res, 200, { ...user, role: "member", full_name: "Ece Yılmaz" });
     if (path === "/team/me")
-      return send(res, 200, state.member
+      return send(res, 200, state.member && state.member !== "0"
         ? { is_owner: false, member: { id: "m1", full_name: "Ece Yılmaz", preset: "mali_musavir" }, module_access: { sales: "view", expenses: "view", cash: "view", stock: "view", reports: "view", settings: "none" },
             permissions: ["dashboard.view", "orders.view", "customers.view", "catalog.view", "inventory.view", "reports.view", "billing.view"] }
         : { is_owner: true, member: null, permissions: ["*"] });
@@ -834,6 +846,57 @@ http
         entries.unshift(outgoing, incoming);
         send(res, 200, { transfer_id: tid, outgoing, incoming });
       });
+    if (state.kasa === "1") {
+      const all = () => [...accounts, ...kasaExtra].filter((a) => !a.deleted && a.is_active !== false);
+      const view = (a) => {
+        const mirror = a.read_only === true;
+        const hasMoves = a.id === "a1" || Math.abs(Number(a.balance) || 0) > 0;
+        return { ...a, archived: a.archived === true, group: a.group || "obihub", read_only: mirror, has_movements: hasMoves, opening_balance_date: a.id === "a1" ? "2026-10-04" : null,
+          actions: mirror ? { add_movement: false, transfer: false, edit: false, archive: false, unarchive: false, delete: false }
+            : { add_movement: !a.archived, transfer: !a.archived, edit: true, archive: !a.archived && !a.is_default, unarchive: a.archived === true, delete: !a.is_default && !hasMoves } };
+      };
+      let km;
+      if (path === "/finance/accounts" && req.method === "GET") {
+        const st = url.searchParams.get("status") || "active";
+        const rows = all().map(view).filter((a) => (st === "all" ? true : st === "archived" ? a.archived : !a.archived));
+        const tot = {}; rows.forEach((a) => { tot[a.currency] = (tot[a.currency] || 0) + a.balance; });
+        const arch = {}; all().filter((a) => a.archived).forEach((a) => { arch[a.currency] = (arch[a.currency] || 0) + a.balance; });
+        const prs = rows.filter((a) => a.group === "parasut").map((a) => a.id);
+        const groups = [...(prs.length ? [{ key: "parasut", label: "Paraşüt hesapları", count: prs.length, account_ids: prs }] : []), { key: "obihub", label: "ObiHub hesapları", count: rows.length - prs.length, account_ids: rows.filter((a) => a.group !== "parasut").map((a) => a.id) }];
+        return send(res, 200, { items: rows, groups, counts: { active: all().filter((a) => !a.archived).length, archived: all().filter((a) => a.archived).length }, totals_by_currency: tot, archived_totals_by_currency: arch });
+      }
+      if ((km = path.match(/^\/finance\/accounts\/([^/]+)\/(archive|unarchive)$/)) && req.method === "POST") {
+        const a = all().find((x) => x.id === decodeURIComponent(km[1]));
+        if (!a) return send(res, 404, { code: "ACCOUNT_NOT_FOUND", detail: "Hesap bulunamadı" });
+        if (a.read_only) return send(res, 409, { code: "MIRROR_ACCOUNT_READ_ONLY", detail: "Bu hesap Paraşüt'ten geliyor." });
+        if (a.is_default) return send(res, 409, { code: "ACCOUNT_DEFAULT_LOCKED", detail: "Varsayılan kasa arşivlenemez." });
+        if (km[2] === "unarchive") { a.archived = false; return send(res, 200, view(a)); }
+        return readBody((b) => {
+          if (Math.abs(a.balance) > 0.004 && !b.confirm_nonzero_balance) return send(res, 409, { code: "ACCOUNT_BALANCE_NOT_ZERO", detail: "Hesabın bakiyesi sıfır değil. Yine de arşivlemek için onaylayın; hareketler ve bakiye korunur.", balance: a.balance, currency: a.currency });
+          a.archived = true; send(res, 200, view(a));
+        });
+      }
+      if ((km = path.match(/^\/finance\/accounts\/([^/]+)$/)) && req.method === "DELETE") {
+        const a = all().find((x) => x.id === decodeURIComponent(km[1]));
+        if (!a) return send(res, 404, { code: "ACCOUNT_NOT_FOUND", detail: "Hesap bulunamadı" });
+        if (view(a).has_movements) return send(res, 409, { code: "ACCOUNT_HAS_MOVEMENTS", detail: "Hareketi olan hesap silinemez; arşivleyebilirsiniz." });
+        a.deleted = true; return send(res, 200, { status: "deleted", id: a.id });
+      }
+      if ((km = path.match(/^\/finance\/accounts\/([^/]+)\/movements$/))) {
+        const a = all().find((x) => x.id === decodeURIComponent(km[1]));
+        if (!a) return send(res, 404, { code: "ACCOUNT_NOT_FOUND", detail: "Hesap bulunamadı" });
+        const rows = a.id === "a1" ? kasaMoves : [];
+        const limit = Number(url.searchParams.get("limit") || 50);
+        const start = Number(url.searchParams.get("cursor") || 0);
+        const pageRows = rows.slice(start, start + limit);
+        const counted = rows.filter((r) => !r.before_opening);
+        const sum = (d) => counted.filter((r) => r.direction === d).reduce((x, r) => x + r.amount, 0);
+        const before = rows.filter((r) => r.before_opening);
+        return send(res, 200, { account: view(a), items: pageRows, next_cursor: start + limit < rows.length ? String(start + limit) : null, has_more: start + limit < rows.length, total: rows.length, order: "desc", running_balance_available: true,
+          totals: { currency: a.currency, in: sum("in"), out: sum("out"), net: sum("in") - sum("out"), count: rows.length, before_opening: { in: before.reduce((x, r) => x + (r.direction === "in" ? r.amount : 0), 0), out: 0, count: before.length } },
+          ...(url.searchParams.get("include_undone") === "true" ? { undone_items: a.id === "a1" ? [{ id: "u1", entry_type: "income", amount: 75, entry_date: "2026-11-10", description: "Yanlış giriş", undone: true }, { id: "u2", entry_type: "income", amount: 300, entry_date: "2026-11-09", description: "Tahsilat · Deniz Ltd", undone_kind: "payment_voided" }] : [] } : {}) });
+      }
+    }
     if (path === "/finance/accounts") return send(res, 200, { items: state.posAccts === "2" ? [...accounts, { id: "a5", name: "Yapı Kredi POS", account_type: "pos", currency: "TRY", balance: 0 }] : accounts });
     if (path.startsWith("/finance/accounts/")) {
       const acc = accounts.find((a) => path.endsWith("/" + a.id));

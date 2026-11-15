@@ -5,7 +5,7 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { addLocalInvoicePayment, checkLocalInvoiceEdocStatus, getCashAccounts, getLocalInvoice, newIdempotencyKey, officializeLocalInvoice } from "../../src/api";
+import { addLocalInvoicePayment, checkLocalInvoiceEdocStatus, getPickableAccounts, getLocalInvoice, newIdempotencyKey, officializeLocalInvoice } from "../../src/api";
 import { accountOptionLabel, accountsForCurrency, collectErrorText, unmatchAllocation, deleteLocalInvoice, getParasutAccounts, getParasutPaymentCaps, isInvoiceEditable, isUncertainWrite, postParasutPaymentAction, sendKeyedMoney } from "../../src/api-finans";
 import { canOfferParasutSync, collectResultText, parasutActionFailText, parasutActionRequest, parasutActionResult, parasutCollectFields, parasutPayView, PARASUT_ACTION_LABELS, type ParasutAction } from "../../src/parasut-pay";
 import { isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
@@ -282,9 +282,9 @@ export default function LocalInvoiceDetailScreen() {
   const collectFlow = async () => {
     if (!token) return;
     // Web gibi tahsilatın yazılacağı kasa/banka hesabı seçilir; yalnız fatura para birimindeki hesaplar listelenir.
-    let accounts: Awaited<ReturnType<typeof getCashAccounts>> = [];
+    let accounts: Awaited<ReturnType<typeof getPickableAccounts>> = [];
     try {
-      accounts = await getCashAccounts(token);
+      accounts = await getPickableAccounts(token);
     } catch (e: any) {
       toast(e?.message || "Kasa/banka hesapları okunamadı.", "error");
       return;

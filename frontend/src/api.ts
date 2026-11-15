@@ -3,6 +3,7 @@ import Constants from "expo-constants";
 // Override via EXPO_PUBLIC_OBIHUB_API_URL env if needed.
 
 import { otherCurrencyRevenue } from "./currency-lines";
+import { isAccountInactive, isAccountWritable } from "./account-pick";
 import type {
   CatalogProduct,
   ChannelRef,
@@ -25,7 +26,7 @@ export const API_BASE_URL =
   (process.env.EXPO_PUBLIC_OBIHUB_API_URL && String(process.env.EXPO_PUBLIC_OBIHUB_API_URL)) ||
   "https://api.obihub.app/api";
 
-type ApiError = { message: string; status: number; code?: string; reason?: string; retryAfter?: number };
+type ApiError = { message: string; status: number; code?: string; reason?: string; retryAfter?: number; data?: any };
 
 // Backend bu önekle başlayan 403 yanıtını abonelik kilidi için döndürür.
 const SUBSCRIPTION_LOCK_PREFIX = "Abonelik erişimi pasif.";
@@ -99,6 +100,8 @@ export async function request<T>(path: string, options: RequestInit = {}, token?
     // Kapalı kodlu hatalar ({code, detail} ya da detail: {code, message}) için kod da taşınır.
     const code = typeof data?.code === "string" ? data.code : typeof detail?.code === "string" ? detail.code : "";
     if (code) err.code = code;
+    // Ek alanlar (ör. ACCOUNT_BALANCE_NOT_ZERO: balance, currency) için yanıt gövdesi.
+    if (data && typeof data === "object") err.data = typeof detail === "object" && detail ? { ...data, ...detail } : data;
     // İçeri Al onay retleri kapalı kodu `reason` alanında taşır ({status: REJECTED, reason, detail}).
     if (typeof data?.reason === "string" && data.reason) err.reason = data.reason;
     // 429 yanıtlarında (ör. LOGIN_LOCKED) beklenecek süre saniye olarak.
@@ -830,6 +833,11 @@ export async function getSupportNotifications(token: string) {
 export async function getCashAccounts(token: string) {
   const d = await request<any>("/finance/accounts", { method: "GET" }, token);
   return (Array.isArray(d?.items) ? d.items : []) as CashAccount[];
+}
+
+// Hesap seçicileri (tahsilat, ödeme, virman, İçeri Al "Ödendi"): arşivli/pasif ve Paraşüt aynalı hesap gösterilmez (D-15: yazım 409).
+export async function getPickableAccounts(token: string) {
+  return (await getCashAccounts(token)).filter((a) => !isAccountInactive(a) && isAccountWritable(a));
 }
 
 export async function getCashAccount(token: string, accountId: string) {

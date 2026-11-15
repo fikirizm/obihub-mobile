@@ -5,7 +5,7 @@
 // Aynı anahtar + farklı sepet → 409. 200 yanıtı = satış ve stok düşümü tamamlandı.
 // Aşama 4 / P4: satışın ödemesi kasaya yazılır (nakit → varsayılan TL kasa, kart → "pos" türü TL hesap, karma → iki bacak).
 // Açık hesap: kayıtlı müşteri kartına borç yazılır, kasaya yazılmaz (customer_id zorunlu; karma yalnız nakit + kart).
-import { getCashAccounts, request } from "./api";
+import { getPickableAccounts, request } from "./api";
 import { karmaPayments, openAccountFields, posTotalsCents, splitCents, toCents } from "./pos-money";
 import type { CashAccount } from "./types";
 
@@ -139,7 +139,7 @@ export async function createPosSale(token: string, body: ReturnType<typeof posPa
 // Kart ödemesinin yazılabileceği POS (Kart) hesapları: "pos" türü, TL, etkin. Birden çoksa kart ödemesinde seçim zorunlu (400 POS_CARD_ACCOUNT_REQUIRED).
 export async function getPosCardAccounts(token: string): Promise<CashAccount[]> {
   const isTry = (c?: string) => ["TRY", "TL", "TRL", ""].includes(String(c ?? "").trim().toUpperCase());
-  return (await getCashAccounts(token)).filter(
+  return (await getPickableAccounts(token)).filter(
     (a) => a.account_type === "pos" && isTry(a.currency) && a.is_active !== false && a.active !== false && a.archived !== true && a.is_deleted !== true
   );
 }

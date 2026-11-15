@@ -6,6 +6,8 @@ import type { CashAccount } from "./types";
 export function isAccountInactive(a: CashAccount) {
   return a.is_active === false || a.active === false || a.archived === true || a.is_deleted === true;
 }
+// D-15 / G4-21: Paraşüt aynalı hesap (read_only, actions.add_movement false) ObiHub'dan yazılamaz → seçicide yok.
+export const isAccountWritable = (a: CashAccount) => a.read_only !== true && a.actions?.add_movement !== false;
 export const isPosAccount = (a: CashAccount) => String(a.account_type || "") === "pos";
 
 const normCur = (c?: string | null) => {
@@ -19,7 +21,7 @@ export function accountsForCurrency(accounts: CashAccount[], currency: string) {
   const rank = (a: CashAccount) => (isPosAccount(a) ? 2 : a.is_default ? 0 : 1);
   return accounts
     .map((a, i) => ({ a, i }))
-    .filter(({ a }) => normCur(a.currency) === cur && !isAccountInactive(a))
+    .filter(({ a }) => normCur(a.currency) === cur && !isAccountInactive(a) && isAccountWritable(a))
     .sort((x, y) => rank(x.a) - rank(y.a) || x.i - y.i)
     .map(({ a }) => a);
 }

@@ -20,7 +20,7 @@ import {
 import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { getCashAccounts, newIdempotencyKey } from "../../src/api";
+import { getPickableAccounts, newIdempotencyKey } from "../../src/api";
 import {
   addPayablePayment,
   decimalText,
@@ -111,7 +111,7 @@ export default function PayablePayScreen() {
     try {
       const [p, acc] = await Promise.all([
         getPayableInfo(token, ref),
-        getCashAccounts(token),
+        getPickableAccounts(token),
       ]);
       setInfo(p);
       setAccounts(
