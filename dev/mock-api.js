@@ -87,7 +87,7 @@ const tySource = [
 
 const accounts = [
   { id: "a1", name: "Nakit Kasa", account_type: "cash", currency: "TRY", balance: 12450.75, is_default: true },
-  { id: "a2", name: "Garanti Ticari", account_type: "bank", currency: "TRY", balance: 86320.1, bank_name: "Garanti BBVA" },
+  { id: "a2", name: "Garanti Ticari", account_type: "bank", currency: "TRY", balance: 86320.1, bank_name: "Garanti BBVA", iban: "TR330006100519786457841326" },
   { id: "a3", name: "POS (Kart)", account_type: "pos", currency: "TRY", balance: 0 },
   { id: "a4", name: "Eski Kasa", account_type: "cash", currency: "TRY", balance: 0, is_active: false },
 ];
@@ -1043,7 +1043,7 @@ http
     // Yeni satış faturası: her zaman taslak açılır, tutarlar kalemlerden hesaplanır (backend/routers/local_invoices.py create_invoice)
     // G2: belge meta ve önizleme (sahte hesap; gerçek kural backend/documents/totals.py). P1 gövdesi create_key ile idempotent.
     if (path === "/documents/meta")
-      return send(res, 200, { vat_rates: [0, 1, 10, 20], units: [{ code: "ADET", label: "Adet" }], withholding: [20, 30, 40, 50, 70, 90, 100].map((rate) => ({ code: null, label: `${rate / 10}/10`, rate })),
+      return send(res, 200, { vat_rates: [0, 1, 10, 20], units: [{ key: "ADET", label: "Adet" }, { key: "KGM", label: "Kilogram" }, { key: "LTR", label: "Litre" }, { key: "SAAT", label: "Saat" }], withholding: [20, 30, 40, 50, 70, 90, 100].map((rate) => ({ code: null, label: `${rate / 10}/10`, rate })),
         tax_codes: [{ code: "0071", label: "ÖTV", types: ["rate", "amount"] }, { code: "4080", label: "ÖİV", types: ["rate"] }, { code: "0059", label: "Konaklama vergisi", types: ["rate"] }],
         doc_taxes: { stopaj_rates: [20, 17, 15, 10, 5, 3], accommodation_rates: [0, 1] }, stock: { owner: "obihub", default_mode: "with_document", warehouses: [{ id: "w1", name: "Ana depo" }] } });
     if (path === "/documents/preview" && req.method === "POST")
@@ -1084,7 +1084,9 @@ http
         if (b.create_key) {
           const prev = localInvoices.find((i) => i.create_key === b.create_key);
           if (prev) return send(res, 200, prev);
-          const inv = { id: "li" + Date.now(), doc_schema: 1, create_key: b.create_key, invoice_number: "", invoice_type: "satis", status: "taslak", display_status: "taslak", money_state: "not_issued",
+          const issued = b.action === "issue";
+          const inv = { id: "li" + Date.now(), doc_schema: 1, create_key: b.create_key, invoice_number: issued ? "OBI2026" + String(130 + localInvoices.length) : "", invoice_type: "satis",
+            status: issued ? "gonderildi" : "taslak", display_status: issued ? "gonderildi" : "taslak", money_state: issued ? "pending" : "not_issued", note_options: b.note_options || null,
             customer_id: b.customer_id, customer_name: b.customer_name, document_name: b.document_name || null, issue_date: b.issue_date, due_date: b.due_date, currency: "TRY", subtotal: 0, discount_amount: 0, vat_amount: 0, total: 0, paid_amount: 0, remaining_amount: 0,
             stopaj_rate: b.stopaj_rate || null, accommodation_tax_rate: b.accommodation_tax_rate ?? null, stock_mode: b.stock_mode, items: b.items, payments: [], voided_payments: [] };
           localInvoices.unshift(inv);
@@ -1130,6 +1132,14 @@ http
         if (!["taslak", "gecikti"].includes(inv.status) || inv.parasut_invoice_id || inv.paid_amount > 0) return send(res, 400, { detail: "Bu fatura düzenlenemez" });
         if (req.method === "DELETE") { localInvoices.splice(localInvoices.indexOf(inv), 1); console.log("WRITE DELETE", path); return send(res, 200, { message: "Silindi" }); }
         return readBody((b) => {
+          console.log("WRITE PUT", path, JSON.stringify(b).slice(0, 500));
+          if (b.action) {
+            // P1 gövdesi: tüm formu değiştirir; action=issue keser.
+            Object.assign(inv, { items: b.items, document_name: b.document_name || null, notes: b.notes, due_date: b.due_date, stock_mode: b.stock_mode, note_options: b.note_options || null,
+              stopaj_rate: b.stopaj_rate || null, accommodation_tax_rate: b.accommodation_tax_rate ?? null, invoice_discount_type: b.invoice_discount_type || null, invoice_discount_value: b.invoice_discount_value || null, doc_schema: 1 });
+            if (b.action === "issue") Object.assign(inv, { status: "gonderildi", display_status: "gonderildi", money_state: "pending", invoice_number: inv.invoice_number || "OBI2026199" });
+            return send(res, 200, inv);
+          }
           const r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
           inv.items = b.items.map((it) => ({ ...it, line_total: r2(Number(it.quantity) * Number(it.unit_price)) }));
           inv.subtotal = r2(inv.items.reduce((n, it) => n + it.line_total, 0));

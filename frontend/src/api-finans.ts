@@ -186,6 +186,7 @@ export async function searchInvoiceCustomers(token: string, search: string) {
 export type DocumentMeta = {
   stock: { owner: string | null; default_mode: "with_document" | "none"; warehouses: { id: string; name: string }[] };
   withholding: { rate: number; label: string }[];
+  units: { key: string; label: string }[];
 };
 
 export async function getDocumentMeta(token: string): Promise<DocumentMeta | null> {
@@ -196,6 +197,7 @@ export async function getDocumentMeta(token: string): Promise<DocumentMeta | nul
     return {
       stock: { owner: st.owner || null, default_mode: st.default_mode === "none" ? "none" : "with_document", warehouses: Array.isArray(st.warehouses) ? st.warehouses : [] },
       withholding: wh,
+      units: Array.isArray(m?.units) ? m.units.filter((u: any) => u?.key).map((u: any) => ({ key: String(u.key), label: String(u.label || u.key) })) : [],
     };
   } catch {
     return null;

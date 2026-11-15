@@ -7,7 +7,7 @@ import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleShe
 import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { getCatalog, getLocalInvoice } from "../../src/api";
+import { getCashAccounts, getCatalog, getLocalInvoice } from "../../src/api";
 import {
   getDocumentMeta,
   isInvoiceEditable,
@@ -156,6 +156,8 @@ export default function NewLocalInvoiceScreen() {
   const createKey = useRef(newCreateKey());
   const [editState, setEditState] = useState<"none" | "loading" | "ready" | "locked" | "error">(editId ? "loading" : "none");
   const [editNumber, setEditNumber] = useState("");
+  const [editStatus, setEditStatus] = useState("");
+  const [banks, setBanks] = useState<{ iban: string; name: string }[]>([]);
 
   useEffect(() => {
     if (token) getDocumentMeta(token).then(setMeta);
@@ -169,6 +171,7 @@ export default function NewLocalInvoiceScreen() {
         if (!live) return;
         if (!isInvoiceEditable(inv)) return setEditState("locked");
         setEditNumber(String(inv.invoice_number || ""));
+        setEditStatus(String(inv.status || ""));
         setForm(fromInvoice(inv, todayIso()));
         setEditState("ready");
       })
@@ -177,6 +180,18 @@ export default function NewLocalInvoiceScreen() {
       live = false;
     };
   }, [token, editId]);
+
+  // IBAN önerileri firmanın banka hesaplarından (web ile aynı: GET /finance/accounts, iban'ı olanlar).
+  useEffect(() => {
+    if (!token || !form.include_iban || banks.length) return;
+    let on = true;
+    getCashAccounts(token)
+      .then((rows) => on && setBanks(rows.filter((a: any) => a?.iban).map((a: any) => ({ iban: String(a.iban), name: String(a.name || "Banka hesabı") }))))
+      .catch(() => {});
+    return () => {
+      on = false;
+    };
+  }, [token, form.include_iban, banks.length]);
 
   const customerSeq = useRef(0);
   useEffect(() => {
@@ -239,7 +254,8 @@ export default function NewLocalInvoiceScreen() {
   const dueDays = form.due_date && form.issue_date ? Math.max(0, dayDiff(form.issue_date, form.due_date)) : 0;
   const shown = (k: string) => (tried ? errors[k] : undefined);
 
-  const submit = async () => {
+  const isIssued = editStatus === "gonderildi" || editStatus === "gecikti";
+  const submit = async (action: "save_draft" | "issue" = "save_draft") => {
     setTried(true);
     if (!token || sending.current) return;
     if (!form.customer_name.trim()) return toast("Önce müşteriyi seçin.", "error");
@@ -249,27 +265,33 @@ export default function NewLocalInvoiceScreen() {
       const m = /^[a-z_]+(\d+)$/.exec(firstErr[0]);
       return toast(m ? `${Number(m[1]) + 1}. satır: ${firstErr[1]}` : firstErr[1], "error");
     }
+    const issue = action === "issue";
     const ok = await confirm({
-      title: uncertain ? "Taslak yeniden gönderilsin mi?" : editId ? "Değişiklikler kaydedilsin mi?" : "Fatura taslağı kaydedilsin mi?",
+      title: uncertain ? "Fatura yeniden gönderilsin mi?" : issue ? "Fatura kaydedilip kesilsin mi?" : editId ? "Değişiklikler kaydedilsin mi?" : "Fatura taslağı kaydedilsin mi?",
       message:
         (uncertain ? "Önceki gönderimin sonucu alınamadı. Aynı taslak ikinci kez açılmaz; sunucu önceki kaydı döndürür.\n" : "") +
         `${form.customer_name} · ${form.lines.length} kalem\n` +
         (totals ? `Genel toplam: ${money(totals.total)}${totals.payable !== totals.total ? ` · Tahsil edilecek ${money(totals.payable)}` : ""}\n` : "") +
-        `Vade: ${formatDate(form.due_date || form.issue_date)}. Fatura taslak olarak kaydedilir.`,
-      confirmLabel: uncertain ? "Yeniden gönder" : editId ? "Kaydet" : "Taslak olarak kaydet",
+        `Vade: ${formatDate(form.due_date || form.issue_date)}. ` +
+        (issue
+          ? "Fatura kesilir: numara verilir, cariye borç yazılır" + (stockMode === "with_document" ? " ve stok çıkışı yapılır" : "") + ". Resmileştirme ayrıca yapılır."
+          : isIssued
+            ? "Kesilmiş fatura güncellenir."
+            : "Fatura taslak olarak kaydedilir."),
+      confirmLabel: uncertain ? "Yeniden gönder" : issue ? "Kaydet ve kes" : editId ? "Kaydet" : "Taslak olarak kaydet",
     });
     if (!ok || sending.current) return;
     sending.current = true;
     setBusy(true);
     try {
-      const body = buildBody(form, { action: "save_draft", stockMode, createKey: editId ? undefined : createKey.current });
+      const body = buildBody(form, { action, stockMode, createKey: editId ? undefined : createKey.current });
       const inv = await saveSalesDocument(token, body, editId || undefined);
       if (editId) {
-        toast("Fatura güncellendi.", "success");
+        toast(issue ? "Fatura kaydedildi ve kesildi." : "Fatura güncellendi.", "success");
         router.back();
         return;
       }
-      toast(inv?.invoice_number ? `Taslak kaydedildi: ${inv.invoice_number}` : "Taslak kaydedildi", "success");
+      toast(issue ? (inv?.invoice_number ? `Fatura kesildi: ${inv.invoice_number}` : "Fatura kaydedildi ve kesildi") : inv?.invoice_number ? `Taslak kaydedildi: ${inv.invoice_number}` : "Taslak kaydedildi", "success");
       if (inv?.id) router.replace({ pathname: "/local-invoices/[id]", params: { id: inv.id } });
       else router.back();
     } catch (e: any) {
@@ -570,6 +592,18 @@ export default function NewLocalInvoiceScreen() {
                     onChange={(v) => patchLine(l.line_key, { vat_rate: v, withholding: v > 0 ? l.withholding : null })}
                   />
                 </View>
+                {meta?.units?.length ? (
+                  <View>
+                    <Text style={[type.callout, { color: colors.textSecondary, fontWeight: "600" }]}>Birim</Text>
+                    <View style={{ marginHorizontal: -spacing.lg }}>
+                      <ChipRow>
+                        {(meta.units.some((u) => u.key === l.unit) ? meta.units : [{ key: l.unit, label: l.unit }, ...meta.units]).map((u) => (
+                          <Chip key={u.key} testID={`invoice-line-unit-${i}-${u.key}`} label={u.label} selected={l.unit === u.key} onPress={() => patchLine(l.line_key, { unit: u.key })} />
+                        ))}
+                      </ChipRow>
+                    </View>
+                  </View>
+                ) : null}
                 {lineExtras(l, i)}
                 <View style={[styles.lineFoot, { borderTopColor: colors.border }]}>
                   <SummaryLine label="Satır tutarı (KDV dahil)" value={lt != null ? money(lt) : "—"} />
@@ -645,6 +679,41 @@ export default function NewLocalInvoiceScreen() {
           <View style={styles.fields}>
             <FormField testID="invoice-notes" label="Not (isteğe bağlı)" value={form.notes} onChangeText={(t) => patch({ notes: t })} placeholder="Faturada görünecek not" multiline maxLength={500} />
           </View>
+          <View style={{ marginTop: spacing.xs }}>
+            <ChipRow>
+              <Chip testID="invoice-note-balance" label="Müşteri bakiyesini not olarak ekle" selected={form.include_balance} onPress={() => patch({ include_balance: !form.include_balance })} />
+              <Chip
+                testID="invoice-note-iban"
+                label="IBAN bilgisi ekle"
+                selected={form.include_iban}
+                onPress={() => patch({ include_iban: !form.include_iban, iban: !form.include_iban && !form.iban && banks[0] ? banks[0].iban : form.iban })}
+              />
+            </ChipRow>
+          </View>
+          {form.include_iban ? (
+            <View style={styles.fields}>
+              <FormField
+                testID="invoice-iban"
+                label="IBAN"
+                value={form.iban}
+                onChangeText={(t) => patch({ iban: t })}
+                placeholder="TR00 0000 0000 0000 0000 0000 00"
+                autoCapitalize="characters"
+                autoCorrect={false}
+                hint="Fatura notunda ve çıktıda görünür."
+                error={tried || form.iban.trim() ? errors.iban : undefined}
+              />
+              {banks.length ? (
+                <View style={{ marginHorizontal: -spacing.lg }}>
+                  <ChipRow>
+                    {banks.map((b) => (
+                      <Chip key={b.iban} testID={`invoice-iban-pick-${b.iban.replace(/\s/g, "")}`} label={b.name} selected={form.iban.replace(/\s/g, "") === b.iban.replace(/\s/g, "")} onPress={() => patch({ iban: b.iban })} />
+                    ))}
+                  </ChipRow>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
 
           {/* Toplam ve ara toplam seçenekleri */}
           <SectionTitle title="Toplam" />
@@ -752,7 +821,13 @@ export default function NewLocalInvoiceScreen() {
                 Önceki gönderimin sonucu alınamadı. Yeniden gönderebilirsiniz; aynı taslak iki kez açılmaz.
               </Text>
             ) : null}
-            <Button testID="invoice-submit" label={uncertain ? "Taslağı yeniden gönder" : editId ? "Değişiklikleri kaydet" : "Taslak olarak kaydet"} busy={busy} onPress={submit} />
+            <Button testID="invoice-submit" label={uncertain ? "Yeniden gönder" : editId ? "Değişiklikleri kaydet" : "Taslak olarak kaydet"} busy={busy} onPress={() => submit("save_draft")} />
+            {!isIssued ? (
+              <Button testID="invoice-issue" variant="secondary" label="Kaydet ve kes" disabled={busy} onPress={() => submit("issue")} />
+            ) : null}
+            <Text style={[type.caption, { color: colors.textTertiary }]}>
+              Kaydedince fatura taslak olarak durur; "Kaydet ve kes" faturayı keser. Resmileştirince fatura Paraşüt'e gider.
+            </Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

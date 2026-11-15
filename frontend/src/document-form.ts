@@ -42,6 +42,10 @@ export type DocForm = {
   accommodation_rate: string;
   withholding_all: Withholding;
   notes: string;
+  // G2 §4: not seçenekleri (IBAN ve müşteri bakiyesi yazdırma/PDF'te nottan üretilir).
+  include_iban: boolean;
+  iban: string;
+  include_balance: boolean;
 };
 
 const rid = () => Math.random().toString(16).slice(2, 14).padEnd(12, "0");
@@ -78,7 +82,7 @@ export function blankForm(today: string): DocForm {
   return {
     customer_id: null, customer_name: "", customer_tax_no: "", customer_tax_office: "", customer_address: "",
     document_name: "", issue_date: today, due_date: today, stock_mode: null, lines: [], doc_discount: null, stopaj_rate: "", accommodation_rate: "",
-    withholding_all: null, notes: "",
+    withholding_all: null, notes: "", include_iban: false, iban: "", include_balance: false,
   };
 }
 
@@ -118,6 +122,10 @@ export function buildBody(f: DocForm, opts: { action?: "save_draft" | "issue"; c
   if (f.stopaj_rate) body.stopaj_rate = f.stopaj_rate;
   if (f.accommodation_rate !== "" && f.accommodation_rate != null) body.accommodation_tax_rate = f.accommodation_rate;
   if (f.withholding_all) body.withholding_all = { rate: Number(f.withholding_all.rate), code: String(f.withholding_all.code || "").trim() };
+  if (f.include_iban || f.include_balance) {
+    body.note_options = { include_iban: Boolean(f.include_iban), include_customer_balance: Boolean(f.include_balance) };
+    if (f.include_iban) body.note_options.iban = String(f.iban || "").trim().toUpperCase();
+  }
   return body;
 }
 
@@ -125,7 +133,7 @@ export function previewBody(f: DocForm, stockMode: string | null) {
   const b = buildBody(f, { stockMode });
   const out: Record<string, any> = { type: "sales", lines: b.items, currency: "TRY" };
   if (b.invoice_discount_type) out.doc_discount = { type: b.invoice_discount_type, value: b.invoice_discount_value };
-  for (const k of ["stopaj_rate", "accommodation_tax_rate", "withholding_all", "stock_mode"]) if (b[k] !== undefined) out[k] = b[k];
+  for (const k of ["stopaj_rate", "accommodation_tax_rate", "withholding_all", "note_options", "stock_mode"]) if (b[k] !== undefined) out[k] = b[k];
   if (b.customer_name) {
     out.customer_name = b.customer_name;
     if (b.customer_id) out.customer_id = b.customer_id;
@@ -151,6 +159,7 @@ export function validateForm(f: DocForm, opts: { stockMode?: string | null } = {
   const dd = f.doc_discount;
   if (dd && has(dd.value) && dotAmount(dd.value, 2) === null) e.doc_discount = "Ara toplam indirimi geçerli değil.";
   if (f.withholding_all && !has(f.withholding_all.code)) e.withholding_all = "Tevkifat kodunu girin.";
+  if (f.include_iban && !/^TR\d{24}$/.test(String(f.iban || "").toUpperCase().replace(/[^A-Z0-9]/g, ""))) e.iban = "Geçerli bir IBAN girin (TR ile başlayan 26 karakter).";
   return e;
 }
 
@@ -223,6 +232,7 @@ export function fromInvoice(inv: any, today: string): DocForm {
     lines: (Array.isArray(inv?.items) ? inv.items : []).map(lineFromItem), doc_discount: dd,
     stopaj_rate: inv?.stopaj_rate ? String(inv.stopaj_rate) : "", accommodation_rate: inv?.accommodation_tax_rate == null ? "" : String(inv.accommodation_tax_rate),
     withholding_all: null, notes: inv?.notes || "",
+    include_iban: Boolean(inv?.note_options?.include_iban), iban: String(inv?.note_options?.iban || ""), include_balance: Boolean(inv?.note_options?.include_customer_balance),
   };
 }
 

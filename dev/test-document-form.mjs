@@ -124,4 +124,24 @@ t("toplam satırları (önizleme totals → ekran): G2 §2 örneği", () => {
   assert.deepEqual(simple.map((r) => r.label), ["Ara toplam", "Toplam KDV", "Genel toplam"]);
 });
 
+t("not seçenekleri (G2 §4): IBAN ve müşteri bakiyesi; ikisi de kapalıysa note_options gönderilmez", () => {
+  assert.ok(!("note_options" in m.buildBody(base())));
+  const b = m.buildBody({ ...base(), include_iban: true, iban: "tr33 0006 1005 1978 6457 8413 26", include_balance: true });
+  assert.deepEqual(b.note_options, { include_iban: true, include_customer_balance: true, iban: "TR33 0006 1005 1978 6457 8413 26" });
+  assert.deepEqual(m.buildBody({ ...base(), include_balance: true }).note_options, { include_iban: false, include_customer_balance: true });
+  assert.deepEqual(m.previewBody({ ...base(), include_balance: true }, null).note_options, { include_iban: false, include_customer_balance: true });
+});
+t("IBAN doğrulaması: TR + 24 hane (boşluk serbest)", () => {
+  assert.equal(m.validateForm({ ...base(), include_iban: true, iban: "TR12" }, {}).iban, "Geçerli bir IBAN girin (TR ile başlayan 26 karakter).");
+  assert.equal(m.validateForm({ ...base(), include_iban: true, iban: "TR33 0006 1005 1978 6457 8413 26" }, {}).iban, undefined);
+  assert.equal(m.validateForm({ ...base(), include_iban: false, iban: "x" }, {}).iban, undefined);
+});
+t("kayıttan forma: note_options ve birim geri okunur", () => {
+  const f = m.fromInvoice({ customer_name: "Can", note_options: { include_iban: true, iban: "TR330006100519786457841326", include_customer_balance: true }, items: [{ description: "Kg", quantity: 2, unit: "KGM", unit_price: 5, vat_rate: 1 }] }, "2026-11-15");
+  assert.equal(f.include_iban, true);
+  assert.equal(f.iban, "TR330006100519786457841326");
+  assert.equal(f.include_balance, true);
+  assert.equal(f.lines[0].unit, "KGM");
+});
+
 console.log(`\n${n} test geçti`);
