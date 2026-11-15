@@ -2,6 +2,7 @@
 // Kaynaklar: frontend/src/pages/ExpenseInvoicesPage.js, CustomersPage.js, IncomingEInvoicesPage.js, components/layout/Sidebar.js.
 import { API_BASE_URL, getParties, getPartyLedger, request } from "./api";
 import { bytesToBase64, inboxQuery, inboxRow } from "./inbox-ui";
+import { manualPaymentFields, paymentStates, type ImportForm, type PaymentStateOption } from "./api-iceri-al";
 import type {
   ExpenseLedgerRow,
   ExpenseSummaryRow,
@@ -525,6 +526,8 @@ export type ManualForm = {
   categoryId: string;
   lines: ManualLineInput[];
   warehouseId: string;
+  // D-14b: Ödenecek · Ödendi (hesap + tarih) · Çalışan cebinden (kapalı).
+  payment?: Pick<ImportForm, "payment_state" | "payment_account_id" | "payment_date">;
 };
 
 // "1.250,50" / "1250.5" → "1250.50" benzeri düz ondalık dize (en çok `maxDecimals` hane); geçersizse null. Float'a çevrilmez.
@@ -601,6 +604,7 @@ export function buildManualPayload(f: ManualForm): { body: Record<string, unknow
       lines,
       other_taxes: [],
       ...(hasProduct && f.warehouseId ? { warehouse_id: f.warehouseId } : {}),
+      ...manualPaymentFields(f.payment),
     },
     problems,
   };
@@ -616,6 +620,7 @@ export type ManualPreview = {
   // POSSIBLE_LEGACY_DUPLICATE (review_items): onayı engeller; açık kabul (legacy_duplicate_ack) önizleme gövdesine girer.
   legacyDuplicate: boolean;
   stock: { entry: boolean; warehouseId: string; warehouses: { id: string; name: string }[] } | null;
+  paymentStates: PaymentStateOption[];
 };
 
 const itemText = (it: any) => String(it?.detail || it?.text || it?.message || "Bu madde kontrol edilmeli.");
@@ -638,6 +643,7 @@ export async function previewManualPurchase(token: string, body: Record<string, 
     blockers: (Array.isArray(d?.blocker_items) ? d.blocker_items : []).map(itemText),
     reviews: (Array.isArray(d?.review_items) ? d.review_items : []).filter((it: any) => it?.key !== "POSSIBLE_LEGACY_DUPLICATE").map(itemText),
     legacyDuplicate: (Array.isArray(d?.review_items) ? d.review_items : []).some((it: any) => it?.key === "POSSIBLE_LEGACY_DUPLICATE"),
+    paymentStates: paymentStates(d),
     stock: st
       ? {
           entry: st.entry === true,

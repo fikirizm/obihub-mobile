@@ -83,4 +83,10 @@ t("hatırlansın planı: yeni kart sayısı notu (kartlar kayıtta açılır)", 
   assert.equal(m.plannedNotice(2), "2 yeni ürün kartı faturayı kaydettiğinizde açılır.");
   assert.equal(m.plannedNotice(0), null);
 });
+t("elle alış: ödeme alanları yalnız Ödendi tamamsa gövdeye girer (taslağa saklanır)", () => {
+  assert.deepEqual(m.manualPaymentFields({ payment_state: "paid", payment_account_id: "a1", payment_date: "2026-11-15" }), { payment_state: "paid", payment_account_id: "a1", payment_date: "2026-11-15" });
+  assert.deepEqual(m.manualPaymentFields({ payment_state: "paid", payment_account_id: null, payment_date: "2026-11-15" }), {});
+  assert.deepEqual(m.manualPaymentFields({ payment_state: "payable" }), {});
+});
+
 console.log(`\n${n} test geçti`);

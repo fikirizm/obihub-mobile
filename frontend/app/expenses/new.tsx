@@ -10,7 +10,8 @@ import { router } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { newIdempotencyKey } from "../../src/api";
-import { LEGACY_DUPLICATE, legacyAckValid } from "../../src/api-iceri-al";
+import { cleanPayment, LEGACY_DUPLICATE, legacyAckValid, paymentMissing, paymentResultText, paymentStates } from "../../src/api-iceri-al";
+import { getCashAccounts } from "../../src/api";
 import {
   buildManualPayload,
   confirmManualPurchase,
@@ -176,7 +177,11 @@ export default function ManualExpenseScreen() {
     categoryId: "",
     lines: [emptyLine()],
     warehouseId: "",
+    payment: { payment_state: "payable", payment_account_id: null, payment_date: null },
   });
+  const pay = f.payment || { payment_state: "payable" as const, payment_account_id: null, payment_date: null };
+  const setPay = (patch: Partial<typeof pay>) => setF((p) => ({ ...p, payment: { ...pay, ...(p.payment || {}), ...patch } }));
+  const [payAccounts, setPayAccounts] = useState<{ id: string; name: string }[] | null>(null);
   const [issueText, setIssueText] = useState(trDate(today));
   const [dueText, setDueText] = useState("");
   const set = (patch: Partial<ManualForm>) => setF((p) => ({ ...p, ...patch }));
@@ -253,7 +258,16 @@ export default function ManualExpenseScreen() {
 
   const fresh = pv.status === "ready" && pv.key === requestKey;
   const showLegacyAck = (fresh && pv.data?.legacyDuplicate === true) || ackOn;
-  const canConfirm = fresh && pv.data?.canConfirm === true && !saving && !outcome?.final;
+  const canConfirm = fresh && pv.data?.canConfirm === true && !saving && !outcome?.final && !paymentMissing(pay);
+  const payStates = fresh && pv.data?.paymentStates?.length ? pv.data.paymentStates : paymentStates(null);
+  useEffect(() => {
+    if (!token || pay.payment_state !== "paid" || payAccounts) return;
+    getCashAccounts(token)
+      .then((rows: any[]) =>
+        setPayAccounts(rows.filter((a) => a?.id && String(a.currency || "TRY").toUpperCase() === "TRY" && a.is_active !== false).map((a) => ({ id: String(a.id), name: String(a.name || "Hesap") })))
+      )
+      .catch(() => setPayAccounts([]));
+  }, [token, pay.payment_state, payAccounts]);
   const stock = fresh ? pv.data?.stock || null : null;
   const hasProductLine = f.lines.some((l) => l.kind === "product");
   const displayTotal = f.lines.reduce((s, l) => s + (lineTotal(l) || 0), 0);
@@ -268,7 +282,8 @@ export default function ManualExpenseScreen() {
       const res = await confirmManualPurchase(token, pv.data.draftId, pv.data.decisionDigest, keyRef.current);
       const st = String(res?.status || "");
       if (st === "APPLIED") {
-        toast("Gider faturası kaydedildi.", "success");
+        const p = cleanPayment(res?.payment);
+        toast(p ? paymentResultText(p) || "Gider faturası kaydedildi." : "Gider faturası kaydedildi.", p?.status === "failed" ? "info" : "success");
         const ref = res?.result?.payable_ref || null;
         if (pay && ref) router.replace({ pathname: "/expenses/pay", params: { ref, title: f.documentNumber.trim() } });
         else router.back();
@@ -429,6 +444,59 @@ export default function ManualExpenseScreen() {
             </View>
           </View>
 
+          <SectionTitle title="Ödeme durumu" />
+          <ChipRow>
+            {payStates.map((st) => (
+              <Chip
+                key={st.id}
+                testID={`manual-pay-${st.id}`}
+                label={st.label}
+                selected={pay.payment_state === st.id}
+                onPress={() =>
+                  st.available
+                    ? setPay(st.id === "paid" ? { payment_state: "paid", payment_date: pay.payment_date || today } : { payment_state: st.id, payment_account_id: null, payment_date: null })
+                    : st.reason
+                      ? toast(st.reason, "info")
+                      : undefined
+                }
+              />
+            ))}
+          </ChipRow>
+          {pay.payment_state === "paid" ? (
+            <View testID="manual-paid-fields">
+              <Text style={[type.caption, styles.pad, { color: colors.textSecondary }]}>Ödemenin yapıldığı hesap</Text>
+              {payAccounts === null ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : payAccounts.length ? (
+                <ChipRow>
+                  {payAccounts.map((a) => (
+                    <Chip key={a.id} testID={`manual-pay-acc-${a.id}`} label={a.name} selected={pay.payment_account_id === a.id} onPress={() => setPay({ payment_account_id: a.id })} />
+                  ))}
+                </ChipRow>
+              ) : (
+                <Text style={[type.caption, styles.pad, { color: colors.error }]}>Uygun TL kasa ya da banka hesabı yok. Önce Kasa ve Banka'dan hesap ekleyin.</Text>
+              )}
+              <Text style={[type.caption, styles.pad, { color: colors.textSecondary, marginTop: spacing.xs }]}>Ödeme tarihi</Text>
+              <ChipRow>
+                {[
+                  { k: "today", label: "Bugün", value: today },
+                  { k: "yesterday", label: "Dün", value: addDays(today, -1) },
+                  ...(/^\d{4}-\d{2}-\d{2}$/.test(f.issueDate) && f.issueDate < addDays(today, -1) ? [{ k: "issue", label: "Fatura tarihi", value: f.issueDate }] : []),
+                ].map((o) => (
+                  <Chip key={o.k} testID={`manual-pay-date-${o.k}`} label={o.label} selected={pay.payment_date === o.value} onPress={() => setPay({ payment_date: o.value })} />
+                ))}
+              </ChipRow>
+              {paymentMissing(pay) ? <Text style={[type.caption, styles.pad, { color: colors.amber }]}>Ödendi için ödemenin yapıldığı hesabı seçin.</Text> : null}
+            </View>
+          ) : null}
+          {payStates
+            .filter((st) => !st.available && st.reason)
+            .map((st) => (
+              <Text key={st.id} style={[type.caption, styles.pad, { color: colors.textTertiary }]}>
+                {st.reason}
+              </Text>
+            ))}
+
           <SectionTitle title="Gider kategorisi" />
           {categories === null ? (
             <Text style={[type.caption, styles.pad, { color: colors.textTertiary }]}>Kategoriler yüklenemedi; kategorisiz kaydedebilirsiniz.</Text>
@@ -584,7 +652,7 @@ export default function ManualExpenseScreen() {
               disabled={!canConfirm && !!built.body}
               onPress={() => save(false)}
             />
-            {caps.payablePayment ? (
+            {caps.payablePayment && pay.payment_state !== "paid" ? (
               <Button testID="manual-save-pay" variant="secondary" label="Kaydet ve ödeme ekle" disabled={!canConfirm} onPress={() => save(true)} />
             ) : null}
             {built.body && !fresh && pv.status === "loading" ? (

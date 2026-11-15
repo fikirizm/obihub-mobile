@@ -472,3 +472,8 @@ export function quickExpenseNotice(doc: any): string | null {
   return doc?.quick_expense === true && doc?.totals_basis === "document" ? "Tutarlar ve KDV fatura toplamlarından alındı; kalemler yalnız bilgi içindir." : null;
 }
 export const plannedNotice = (count: number) => (count > 0 ? `${count} yeni ürün kartı faturayı kaydettiğinizde açılır.` : null);
+
+// Elle alış (D-14b): ödeme alanları önizleme gövdesine girer ve taslağa saklanır; yalnız Ödendi tamamsa (eksikken kayıt kapalı).
+export function manualPaymentFields(f: Partial<ImportForm> | null | undefined): Record<string, string> {
+  return paymentComplete(f) ? { payment_state: "paid", payment_account_id: String(f!.payment_account_id), payment_date: String(f!.payment_date) } : {};
+}
