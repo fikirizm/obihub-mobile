@@ -46,7 +46,8 @@ export function singleFlight<T>(fn: () => Promise<T>): () => Promise<T> {
   };
 }
 
-const REJECT_CODES = ["REFRESH_TOKEN_INVALID", "REFRESH_TOKEN_EXPIRED", "REFRESH_TOKEN_REUSED", "SESSION_REVOKED"];
+// Sözleşme §2: bu kodlar yeniden giriş gerektirir (hepsi 401 gelir). 429 / ağ / 5xx'te çıkış yapılmaz.
+const REJECT_CODES = ["REFRESH_INVALID", "REFRESH_EXPIRED", "REFRESH_REUSED", "SESSION_REVOKED", "ACCOUNT_INACTIVE", "ACCOUNT_NOT_FOUND", "REFRESH_TOKEN_INVALID"];
 // "rejected": yenileme anahtarı geçersiz/iptal → çıkış. "transient": ağ/sunucu → oturum korunur, sonra yeniden denenir.
 export function refreshFailureKind(e: any): "rejected" | "transient" {
   const status = Number(e?.status || 0);

@@ -58,7 +58,11 @@ export default function Index() {
     setError(null);
     try {
       // Yönlendirmeyi yukarıdaki effect yapar; burada ikinci kez yapılmaz.
-      await login(email.trim(), password);
+      const r = await login(email.trim(), password);
+      // Yeni cihaz: e-posta kodu ekranı (güvenilir cihazda oturum doğrudan açılır).
+      if (r?.verify) {
+        router.push({ pathname: "/verify-code", params: { email: r.verify.email, resendAfter: String(r.verify.resendAfter), message: r.verify.message || "" } });
+      }
     } catch (e: any) {
       // Sunucunun makine okunur kodu (INVALID_CREDENTIALS, ACCOUNT_SUSPENDED, LOGIN_LOCKED…) ile Türkçe metin;
       // süresi dolan/duraklatılan abonelikte web'den yenileme yönlendirmesi (mobilde satın alma yok).

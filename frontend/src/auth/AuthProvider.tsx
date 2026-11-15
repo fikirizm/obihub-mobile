@@ -5,7 +5,24 @@ import * as BackgroundFetch from "expo-background-fetch";
 import * as TaskManager from "expo-task-manager";
 import { Platform } from "react-native";
 import * as Storage from "../storage";
-import { getAccountingSettings, getMe, getOrders, getSupportNotifications, login as apiLogin, refreshSession, registerPushToken, sessionTokensOf, setSessionHandlers, unregisterPushToken } from "../api";
+import {
+  getAccountingSettings,
+  getMe,
+  getOrders,
+  getSupportNotifications,
+  login as apiLogin,
+  logoutSession,
+  mobileRequestCode,
+  mobileVerifyCode,
+  refreshSession,
+  registerMobilePush,
+  registerPushToken,
+  sessionTokensOf,
+  setSessionHandlers,
+  unregisterPushToken,
+} from "../api";
+import { deviceIdValid, fallbackToLegacy, loginStep, newDeviceId, requestCodeBody, verifyCodeBody, type DeviceCtx } from "../mobile-auth";
+import Constants from "expo-constants";
 import { refreshDue, refreshFailureKind, singleFlight } from "../session-refresh";
 import { orderNotificationText } from "../push-ui";
 import { AppState } from "react-native";
@@ -19,7 +36,10 @@ type AuthContextValue = {
   token: string | null;
   user: User | null;
   bootLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  // Yeni cihazda e-posta kodu gerekir: verify dolu döner ve kod ekranına geçilir; güvenilir cihazda doğrudan oturum açılır.
+  login: (email: string, password: string) => Promise<LoginResult>;
+  verifyCode: (code: string) => Promise<void>;
+  resendCode: () => Promise<LoginResult>;
   logout: () => Promise<void>;
   refreshMe: () => Promise<void>;
   // Aboneliği kilitli hesapta backend'in döndürdüğü açıklama; kilit yoksa null.
@@ -48,6 +68,22 @@ const TOKEN_KEY = "obihub_token";
 const USER_KEY = "obihub_user";
 // Uzun oturum: yenileme anahtarı (her kullanımda değişir) güvenli depoda.
 const REFRESH_KEY = "obihub_refresh_token";
+// Cihaz kimliği ve güvenilir cihaz belirteci (90 gün, her kullanımda döner): çıkışta SİLİNMEZ; böylece çıkıp girmek
+// yeniden kod istemez. Uygulama silinip kurulursa yeni cihaz = yeniden e-posta kodu.
+const DEVICE_ID_KEY = "obihub_device_id";
+const TRUSTED_DEVICE_KEY = "obihub_trusted_device_token";
+
+export type LoginResult = { verify: { email: string; expiresIn: number; resendAfter: number; message: string | null } | null };
+
+async function deviceCtx(): Promise<DeviceCtx> {
+  let id = await Storage.getItemAsync(DEVICE_ID_KEY).catch(() => null);
+  if (!deviceIdValid(id)) {
+    id = newDeviceId();
+    await Storage.setItemAsync(DEVICE_ID_KEY, id).catch(() => {});
+  }
+  const name = String((Constants as any).deviceName || "").trim() || (Platform.OS === "ios" ? "iPhone" : Platform.OS === "android" ? "Android cihaz" : "Tarayıcı");
+  return { deviceId: String(id), deviceName: name.slice(0, 80), platform: Platform.OS, appVersion: String(Constants.expoConfig?.version || "") };
+}
 const SEEN_ORDER_IDS_KEY = "obihub_seen_order_ids";
 const ORDERS_CHANNEL_ID = "orders";
 // Kullanıcı kararı (15 Kas 2026): mevcut sipariş sesi (cha_ching.wav) kalır; ön planda, arka planda ve kilit ekranında bu çalar.
@@ -304,7 +340,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return t.access;
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
+  // Oturum yanıtını işle (kod doğrulama, güvenilir cihaz): anahtarlar, güvenilir cihaz belirteci, kullanıcı.
+  const completeSession = useCallback(
+    async (data: any) => {
+      pendingLogin.current = null;
+      const access = await saveSession(data);
+      if (typeof data?.trusted_device_token === "string" && data.trusted_device_token) await Storage.setItemAsync(TRUSTED_DEVICE_KEY, data.trusted_device_token).catch(() => {});
+      if (data?.user) {
+        setUser(data.user);
+        await Storage.setItemAsync(USER_KEY, JSON.stringify(data.user));
+      }
+      try {
+        const me = await getMe(access);
+        setUser(me);
+        await Storage.setItemAsync(USER_KEY, JSON.stringify(me));
+      } catch {}
+    },
+    [saveSession]
+  );
+
+  // Kod bekleyen giriş: yeniden gönderme parola ister; parola YALNIZ bellekte, en çok 10 dk tutulur (diske yazılmaz).
+  const pendingLogin = useRef<{ email: string; password: string; until: number } | null>(null);
+  const requestCode = useCallback(
+    async (email: string, password: string): Promise<LoginResult> => {
+      const ctx = await deviceCtx();
+      const trusted = await Storage.getItemAsync(TRUSTED_DEVICE_KEY).catch(() => null);
+      const res = await mobileRequestCode(requestCodeBody(email, password, ctx, trusted));
+      const step = loginStep(res);
+      if (step.kind === "session") {
+        await completeSession(res);
+        return { verify: null };
+      }
+      pendingLogin.current = { email: email.trim().toLowerCase(), password, until: Date.now() + 10 * 60_000 };
+      return { verify: { email: email.trim().toLowerCase(), expiresIn: step.expiresIn, resendAfter: step.resendAfter, message: step.message } };
+    },
+    [completeSession]
+  );
+
+  const login = useCallback(async (email: string, password: string): Promise<LoginResult> => {
+    try {
+      return await requestCode(email, password);
+    } catch (e) {
+      // Yeni giriş uçları yoksa (eski sunucu) eski kodsuz girişe düşülür.
+      if (!fallbackToLegacy(e)) throw e;
+    }
     // Web giriş akışı gibi e-posta küçük harfe çevrilir (sunucu web ucunda da böyle yapıyor).
     const data = await apiLogin(email.trim().toLowerCase(), password);
     await saveSession(data);
@@ -315,7 +394,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(me);
       await Storage.setItemAsync(USER_KEY, JSON.stringify(me));
     } catch {}
-  }, []);
+    return { verify: null };
+  }, [requestCode, saveSession]);
+
+  const verifyCode = useCallback(
+    async (code: string) => {
+      const p = pendingLogin.current;
+      if (!p || p.until < Date.now()) throw { message: "Giriş süresi doldu. E-posta ve şifrenizi yeniden girin.", status: 0, code: "LOGIN_RESTART" };
+      const ctx = await deviceCtx();
+      const res = await mobileVerifyCode(verifyCodeBody(p.email, code, ctx));
+      await completeSession(res);
+    },
+    [completeSession]
+  );
+  const resendCode = useCallback(async (): Promise<LoginResult> => {
+    const p = pendingLogin.current;
+    if (!p || p.until < Date.now()) throw { message: "Giriş süresi doldu. E-posta ve şifrenizi yeniden girin.", status: 0, code: "LOGIN_RESTART" };
+    return requestCode(p.email, p.password);
+  }, [requestCode]);
 
   const logout = useCallback(async (opts?: { sessionExpired?: boolean }) => {
     // Cihaz önceki kullanıcının bildirimlerini almaya devam etmesin. Oturum zaten düşmüşse (401) istek de 401 alır;
@@ -323,7 +419,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const authToken = tokenRef.current;
     const pushToken = pushTokenRef.current;
     pushTokenRef.current = null;
-    if (authToken && pushToken && !opts?.sessionExpired) await unregisterPushToken(authToken, pushToken);
+    const refreshToken = await Storage.getItemAsync(REFRESH_KEY).catch(() => null);
+    if (refreshToken) {
+      // Uzun oturum: oturum ailesi ve bu cihazın push kaydı sunucuda silinir; güvenilir cihaz korunur (yeniden kod istemez).
+      await logoutSession(authToken, { refresh_token: refreshToken, push_token: pushToken });
+    } else if (authToken && pushToken && !opts?.sessionExpired) await unregisterPushToken(authToken, pushToken);
     await Storage.deleteItemAsync(TOKEN_KEY);
     await Storage.deleteItemAsync(REFRESH_KEY);
     await Storage.deleteItemAsync(USER_KEY);
@@ -354,6 +454,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setToken(t.access);
         await Storage.setItemAsync(TOKEN_KEY, t.access);
         if (t.refresh) await Storage.setItemAsync(REFRESH_KEY, t.refresh);
+        if (t.trusted) await Storage.setItemAsync(TRUSTED_DEVICE_KEY, t.trusted).catch(() => {});
         return t.access;
       } catch (e) {
         if (refreshFailureKind(e) === "rejected") throw Object.assign(new Error("rejected"), { rejected: true });
@@ -554,6 +655,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             bypassDnd: false,
             showBadge: true,
           });
+          // Ses kapalı / sessiz saatlerde sunucu bu kanalı kullanır (sözleşme §6).
+          await Notifications.setNotificationChannelAsync("orders-silent", {
+            name: "Yeni siparişler (sessiz)",
+            importance: Notifications.AndroidImportance.DEFAULT,
+            sound: null,
+            lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+            showBadge: true,
+          });
         }
 
         const { status: existing } = await Notifications.getPermissionsAsync();
@@ -604,7 +713,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const pushTokenData = await Notifications.getExpoPushTokenAsync({ projectId: "90de2c08-4e66-4c91-a4f7-f5aa27669d82" });
       if (pushTokenData.data) {
-        await registerPushToken(authToken, pushTokenData.data);
+        const ctx = await deviceCtx();
+        try {
+          await registerMobilePush(authToken, {
+            token: pushTokenData.data,
+            platform: ctx.platform,
+            device_id: ctx.deviceId,
+            app_version: ctx.appVersion,
+            device_name: ctx.deviceName,
+            supports_custom_sound: true,
+          });
+        } catch (e: any) {
+          // Yeni uç yoksa eski kayıt ucu (sunucu ikisini tekilleştirir).
+          if ([404, 405].includes(Number(e?.status))) await registerPushToken(authToken, pushTokenData.data);
+          else throw e;
+        }
         pushTokenRef.current = pushTokenData.data;
       }
     } catch {}
@@ -634,6 +757,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       bootLoading,
       login,
+      verifyCode,
+      resendCode,
       logout,
       refreshMe,
       subscriptionLock,
@@ -657,6 +782,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       bootLoading,
       login,
+      verifyCode,
+      resendCode,
       logout,
       refreshMe,
       subscriptionLock,

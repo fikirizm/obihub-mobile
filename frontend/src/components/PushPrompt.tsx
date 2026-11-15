@@ -51,7 +51,9 @@ export function PushPrompt() {
               </Defs>
               <Rect x={0} y={0} width={72} height={72} rx={22} fill="url(#push-g)" />
             </Svg>
-            <BellIcon size={32} color="#FFFFFF" strokeWidth={2.2} />
+            <View style={styles.badgeIcon}>
+              <BellIcon size={32} color="#FFFFFF" strokeWidth={2.2} />
+            </View>
           </View>
           <Text accessibilityRole="header" style={[type.title, styles.center, { color: colors.textPrimary }]}>
             Yeni siparişleri anında duyun
@@ -76,6 +78,8 @@ export function PushPrompt() {
 }
 
 const styles = StyleSheet.create({
+  // Degrade SVG mutlak konumlu; simge üstte kalsın.
+  badgeIcon: { zIndex: 1, elevation: 1 },
   end: { flex: 1, justifyContent: "flex-end" },
   sheet: { borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl, padding: spacing.lg, gap: spacing.sm },
   badgeWrap: { width: 72, height: 72, alignSelf: "center", alignItems: "center", justifyContent: "center", marginBottom: spacing.xs },

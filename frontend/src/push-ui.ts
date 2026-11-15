@@ -31,8 +31,12 @@ export function orderNotificationText(orders: OrderNote[], opts: { showAmount?: 
 }
 
 // Bildirime dokununca: sipariş detayı. Yalnız uygulama içi yol ya da uygulama şemasıyla gelen bağlantı kabul edilir.
-export function notificationRoute(data: any): { pathname: "/orders/[id]"; params: { id: string } } | null {
+export type NotificationRoute = { pathname: "/orders/[id]"; params: { id: string } } | { pathname: "/(tabs)/orders" };
+export function notificationRoute(data: any): NotificationRoute | null {
+  if (data?.type === "test") return null;
   if (data?.order_id) return { pathname: "/orders/[id]", params: { id: String(data.order_id) } };
+  // Özet bildirim (5'ten fazla sipariş): sipariş listesi.
+  if (data?.type === "new_orders_summary" || data?.path === "/orders") return { pathname: "/(tabs)/orders" };
   const raw = String(data?.path || data?.url || "");
   const m = /^(?:obihub:\/\/|frontend:\/\/|\/)orders\/([^/?#]+)/.exec(raw);
   return m ? { pathname: "/orders/[id]", params: { id: decodeURIComponent(m[1]) } } : null;
@@ -44,3 +48,9 @@ export function shouldShowPushPrompt(status: string | null, dismissedAt: number 
   if (status !== "undetermined") return false;
   return !dismissedAt || now - dismissedAt >= SNOOZE_MS;
 }
+
+// Bildirim tercihleri (GET/PATCH /mobile/notification-preferences; hesap bazlı, tüm cihazlar).
+export const hhmmValid = (v: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v || ""));
+export const toggleMuted = (list: string[], key: string) => (list.includes(key) ? list.filter((k) => k !== key) : [...list, key]);
+export const quietLabel = (q: { enabled?: boolean; start?: string; end?: string } | null | undefined) =>
+  q?.enabled ? `${q.start} – ${q.end} arası sessiz` : "Kapalı";

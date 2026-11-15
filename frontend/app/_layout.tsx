@@ -21,7 +21,9 @@ function navigateToOrder(
   // Sipariş kimliği ya da uygulama içi bağlantı yolu (sözleşme: docs/pm/tasarim/mobil-oturum-push.md).
   const route = notificationRoute(data);
   const provider = data?.provider || "";
-  if (route) {
+  if (route && route.pathname === "/(tabs)/orders") {
+    router.push("/(tabs)/orders");
+  } else if (route) {
     router.push({
       pathname: "/orders/[id]",
       params: { id: route.params.id, provider: String(provider) },
@@ -83,7 +85,8 @@ function useSessionGuard() {
 
   useEffect(() => {
     if (!rootNavState?.key || bootLoading || token) return;
-    const isPublic = first === "" || first === "index" || first === "forgot-password";
+    // verify-code: yeni cihazda ilk girişte e-posta kodu ekranı (oturum henüz yok).
+    const isPublic = first === "" || first === "index" || first === "forgot-password" || first === "verify-code";
     if (isPublic || first === "(tabs)") return;
     if (router.canDismiss()) router.dismissAll();
     router.replace("/");
@@ -131,6 +134,7 @@ function RootInner() {
         <Stack.Screen name="index" options={{ animation: "fade" }} />
         <Stack.Screen name="(tabs)" options={{ animation: "fade" }} />
         <Stack.Screen name="forgot-password" options={{ animation: "slide_from_bottom" }} />
+        <Stack.Screen name="verify-code" options={{ animation: "slide_from_right" }} />
         <Stack.Screen name="products/scan" options={{ animation: "slide_from_bottom" }} />
         <Stack.Screen name="pos" options={{ animation: "slide_from_bottom", gestureEnabled: false }} />
         {/* Cila turu: kayıt oluşturan / para işleyen formlar alttan açılır (detay ve listeler sağdan kayar). */}

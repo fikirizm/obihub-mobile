@@ -100,6 +100,13 @@ const expenseState = {
 const importState = { in2: "applied" };
 const remembered = {};
 let refreshCalls = 0;
+let otpTries = 0;
+const notifPrefs = { new_order: true, sound: true, time_sensitive: false, show_amount: true, quiet_hours: { enabled: false, start: "23:00", end: "07:00", timezone: "Europe/Istanbul" },
+  muted_channels: [], available_channels: [{ key: "trendyol", label: "Trendyol" }, { key: "hepsiburada", label: "Hepsiburada" }, { key: "woocommerce", label: "WooCommerce" }], registered_devices: 2, orders_view_allowed: true, sound_name: "cha_ching.wav" };
+let mobileSessions = [
+  { id: "s1", device_name: "iPhone 15", platform: "ios", app_version: "1.1.14", created_at: "2026-11-15T09:00:00Z", last_used_at: "2026-11-15T17:00:00Z", ip_hint: "88.23.•.•", current: true },
+  { id: "s2", device_name: "Ofis iPad", platform: "ios", app_version: "1.1.13", created_at: "2026-11-01T09:00:00Z", last_used_at: "2026-11-12T12:00:00Z", ip_hint: "85.10.•.•", current: false },
+];
 let currentRefresh = null;
 const inboxDoc = (k, no, name, tax, date, amt, status, label, extra = {}) => ({ provider: "parasut", document_key: k, native_id: k, ettn: null, invoice_no: no, issue_date: date, supplier: { name, tax_no: tax },
   payable_amount: amt, tax_exclusive_amount: Math.round((amt / 1.2) * 100) / 100, currency: "TRY", provider_status: status, status, status_label: label, response_days_left: null, response_deadline: null,
@@ -265,7 +272,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -293,6 +300,42 @@ http
       });
       return;
     }
+    // Mobil kodlu giriş (/__mode?otp=1): yeni cihazda kod 123456; güvenilir cihaz belirteciyle doğrudan oturum.
+    if (state.otp && /^\/auth\/mobile\/login\/(request-code|verify-code)$/.test(path) && req.method === "POST") {
+      let rawBody = "";
+      req.on("data", (c) => (rawBody += c));
+      req.on("end", () => {
+        const b = JSON.parse(rawBody || "{}");
+        console.log("OTP", path, JSON.stringify({ ...b, password: b.password ? "***" : undefined }));
+        const session = () => { currentRefresh = "r1"; return { access_token: "test-token", token_type: "bearer", expires_in: 86400, refresh_token: "r1", session_id: "s1", trusted_device_token: "trust-" + b.device_id, user }; };
+        if (path.endsWith("request-code")) {
+          if (b.password !== "demo1234") return send(res, 401, { code: "INVALID_CREDENTIALS", detail: "E-posta veya şifre hatalı." });
+          if (b.device_token && b.device_token === "trust-" + b.device_id) return send(res, 200, { ...session(), skip_verification: true });
+          otpTries = 0;
+          return send(res, 200, { success: true, verification_required: true, message: "Doğrulama kodu e-posta adresinize gönderildi.", expires_in: 300, resend_after: 5 });
+        }
+        if (b.code !== "123456") { otpTries++; return send(res, 400, { code: otpTries >= 5 ? "CODE_LOCKED" : "CODE_INVALID", detail: otpTries >= 5 ? "Çok fazla hatalı deneme. Yeni kod isteyin." : "Kod hatalı. Tekrar deneyin." }); }
+        return send(res, 200, session());
+      });
+      return;
+    }
+    // Mobil push tercihleri, test bildirimi ve oturumlar (sözleşme §3–§4).
+    // Kodlu giriş modu kapalıyken yeni giriş uçları yok (eski sunucu): 404 → istemci eski /auth/login'e düşer.
+    if (!state.otp && path.startsWith("/auth/mobile/login/")) return send(res, 404, { detail: "Not Found" });
+    if (path === "/mobile/notification-preferences" && req.method === "GET") return send(res, 200, notifPrefs);
+    if (path === "/mobile/notification-preferences" && req.method === "PATCH") {
+      let rawBody = "";
+      req.on("data", (c) => (rawBody += c));
+      req.on("end", () => { const b = JSON.parse(rawBody || "{}"); console.log("WRITE prefs", rawBody); Object.assign(notifPrefs, b); send(res, 200, notifPrefs); });
+      return;
+    }
+    if (path === "/mobile/push-test" && req.method === "POST") return send(res, 200, { ok: true, devices: 1 });
+    if (path === "/mobile/push-tokens") return send(res, 200, { ok: true, active: true });
+    if (path === "/auth/sessions" && req.method === "GET") return send(res, 200, { sessions: mobileSessions });
+    if (path === "/auth/sessions/revoke-others" && req.method === "POST") { const n = mobileSessions.filter((x) => !x.current).length; mobileSessions = mobileSessions.filter((x) => x.current); return send(res, 200, { success: true, revoked: n }); }
+    let smt;
+    if ((smt = path.match(/^\/auth\/sessions\/([^/]+)$/)) && req.method === "DELETE") { mobileSessions = mobileSessions.filter((x) => x.id !== smt[1]); return send(res, 200, { success: true }); }
+    if (path === "/auth/logout" && req.method === "POST") { console.log("LOGOUT"); return send(res, 200, { success: true, revoked: true }); }
     if (path === "/auth/login" && state.expire) { currentRefresh = "r1"; return send(res, 200, { access_token: "acc-old", refresh_token: "r1", token_type: "bearer", user }); }
     if (state.expire && req.headers.authorization === "Bearer acc-old") return send(res, 401, { detail: "Oturum süresi doldu." });
     if (path === "/auth/login") return send(res, 200, { access_token: "test-token", token_type: "bearer", user });

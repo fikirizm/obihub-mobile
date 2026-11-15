@@ -1,3 +1,4 @@
+import { router } from "expo-router";
 import React from "react";
 import { ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import Constants from "expo-constants";
@@ -69,10 +70,30 @@ export default function SettingsScreen() {
           ]}
         />
 
+        <SectionTitle title="Bildirimler" />
+        <Card style={styles.block}>
+          <ListRow
+            testID="settings-notifications"
+            title="Bildirimler"
+            subtitle="Yeni sipariş, ses, sessiz saatler, kanallar"
+            chevron
+            onPress={() => router.push("/notification-settings")}
+          />
+        </Card>
+
+        <SectionTitle title="Güvenlik" />
+        <Card style={styles.block}>
+          <ListRow
+            testID="settings-sessions"
+            title="Oturumlar ve cihazlar"
+            subtitle="Açık oturumları görün, cihazlardan çıkış yapın"
+            chevron
+            onPress={() => router.push("/sessions")}
+          />
+        </Card>
         {appLock.supported ? (
           <>
-            <SectionTitle title="Güvenlik" />
-            <Card style={styles.block}>
+            <Card style={[styles.block, { marginTop: spacing.sm }]}>
               <ListRow
                 title="Biyometrik kilit"
                 subtitle="Açılışta Face ID veya parmak izi iste"

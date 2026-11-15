@@ -45,4 +45,20 @@ t("izin açıklama ekranı: yalnız izin sorulmamışsa; 'Şimdi değil'den sonr
   assert.equal(m.shouldShowPushPrompt("undetermined", now - 2 * 86400000, now), false);
   assert.equal(m.shouldShowPushPrompt("undetermined", now - 8 * 86400000, now), true);
 });
+t("özet bildirim (data.path /orders, type new_orders_summary) → sipariş listesi; test bildirimi yönlendirmez", () => {
+  assert.deepEqual(m.notificationRoute({ type: "new_orders_summary", count: 8, path: "/orders" }), { pathname: "/(tabs)/orders" });
+  assert.deepEqual(m.notificationRoute({ type: "new_order", order_id: "u1", path: "/orders/u1" }), { pathname: "/orders/[id]", params: { id: "u1" } });
+  assert.equal(m.notificationRoute({ type: "test" }), null);
+});
+
+t("bildirim tercihleri: sessiz saat HH:MM, kanal susturma aç/kapa (kısmi PATCH)", () => {
+  assert.equal(m.hhmmValid("23:00"), true);
+  assert.equal(m.hhmmValid("7:00"), false);
+  assert.equal(m.hhmmValid("24:00"), false);
+  assert.deepEqual(m.toggleMuted(["trendyol"], "n11"), ["trendyol", "n11"]);
+  assert.deepEqual(m.toggleMuted(["trendyol", "n11"], "trendyol"), ["n11"]);
+  assert.equal(m.quietLabel({ enabled: true, start: "23:00", end: "07:00" }), "23:00 – 07:00 arası sessiz");
+  assert.equal(m.quietLabel({ enabled: false, start: "23:00", end: "07:00" }), "Kapalı");
+});
+
 console.log(`\n${n} test geçti`);

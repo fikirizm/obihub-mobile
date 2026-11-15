@@ -56,4 +56,10 @@ await t("yenileme sonucu: yalnız kesin ret (401/403 ya da bilinen kod) çıkı�
   assert.equal(m.refreshFailureKind({ status: 503 }), "transient");
   assert.equal(m.refreshFailureKind({ status: 429 }), "transient");
 });
+await t("sözleşme kodları (§2): REFRESH_* / SESSION_REVOKED / ACCOUNT_* kesin ret; 429 bekle", () => {
+  for (const code of ["REFRESH_INVALID", "REFRESH_EXPIRED", "REFRESH_REUSED", "SESSION_REVOKED", "ACCOUNT_INACTIVE", "ACCOUNT_NOT_FOUND"])
+    assert.equal(m.refreshFailureKind({ status: 400, code }), "rejected", code);
+  assert.equal(m.refreshFailureKind({ status: 429, code: "RATE_LIMITED" }), "transient");
+});
+
 console.log(`\n${n} test geçti`);

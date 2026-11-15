@@ -1,3 +1,4 @@
+import Constants from "expo-constants";
 // Premium ObiHub API client targeting api.obihub.app/api by default.
 // Override via EXPO_PUBLIC_OBIHUB_API_URL env if needed.
 
@@ -1119,20 +1120,26 @@ export async function markSupportNotificationsRead(token: string) {
 // Uzun oturum bağdaştırıcısı (docs/pm/tasarim/mobil-oturum-push.md). Sunucu alan adları sözleşme gelince burada kesinleşir;
 // uygulamanın geri kalanı yalnız { access, refresh } ile çalışır.
 // ---------------------------------------------------------------------------
-export type SessionTokens = { access: string; refresh: string | null };
+export type SessionTokens = { access: string; refresh: string | null; trusted?: string | null };
 
 export function sessionTokensOf(data: any): SessionTokens | null {
   const access = data?.access_token || data?.token;
   if (typeof access !== "string" || !access) return null;
   const refresh = typeof data?.refresh_token === "string" && data.refresh_token ? data.refresh_token : null;
-  return { access, refresh };
+  // Güvenilir cihaz belirteci (yalnız kalan süresi kısalınca ya da girişte gelir).
+  const trusted = typeof data?.trusted_device_token === "string" && data.trusted_device_token ? data.trusted_device_token : null;
+  return { access, refresh, trusted };
 }
 
 // Yenileme: her kullanımda yenileme anahtarı değişir; yenisi saklanır. Ortak request() kullanılmaz (401 döngüsü olmasın).
 export async function refreshSession(refreshToken: string): Promise<SessionTokens> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE_URL}/auth/refresh`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refresh_token: refreshToken }) });
+    res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken, app_version: String(Constants.expoConfig?.version || "") }),
+    });
   } catch {
     throw { message: "Sunucuya bağlanılamıyor.", status: 0 } as ApiError;
   }
@@ -1140,5 +1147,71 @@ export async function refreshSession(refreshToken: string): Promise<SessionToken
   if (!res.ok) throw { message: "Oturum yenilenemedi.", status: res.status, code: typeof data?.code === "string" ? data.code : typeof data?.detail?.code === "string" ? data.detail.code : undefined } as ApiError;
   const t = sessionTokensOf(data);
   if (!t) throw { message: "Oturum yenilenemedi.", status: 500 } as ApiError;
-  return { access: t.access, refresh: t.refresh || refreshToken };
+  return { access: t.access, refresh: t.refresh || refreshToken, trusted: t.trusted };
+}
+
+// ---------------------------------------------------------------------------
+// Mobil oturum + push (docs/pm/tasarim/mobil-oturum-push.md). Giriş uçları Bearer'sız; 404/405 → eski /auth/login'e düşülür.
+// ---------------------------------------------------------------------------
+export async function mobileRequestCode(body: Record<string, unknown>) {
+  return request<any>("/auth/mobile/login/request-code", { method: "POST", body: JSON.stringify(body) });
+}
+export async function mobileVerifyCode(body: Record<string, unknown>) {
+  return request<any>("/auth/mobile/login/verify-code", { method: "POST", body: JSON.stringify(body) });
+}
+
+// Çıkış: oturum ailesi ve bu cihazın push kaydı sunucuda silinir. Ortak request() kullanılmaz (401 döngüsü olmasın);
+// hata yutulur, en çok 4 sn beklenir. Süresi dolmuş erişim anahtarı da kabul edilir; gövdedeki refresh_token yeterlidir.
+export async function logoutSession(accessToken: string | null, body: { refresh_token?: string | null; push_token?: string | null; forget_device?: boolean }) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    await fetch(`${API_BASE_URL}/auth/logout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+      body: JSON.stringify({ ...(body.refresh_token ? { refresh_token: body.refresh_token } : {}), ...(body.push_token ? { push_token: body.push_token } : {}), forget_device: body.forget_device === true }),
+      signal: ctrl.signal,
+    });
+  } catch {
+    // Ağ hatası: yerel çıkış yine tamamlanır.
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function registerMobilePush(token: string, body: Record<string, unknown>) {
+  return request<{ ok?: boolean; active?: boolean }>("/mobile/push-tokens", { method: "POST", body: JSON.stringify(body) }, token);
+}
+
+export type MobileSession = { id: string; device_name?: string; platform?: string; app_version?: string; created_at?: string; last_used_at?: string; ip_hint?: string; expires_at?: string; current?: boolean };
+export async function getMobileSessions(token: string) {
+  const d = await request<any>("/auth/sessions", { method: "GET" }, token);
+  return (Array.isArray(d?.sessions) ? d.sessions : []) as MobileSession[];
+}
+export async function deleteMobileSession(token: string, id: string) {
+  return request<any>(`/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }, token);
+}
+export async function revokeOtherSessions(token: string) {
+  return request<{ success?: boolean; revoked?: number }>("/auth/sessions/revoke-others", { method: "POST", body: "{}" }, token);
+}
+
+export type NotificationPrefs = {
+  new_order: boolean;
+  sound: boolean;
+  time_sensitive: boolean;
+  show_amount: boolean;
+  quiet_hours: { enabled: boolean; start: string; end: string; timezone?: string };
+  muted_channels: string[];
+  available_channels?: { key: string; label: string }[];
+  registered_devices?: number;
+  orders_view_allowed?: boolean;
+};
+export async function getNotificationPrefs(token: string) {
+  return request<NotificationPrefs>("/mobile/notification-preferences", { method: "GET" }, token);
+}
+export async function patchNotificationPrefs(token: string, patch: Partial<NotificationPrefs>) {
+  return request<NotificationPrefs>("/mobile/notification-preferences", { method: "PATCH", body: JSON.stringify(patch) }, token);
+}
+export async function sendPushTest(token: string) {
+  return request<{ ok?: boolean; devices?: number }>("/mobile/push-test", { method: "POST", body: "{}" }, token);
 }
