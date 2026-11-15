@@ -1,6 +1,7 @@
 // Finans alanının yazma uçları: virman, yeni kasa/banka hesabı, yeni cari, yeni satış faturası (taslak).
 // İstek gövdeleri web panelindeki formlarla aynıdır (kaynak dosya ve satır her işlevin üstünde yazılıdır).
-import { request } from "./api";
+import { API_BASE_URL, request } from "./api";
+import { bytesToBase64 } from "./inbox-ui";
 import type { CashAccount, LocalInvoice, Party } from "./types";
 import { isUncertainWrite, moneyRetryable, sendKeyedMoney, type KeyedMoneyOutcome } from "./money-retry";
 import { collectionPath, orderInvoiceLabel, type Collection } from "./collection-actions";
@@ -220,8 +221,12 @@ export async function deleteLocalInvoice(token: string, id: string) {
 }
 
 // Web SalesInvoiceFormOS editable: taslak/gecikti, gönderilmemiş (parasut_invoice_id yok), ödeme yok, resmileştirme kilidi yok.
-export function isInvoiceEditable(inv: { status?: string; parasut_invoice_id?: string | null; paid_amount?: number | null; officialize_lock?: unknown } | null) {
+export function isInvoiceEditable(
+  inv: { status?: string; parasut_invoice_id?: string | null; paid_amount?: number | null; officialize_lock?: unknown; actions?: { edit_amounts?: unknown } | null } | null
+) {
   if (!inv) return false;
+  // D-12 (S-4): kesilmiş faturada tutar alanları kilitli; sunucu actions.edit_amounts verirse o esastır.
+  if (inv.actions && typeof inv.actions.edit_amounts === "boolean" && !inv.actions.edit_amounts) return false;
   return ["taslak", "gecikti"].includes(String(inv.status || "")) && !inv.parasut_invoice_id && Number(inv.paid_amount || 0) <= 0 && !inv.officialize_lock;
 }
 
@@ -398,4 +403,57 @@ export async function deleteCustomerTransfer(token: string, customerId: string, 
     { method: "DELETE", headers: { "Idempotency-Key": key } },
     token
   );
+}
+
+// ---------------------------------------------------------------------------
+// D-12 satış faturası yaşam döngüsü (docs/pm/tasarim/D-12.md). Yazan uçlar işlem anahtarlı (gövdede idempotency_key + başlık);
+// belirsiz sonuçta aynı anahtarla yeniden gönderilir (sendKeyedMoney).
+// ---------------------------------------------------------------------------
+const lcPath = (id: string, tail: string) => `/local-invoices/${encodeURIComponent(id)}/${tail}`;
+const keyed = (key: string) => ({ "Idempotency-Key": key });
+
+export async function cancelInvoice(token: string, id: string, reason: string, key: string) {
+  return request<any>(lcPath(id, "cancel"), { method: "POST", body: JSON.stringify({ reason, idempotency_key: key }), headers: keyed(key) }, token);
+}
+// e-Belgeli faturada yerel iptalden önce ayrı, onaylı e-belge iptali (geri alınamaz).
+export async function cancelInvoiceEdoc(token: string, id: string, reason: string, key: string) {
+  return request<any>(lcPath(id, "cancel/edoc"), { method: "POST", body: JSON.stringify({ reason, confirm: true, idempotency_key: key }), headers: keyed(key) }, token);
+}
+export async function getInvoiceReturns(token: string, id: string) {
+  return request<{ items?: any[]; returned_totals?: Record<string, string> }>(lcPath(id, "returns"), { method: "GET" }, token);
+}
+export async function createInvoiceReturn(
+  token: string,
+  id: string,
+  body: { kind: "iade_faturasi" | "gider_pusulasi"; lines: { source_line_key: string; quantity: string }[]; stock_in: boolean; date: string; note?: string },
+  key: string
+) {
+  return request<any>(lcPath(id, "returns"), { method: "POST", body: JSON.stringify({ ...body, idempotency_key: key }), headers: keyed(key) }, token);
+}
+export async function copyInvoice(token: string, id: string, key: string) {
+  return request<any>(lcPath(id, "copy"), { method: "POST", body: JSON.stringify({ idempotency_key: key }), headers: keyed(key) }, token);
+}
+export async function setInvoiceArchived(token: string, id: string, archived: boolean) {
+  return request<any>(lcPath(id, archived ? "archive" : "unarchive"), { method: "POST", body: "{}" }, token);
+}
+export async function getInvoiceEvents(token: string, id: string, before?: string) {
+  const qs = new URLSearchParams({ limit: "50" });
+  if (before) qs.set("before", before);
+  return request<{ items?: any[]; next_before?: string | null }>(`${lcPath(id, "events")}?${qs.toString()}`, { method: "GET" }, token);
+}
+
+// GET /local-invoices/{id}/pdf → application/pdf (base64 olarak döner) ya da aynalı belgede {redirect: url}.
+export async function getInvoicePdf(token: string, id: string): Promise<{ base64?: string; redirect?: string }> {
+  const res = await fetch(`${API_BASE_URL}${lcPath(id, "pdf")}`, { headers: { Authorization: `Bearer ${token}` } });
+  const type = res.headers.get("Content-Type") || "";
+  if (!res.ok) {
+    const j: any = await res.json().catch(() => null);
+    throw Object.assign(new Error(typeof j?.detail === "string" ? j.detail : "Fatura PDF'i alınamadı."), { status: res.status, code: j?.code });
+  }
+  if (type.includes("application/json")) {
+    const j: any = await res.json().catch(() => null);
+    if (j?.redirect) return { redirect: String(j.redirect) };
+    throw new Error("Fatura PDF'i alınamadı.");
+  }
+  return { base64: bytesToBase64(new Uint8Array(await res.arrayBuffer())) };
 }

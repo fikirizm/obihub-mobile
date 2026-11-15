@@ -28,6 +28,7 @@ export const SALES_TABS: [string, string][] = [
   ["tahsil", "Tahsil edilecek"],
   ["gecikmis", "Gecikmiş"],
   ["iptal", "İptal"],
+  ["arsiv", "Arşiv"],
 ];
 
 const EDOC_TYPE: Record<string, string> = { e_invoice: "e-Fatura", einvoice: "e-Fatura", e_fatura: "e-Fatura", e_archive: "e-Arşiv", earchive: "e-Arşiv", e_arsiv: "e-Arşiv" };

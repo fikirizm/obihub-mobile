@@ -169,7 +169,8 @@ const VIEW_FILTER = {
   resmilesti: (i) => i.status === "resmilesti" || i.edoc_state === "done",
   tahsil: (i) => !["taslak", "iptal"].includes(i.status) && i.remaining_amount > 0 && i.money_state !== "overdue",
   gecikmis: (i) => i.money_state === "overdue",
-  iptal: (i) => i.status === "iptal",
+  iptal: (i) => i.status === "iptal" && !i.archived,
+  arsiv: (i) => i.archived === true,
 };
 const payKeys = new Map(); // Aşama 4 P2: tahsilat işlem anahtarları (anahtar → ilk yanıt)
 const tickets = [
@@ -1138,7 +1139,7 @@ http
       if (vw && !VIEW_FILTER[vw]) return send(res, 422, { code: "FILTER_INVALID", detail: "Görünüm geçersiz." });
       const it = url.searchParams.get("invoice_type") || "satis";
       const qo = url.searchParams.get("quote_outcome");
-      const rows = localInvoices.filter((i) => (i.invoice_type || "satis") === it && (!st || i.status === st) && (!vw || VIEW_FILTER[vw](i)) && (!qo || QUOTE_FILTER[qo](i)));
+      const rows = localInvoices.filter((i) => (i.invoice_type || "satis") === it && (!st || i.status === st) && (vw ? VIEW_FILTER[vw](i) : !i.archived) && (!qo || QUOTE_FILTER[qo](i)));
       return send(res, 200, { items: rows, total: rows.length, page: 1, per_page: 30, total_pages: 1 });
     }
     // C4 eki: Paraşüt tahsilat senkronu
@@ -1155,6 +1156,42 @@ http
         if (p.parasut_sync_state === "not_sent" && !b.parasut_account_id) return send(res, 200, { ok: false, error: "Paraşüt hesabı seçin." });
         p.parasut_sync_state = "synced"; p.parasut_sync_error = undefined;
         send(res, 200, { ok: true });
+      });
+    }
+    // D-12 yaşam döngüsü: iptal (gerekçe, e-belge adımı), iade, kopya, arşiv, geçmiş, PDF.
+    let lcm;
+    if ((lcm = path.match(/^\/local-invoices\/([^/]+)\/(cancel|cancel\/edoc|returns|copy|archive|unarchive|events|pdf)$/))) {
+      const inv = localInvoices.find((i) => i.id === lcm[1]);
+      if (!inv) return send(res, 404, { code: "NOT_FOUND", detail: "Fatura bulunamadı." });
+      const ev = (type, summary, data = {}) => (inv.events = [{ id: "ev" + Date.now() + Math.random(), type, at: new Date().toISOString(), actor: { name: "Demo Kullanıcı" }, summary, data }, ...(inv.events || [])]);
+      const op = lcm[2];
+      if (op === "events") return send(res, 200, { items: inv.events || [{ id: "ev0", type: "created", at: "2026-11-14T09:00:00+03:00", actor: { name: "Demo Kullanıcı" }, summary: "Fatura oluşturuldu" }], next_before: null });
+      if (op === "pdf") { res.writeHead(200, { "Content-Type": "application/pdf", "Access-Control-Allow-Origin": "*" }); return res.end(Buffer.from("%PDF-1.4\n%mock\n")); }
+      if (op === "returns" && req.method === "GET") return send(res, 200, { items: [], returned_totals: inv.returned_totals || {} });
+      return readBody((b) => {
+        console.log("WRITE", path, JSON.stringify(b));
+        if (op === "cancel") {
+          if (String(b.reason || "").trim().length < 3) return send(res, 422, { code: "CANCEL_REASON_REQUIRED", detail: "İptal gerekçesi zorunlu." });
+          if (inv.paid_amount > 0) return send(res, 409, { code: "HAS_PAYMENTS", detail: "Tahsilatı olan fatura iptal edilemez." });
+          if (inv.edoc_state === "done" && !inv.edoc_cancelled) return send(res, 409, { code: "EDOC_CANCEL_REQUIRED", detail: "e-Belge iptali gerekli." });
+          Object.assign(inv, { status: "iptal", display_status: "iptal", lifecycle: "cancelled", cancel_reason: b.reason, money_state: "not_issued" }); ev("cancelled", "Fatura iptal edildi", { reason: b.reason });
+          return send(res, 200, { ok: true, id: inv.id, status: "iptal", lifecycle: "cancelled", replayed: false });
+        }
+        if (op === "cancel/edoc") { inv.edoc_cancelled = true; return send(res, 200, { ok: true }); }
+        if (op === "returns") {
+          inv.returned_totals = inv.returned_totals || {};
+          for (const l of b.lines || []) inv.returned_totals[l.source_line_key] = String(Number(inv.returned_totals[l.source_line_key] || 0) + Number(l.quantity));
+          const r = { id: "ret" + Date.now(), invoice_type: "iade", return_of: inv.id, kind: b.kind, status: "taslak", display_status: "taslak", customer_name: inv.customer_name, invoice_number: "", issue_date: b.date, currency: "TRY", total: 0, items: [], payments: [], voided_payments: [] };
+          localInvoices.unshift(r); ev("returned", "İade oluşturuldu");
+          return send(res, 201, { ...r, replayed: false, warnings: [] });
+        }
+        if (op === "copy") {
+          const c = { ...inv, id: "li" + Date.now(), status: "taslak", display_status: "taslak", money_state: "not_issued", invoice_number: "", paid_amount: 0, payments: [], copied_from: inv.id, issue_date: "2026-11-15", events: [], archived: false };
+          localInvoices.unshift(c); ev("copied", "Kopyalandı");
+          return send(res, 201, c);
+        }
+        inv.archived = op === "archive"; ev(op === "archive" ? "archived" : "unarchived", op === "archive" ? "Arşivlendi" : "Arşivden çıkarıldı");
+        return send(res, 200, { ok: true, archived: inv.archived });
       });
     }
     const invMatch = path.match(/^\/local-invoices\/([^/]+)(?:\/(payment|resmilestir|convert|quote-outcome))?$/);

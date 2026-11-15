@@ -10,6 +10,11 @@ import { canOfferParasutSync, collectResultText, parasutActionFailText, parasutA
 import { isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { amountRows, collectAmount, invoiceStatusView, parasutUnsupportedText } from "../../src/invoice-status";
 import { invoicePaymentActions, invoicePaymentCollection } from "../../src/collection-actions";
+import { lifecycleActions, lifecycleErrorText } from "../../src/document-lifecycle";
+import { copyInvoice, getInvoicePdf, setInvoiceArchived } from "../../src/api-finans";
+import { Linking, Platform } from "react-native";
+import * as FileSystem from "expo-file-system/legacy";
+import { printOrShare } from "../../src/pdf";
 import { autoSettlementText, canUnmatch, UNMATCH_CONFIRM, unmatchDoneText, unmatchErrorText } from "../../src/cari-ui";
 import { runVoidCollection } from "../../src/collection-flow";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -85,7 +90,7 @@ export default function LocalInvoiceDetailScreen() {
   const [inv, setInv] = useState<LocalInvoice | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [busy, setBusy] = useState<"official" | "payment" | "edoc" | "delete" | "void" | null>(null);
+  const [busy, setBusy] = useState<"official" | "payment" | "edoc" | "delete" | "void" | "copy" | "archive" | "pdf" | null>(null);
   const [voidingId, setVoidingId] = useState<string | null>(null);
   // C4 eki: firmada tahsilatı Paraşüt'e yazma açık mı (okunamazsa kapalı).
   const [caps, setCaps] = useState<{ payment_sync: boolean }>({ payment_sync: false });
@@ -158,6 +163,53 @@ export default function LocalInvoiceDetailScreen() {
   const mayWrite = canManage(user, "billing");
   // C4: web SalesInvoiceFormOS editable kuralı; silme de aynı koşulda sunulur (sunucu ayrıca doğrular).
   const canEditInvoice = mayWrite && isInvoiceEditable(inv as any);
+  const lc = lifecycleActions(inv as any);
+  const onCopy = async () => {
+    if (!token || busy) return;
+    const ok = await confirm({ title: "Fatura kopyalansın mı?", message: "Aynı kalemlerle bugün tarihli yeni bir taslak oluşturulur; tahsilat ve e-belge bilgileri taşınmaz.", confirmLabel: "Kopyala" });
+    if (!ok) return;
+    setBusy("copy");
+    const key = newIdempotencyKey("copy");
+    const out = await sendKeyedMoney(
+      () => copyInvoice(token, inv.id, key),
+      () => confirm({ title: "Sonuç alınamadı", message: "Kopya oluşmuş olabilir. Yeniden gönderebilirsiniz; ikinci kez oluşmaz.", confirmLabel: "Yeniden gönder" })
+    );
+    setBusy(null);
+    if (out.ok && out.result?.id) {
+      toast("Fatura kopyalandı; yeni taslak açıldı.", "success");
+      router.push({ pathname: "/local-invoices/new", params: { id: String(out.result.id) } });
+    } else if (!out.ok) toast(lifecycleErrorText(out.error, "Fatura kopyalanamadı."), "error");
+  };
+  const onArchive = async () => {
+    if (!token || busy) return;
+    setBusy("archive");
+    try {
+      await setInvoiceArchived(token, inv.id, !inv.archived);
+      toast(inv.archived ? "Fatura arşivden çıkarıldı." : "Fatura arşivlendi; bakiye ve raporlar değişmez.", "success");
+      load();
+    } catch (e: any) {
+      toast(lifecycleErrorText(e, "Arşiv işlemi yapılamadı."), "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+  const onPdf = async () => {
+    if (!token || busy) return;
+    setBusy("pdf");
+    try {
+      const r = await getInvoicePdf(token, inv.id);
+      if (r.redirect) await Linking.openURL(r.redirect);
+      else if (r.base64 && Platform.OS !== "web") {
+        const path = `${FileSystem.cacheDirectory}${String(inv.invoice_number || "fatura").replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`;
+        await FileSystem.writeAsStringAsync(path, r.base64, { encoding: FileSystem.EncodingType.Base64 });
+        await printOrShare(path);
+      } else if (r.base64) toast("PDF hazır (web önizlemesinde açılmaz).", "info");
+    } catch (e: any) {
+      toast(lifecycleErrorText(e, "Fatura PDF'i alınamadı."), "error");
+    } finally {
+      setBusy(null);
+    }
+  };
   const onDelete = async () => {
     if (!token || !inv || busy) return;
     const ok = await confirm({
@@ -517,6 +569,53 @@ export default function LocalInvoiceDetailScreen() {
           </SafeAnimatedView>
         ) : null}
 
+        {/* D-12 yaşam döngüsü: düğmeler sunucunun actions'ına göre (iptal, iade, kopya, arşiv, geçmiş, PDF). */}
+        {mayWrite || lc.preview ? (
+          <SafeAnimatedView entering={FadeInDown.delay(100).duration(380)}>
+            <SectionTitle title="Belge işlemleri" action={inv.archived ? <StatusBadge label="Arşivde" kind="neutral" size="sm" /> : undefined} />
+            <View style={styles.lcGrid}>
+              {lc.preview ? <Button testID="invoice-pdf" size="sm" variant="secondary" label="PDF / Yazdır" busy={busy === "pdf"} disabled={Boolean(busy)} onPress={onPdf} /> : null}
+              {mayWrite && lc.copy ? <Button testID="invoice-copy" size="sm" variant="secondary" label="Kopyala" busy={busy === "copy"} disabled={Boolean(busy)} onPress={onCopy} /> : null}
+              {mayWrite && lc.return ? (
+                <Button
+                  testID="invoice-return"
+                  size="sm"
+                  variant="secondary"
+                  label="İade oluştur"
+                  disabled={Boolean(busy)}
+                  onPress={() => router.push({ pathname: "/local-invoices/returns", params: { id: inv.id, title: [inv.invoice_number, inv.customer_name].filter(Boolean).join(" · ") } })}
+                />
+              ) : null}
+              {mayWrite && lc.archive ? (
+                <Button testID="invoice-archive" size="sm" variant="secondary" label={inv.archived ? "Arşivden çıkar" : "Arşivle"} busy={busy === "archive"} disabled={Boolean(busy)} onPress={onArchive} />
+              ) : null}
+              <Button
+                testID="invoice-events"
+                size="sm"
+                variant="ghost"
+                label="Geçmiş"
+                onPress={() => router.push({ pathname: "/local-invoices/events", params: { id: inv.id, title: inv.invoice_number || "" } })}
+              />
+              {mayWrite && lc.cancel ? (
+                <Button
+                  testID="invoice-cancel"
+                  size="sm"
+                  variant="destructive"
+                  label="İptal et"
+                  disabled={Boolean(busy)}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/local-invoices/cancel",
+                      params: { id: inv.id, title: [inv.invoice_number, inv.customer_name, formatMoney(inv.total, cur)].filter(Boolean).join(" · ") },
+                    })
+                  }
+                />
+              ) : null}
+            </View>
+            {inv.cancel_reason ? <Text style={[type.caption, styles.note, { color: colors.textSecondary }]}>{`İptal gerekçesi: ${inv.cancel_reason}`}</Text> : null}
+          </SafeAnimatedView>
+        ) : null}
+
         {/* Hero başlığı iki satırda kesilir; tam unvan burada satır sınırı olmadan görünür. */}
         <SafeAnimatedView entering={FadeInDown.delay(110).duration(380)}>
           <SectionTitle title="Müşteri" />
@@ -636,6 +735,7 @@ export default function LocalInvoiceDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  lcGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginHorizontal: spacing.lg },
   badges: { flexDirection: "column", alignItems: "flex-end", gap: 4 },
   note: { marginHorizontal: spacing.lg, marginBottom: spacing.sm, padding: spacing.sm, borderRadius: radius.md },
   wrap: { flex: 1 },

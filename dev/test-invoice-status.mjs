@@ -16,8 +16,9 @@ let n = 0;
 function t(name, fn) { fn(); n++; console.log("ok -", name); }
 
 t("sekmeler web ile aynı; kimlik sunucu view parametresi", () => {
-  assert.deepEqual(m.SALES_TABS.map((x) => x[0]), ["", "taslak", "kesildi", "resmilesti", "tahsil", "gecikmis", "iptal"]);
-  assert.deepEqual(m.SALES_TABS.map((x) => x[1]), ["Tümü", "Taslak", "Kesildi", "Resmileşti", "Tahsil edilecek", "Gecikmiş", "İptal"]);
+  // D-12: sunucu view=arsiv (arşivli belgeler varsayılan listede yok).
+  assert.deepEqual(m.SALES_TABS.map((x) => x[0]), ["", "taslak", "kesildi", "resmilesti", "tahsil", "gecikmis", "iptal", "arsiv"]);
+  assert.deepEqual(m.SALES_TABS.map((x) => x[1]), ["Tümü", "Taslak", "Kesildi", "Resmileşti", "Tahsil edilecek", "Gecikmiş", "İptal", "Arşiv"]);
 });
 t("belge ekseni: gonderildi → Kesildi (Gönderildi metni yok)", () => {
   assert.equal(m.documentAxis({ status: "gonderildi" }), "issued");

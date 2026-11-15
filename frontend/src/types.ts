@@ -399,6 +399,13 @@ export type LocalInvoice = {
   parasut_invoice_id?: string;
   // Toplu sürüm 1 (G2): fatura ismi, tahsil edilecek tutar (tevkifat/stopaj düşülmüş), resmileşme alanları.
   document_name?: string | null;
+  // D-12: arşiv (yalnız ObiHub görünümü), yaşam döngüsü kapıları, iptal gerekçesi, iade bağı.
+  archived?: boolean;
+  lifecycle?: string;
+  actions?: Record<string, boolean> | null;
+  cancel_reason?: string | null;
+  return_of?: string | null;
+  read_only?: boolean;
   payable_amount?: number;
   edocument_type?: string;
   source?: string;
