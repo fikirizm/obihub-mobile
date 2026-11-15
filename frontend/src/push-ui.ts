@@ -57,6 +57,8 @@ export const quietLabel = (q: { enabled?: boolean; start?: string; end?: string 
 
 // Uygulama rozeti = bekleyen (işlenmemiş) sipariş sayısı; push yükündeki `badge` ile aynı tanım. Okunamazsa null (rozete dokunulmaz).
 export function badgeFromStats(stats: any): number | null {
+  // Kesin sözleşme (15 Kas 2026): /orders/stats → badge_count (push yükündeki badge ile aynı; tüm firma, süzgeçsiz).
+  if (stats?.badge_count != null && Number.isFinite(Number(stats.badge_count))) return Math.max(0, Math.floor(Number(stats.badge_count)));
   const g = Number(stats?.groups?.pending);
   if (Number.isFinite(g)) return Math.max(0, Math.floor(g));
   const p = Number(stats?.pending);

@@ -69,4 +69,9 @@ t("rozet: bekleyen sipariş sayısı (stats.groups.pending; eski sunucuda pendin
   assert.equal(m.badgeFromStats({}), null);
 });
 
+t("rozet: kesin sözleşme — /orders/stats badge_count esastır (push badge ile aynı sayı)", () => {
+  assert.equal(m.badgeFromStats({ badge_count: 7, groups: { pending: 4 } }), 7);
+  assert.equal(m.badgeFromStats({ badge_count: 0, groups: { pending: 4 } }), 0);
+});
+
 console.log(`\n${n} test geçti`);
