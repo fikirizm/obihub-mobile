@@ -397,6 +397,11 @@ export type LocalInvoice = {
   }[];
   parasut_item_type?: string;
   parasut_invoice_id?: string;
+  // Toplu sürüm 1 (G2): fatura ismi, tahsil edilecek tutar (tevkifat/stopaj düşülmüş), resmileşme alanları.
+  document_name?: string | null;
+  payable_amount?: number;
+  edocument_type?: string;
+  source?: string;
   // Düzenleme formu için cari alanları ve resmileştirme kilidi.
   customer_id?: string | null;
   customer_tax_no?: string;

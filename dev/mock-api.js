@@ -130,6 +130,19 @@ const localInvoices = [
   { id: "li5", invoice_number: "", status: "taslak", display_status: "taslak", money_state: "not_issued", customer_id: "c1", customer_name: "Elif Kaya", issue_date: "2026-11-12", due_date: "2026-11-30", currency: "TRY", subtotal: 100, discount_amount: 0, vat_amount: 20, total: 120, paid_amount: 0, remaining_amount: 120, payments: [], voided_payments: [], items: [] },
   { id: "li3", invoice_number: "OBI2026102", status: "gecikti", display_status: "gonderildi", money_state: "pending", customer_name: "Acme GmbH", issue_date: "2026-11-08", due_date: "2026-12-08", currency: "USD", subtotal: 1000, discount_amount: 0, vat_amount: 200, total: 1200, paid_amount: 0, remaining_amount: 1200, payments: [], items: [{ name: "İhracat", quantity: 1, unit_price: 1000, vat_rate: 20, total: 1200 }] },
 ];
+// Toplu sürüm 1 (G2 §5 örneği): P1 belgesi — ara toplam indirimi, ÖTV/konaklama, tevkifat, stopaj; fatura ismi; Paraşüt'e resmileşmemiş.
+localInvoices.push({ id: "li6", doc_schema: 1, invoice_number: "OBI2026120", document_name: "Kasım danışmanlık", status: "gonderildi", display_status: "gonderildi", money_state: "pending", lifecycle: "issued",
+  customer_id: "c2", customer_name: "Can Öztürk", issue_date: "2026-11-14", due_date: "2026-12-14", currency: "TRY", subtotal: 1150, discount_amount: 150, vat_amount: 201.25, other_taxes_total: 2.88,
+  withholding_total: 100.63, accommodation_tax_rate: "1", accommodation_tax_total: 11.5, stopaj_rate: "10", stopaj_total: 115, total: 1365.63, payable_amount: 1150, paid_amount: 0, remaining_amount: 1150,
+  payments: [], voided_payments: [], items: [{ line_key: "l-aaaaaaaaaaaa", description: "Danışmanlık", quantity: 2, unit_price: 500, vat_rate: 20, line_total: 1035 }, { line_key: "l-bbbbbbbbbbbb", description: "Konaklama paketi", quantity: 1, unit_price: 300, vat_rate: 10, line_total: 319.13 }] });
+const VIEW_FILTER = {
+  taslak: (i) => i.status === "taslak",
+  kesildi: (i) => !["taslak", "iptal", "resmilesti"].includes(i.status) && i.edoc_state !== "done",
+  resmilesti: (i) => i.status === "resmilesti" || i.edoc_state === "done",
+  tahsil: (i) => !["taslak", "iptal"].includes(i.status) && i.remaining_amount > 0 && i.money_state !== "overdue",
+  gecikmis: (i) => i.money_state === "overdue",
+  iptal: (i) => i.status === "iptal",
+};
 const payKeys = new Map(); // Aşama 4 P2: tahsilat işlem anahtarları (anahtar → ilk yanıt)
 const tickets = [
   { id: "t1", ticket_code: "DST-00001234", topic: "Entegrasyon", subject: "Trendyol siparişleri gecikiyor", status: "waiting_customer", last_message_preview: "Mağaza kimliğinizi paylaşır mısınız?", last_message_at: new Date().toISOString(), unread_from_support: true,
@@ -1041,7 +1054,9 @@ http
       });
     if (path === "/local-invoices") {
       const st = url.searchParams.get("status");
-      const rows = localInvoices.filter((i) => !st || i.status === st);
+      const vw = url.searchParams.get("view");
+      if (vw && !VIEW_FILTER[vw]) return send(res, 422, { code: "FILTER_INVALID", detail: "Görünüm geçersiz." });
+      const rows = localInvoices.filter((i) => (!st || i.status === st) && (!vw || VIEW_FILTER[vw](i)));
       return send(res, 200, { items: rows, total: rows.length, page: 1, per_page: 30, total_pages: 1 });
     }
     // C4 eki: Paraşüt tahsilat senkronu

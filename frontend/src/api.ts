@@ -882,12 +882,14 @@ export async function collectPartyPayment(token: string, partyId: string, body: 
   return request<any>(`/customers/${encodeURIComponent(partyId)}/payments`, { method: "POST", body: JSON.stringify(body) }, token);
 }
 
-export async function getLocalInvoices(token: string, options: { page?: number; search?: string; status?: string } = {}) {
+export async function getLocalInvoices(token: string, options: { page?: number; search?: string; status?: string; view?: string } = {}) {
   const page = options.page ?? 1;
   const perPage = 30;
   const qs = new URLSearchParams({ page: String(page), per_page: String(perPage), invoice_type: "satis" });
   if (options.search) qs.set("search", options.search);
   if (options.status) qs.set("status", options.status);
+  // Toplu sürüm 1: iki eksenli liste görünümü (taslak|kesildi|resmilesti|tahsil|gecikmis|iptal).
+  if (options.view) qs.set("view", options.view);
   return paged<LocalInvoice>(await request<any>(`/local-invoices?${qs.toString()}`, { method: "GET" }, token), "items", page, perPage);
 }
 

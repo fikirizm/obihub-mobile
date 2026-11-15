@@ -1,10 +1,11 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { getLocalInvoices, getLocalInvoiceSummary } from "../../src/api";
-import { invoiceStatus, isInvoiceOverdue } from "../../src/finance";
+import { getUiCapabilities } from "../../src/api-gider";
+import { invoiceStatusView, SALES_TABS } from "../../src/invoice-status";
 import { useDebounce } from "../../src/hooks/useDebounce";
 import { usePagedList } from "../../src/hooks/usePagedList";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -23,14 +24,6 @@ import { RowCard, StatCard } from "../../src/ui/RowCard";
 import { SearchField } from "../../src/ui/SearchField";
 import type { LocalInvoice } from "../../src/types";
 
-const FILTERS = [
-  { key: "", label: "Tümü" },
-  { key: "taslak", label: "Taslak" },
-  { key: "gonderildi", label: "Gönderildi" },
-  { key: "resmilesti", label: "Resmileşti" },
-  { key: "gecikti", label: "Gecikti" },
-  { key: "odendi", label: "Ödendi" },
-];
 
 // Aşama 4 P5a: tekil özet yalnız TRY; dövizli faturalar `by_currency`'den ayrı satırda (toplanmaz).
 function OtherCurrencies({ byCurrency }: { byCurrency?: Record<string, { total_remaining?: number; overdue_amount?: number }> }) {
@@ -57,12 +50,16 @@ export default function LocalInvoicesScreen() {
   const mayCreate = canManage(user, "billing");
   const [search, setSearch] = useState("");
   const debounced = useDebounce(search.trim(), 350);
-  const [status, setStatus] = useState("");
+  const [view, setView] = useState("");
+  const [parasutConnected, setParasutConnected] = useState(false);
+  useEffect(() => {
+    if (token) getUiCapabilities(token).then((c) => setParasutConnected(c.parasutConnected));
+  }, [token]);
   const [summary, setSummary] = useState<{ total_remaining?: number; overdue_amount?: number; by_currency?: Record<string, { total_remaining?: number; overdue_amount?: number }> } | null>(null);
 
   const fetchPage = useCallback(
-    (page: number) => getLocalInvoices(token as string, { page, search: debounced || undefined, status: status || undefined }),
-    [token, debounced, status]
+    (page: number) => getLocalInvoices(token as string, { page, search: debounced || undefined, view: view || undefined }),
+    [token, debounced, view]
   );
   const list = usePagedList<LocalInvoice>(token ? fetchPage : null);
 
@@ -107,54 +104,46 @@ export default function LocalInvoicesScreen() {
       ) : null}
       <SearchField testID="local-invoices-search" value={search} onChangeText={setSearch} placeholder="Müşteri veya fatura no ara" />
       <ChipRow>
-        {FILTERS.map((f) => (
-          <Chip key={f.key || "all"} label={f.label} selected={status === f.key} onPress={() => setStatus(f.key)} />
+        {SALES_TABS.map(([key, label]) => (
+          <Chip key={key || "all"} testID={`local-invoices-tab-${key || "all"}`} label={label} selected={view === key} onPress={() => setView(key)} />
         ))}
       </ChipRow>
       <ListBody
         state={{ ...list, refresh: () => { loadSummary(); list.refresh(); } }}
         icon={<ReceiptIcon size={30} color={colors.emerald} />}
         emptyTitle="Fatura yok"
-        emptyAction={mayCreate && !debounced && !status ? { label: "Fatura oluştur", onPress: () => router.push("/local-invoices/new") } : null}
+        emptyAction={mayCreate && !debounced && !view ? { label: "Fatura oluştur", onPress: () => router.push("/local-invoices/new") } : null}
         emptyDescription={mayCreate ? "Bu süzgece uyan satış faturası bulunmuyor. Yukarıdaki düğmeyle yeni fatura oluşturabilirsiniz." : "Bu süzgece uyan satış faturası bulunmuyor."}
         renderItem={(inv) => {
-          // "Gönderildi" ve "Resmileşti" süzgeçlerinde sunucu gecikmişleri kendi gününe göre ayıklar; rozet de sunucunun
-          // durumunu gösterir. Aksi halde gece yarısından sonra satır bu süzgeçte "Gecikti" rozetiyle çıkar.
-          const serverKey = String(inv.display_status || inv.status || "");
-          // Aşama 4 P5a: `money_state` geldiyse rozet doğrudan ondan (sunucu tek tanım; iade belgesi alacak sayılmaz).
-          const key = inv.money_state
-            ? inv.money_state === "overdue"
-              ? "gecikti"
-              : inv.money_state === "refund"
-                ? "iade"
-                : serverKey === "gecikti"
-                  ? "gonderildi"
-                  : serverKey
-            : status === "gonderildi" || status === "resmilesti"
-              ? serverKey
-              : isInvoiceOverdue(inv)
-                ? "gecikti"
-                : serverKey;
-          const st = invoiceStatus(key);
-          // Durum rengi: gecikti kırmızı, taslak sarı, ödendi yeşil; diğerleri nötr mavi simge.
+          // İki eksen (web invoiceStatus.js): belge (Taslak/Kesildi/Resmileşti/İptal) + Resmileşmedi (Paraşüt bağlıysa) + tahsilat.
+          const st = invoiceStatusView(inv, { parasutConnected });
+          const docKey = st.document.key;
+          const payKey = st.payment?.key;
           const look =
-            key === "gecikti"
+            payKey === "overdue"
               ? { accent: colors.error, tint: colors.errorBg, icon: <AlertIcon size={18} color={colors.error} /> }
-              : key === "taslak"
+              : docKey === "draft"
                 ? { accent: colors.warning, tint: colors.warningBg, icon: <FileTextIcon size={18} color={colors.amber} /> }
-                : key === "odendi"
+                : payKey === "paid"
                   ? { accent: colors.success, tint: colors.successBg, icon: <CheckIcon size={18} color={colors.success} /> }
                   : { accent: undefined, tint: colors.emeraldSoft, icon: <ReceiptIcon size={18} color={colors.emerald} /> };
+          const name = String(inv.document_name || "").trim();
           return (
             <RowCard
               testID={`local-invoice-${inv.id}`}
               accent={look.accent}
               leading={<IconTile tint={look.tint}>{look.icon}</IconTile>}
               title={inv.customer_name || "Müşteri"}
-              subtitle={`${inv.invoice_number || "Numarasız"} · ${formatDate(inv.issue_date)}`}
+              subtitle={[name || null, `${inv.invoice_number || "Numarasız"} · ${formatDate(inv.issue_date)}`].filter(Boolean).join(" · ")}
               meta={inv.due_date ? `Vade ${formatDate(inv.due_date)}` : undefined}
               amount={formatMoney(inv.total, inv.currency)}
-              badge={<StatusBadge label={st.label} kind={st.kind} size="sm" />}
+              badge={
+                <View style={styles.badges} testID={`local-invoice-${inv.id}-status`}>
+                  <StatusBadge label={st.document.label} kind={st.document.kind} size="sm" />
+                  {st.notOfficial ? <StatusBadge label={st.notOfficial.label} kind={st.notOfficial.kind} size="sm" /> : null}
+                  {st.payment ? <StatusBadge label={st.payment.label} kind={st.payment.kind} size="sm" /> : null}
+                </View>
+              }
               onPress={() => router.push({ pathname: "/local-invoices/[id]", params: { id: inv.id } })}
             />
           );
@@ -167,5 +156,6 @@ export default function LocalInvoicesScreen() {
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
   actions: { marginHorizontal: spacing.lg, marginBottom: spacing.sm },
+  badges: { flexDirection: "row", flexWrap: "wrap", gap: 4, justifyContent: "flex-end" },
   stats: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
 });

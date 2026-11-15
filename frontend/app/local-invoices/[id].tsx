@@ -7,7 +7,8 @@ import { canManage } from "../../src/auth/permissions";
 import { addLocalInvoicePayment, checkLocalInvoiceEdocStatus, getCashAccounts, getLocalInvoice, newIdempotencyKey, officializeLocalInvoice } from "../../src/api";
 import { accountOptionLabel, accountsForCurrency, collectErrorText, unmatchAllocation, deleteLocalInvoice, getParasutAccounts, getParasutPaymentCaps, isInvoiceEditable, isUncertainWrite, postParasutPaymentAction, sendKeyedMoney } from "../../src/api-finans";
 import { canOfferParasutSync, collectResultText, parasutActionFailText, parasutActionRequest, parasutActionResult, parasutCollectFields, parasutPayView, PARASUT_ACTION_LABELS, type ParasutAction } from "../../src/parasut-pay";
-import { invoiceStatus, isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
+import { isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
+import { amountRows, collectAmount, invoiceStatusView, parasutUnsupportedText } from "../../src/invoice-status";
 import { invoicePaymentActions, invoicePaymentCollection } from "../../src/collection-actions";
 import { autoSettlementText, canUnmatch, UNMATCH_CONFIRM, unmatchDoneText, unmatchErrorText } from "../../src/cari-ui";
 import { runVoidCollection } from "../../src/collection-flow";
@@ -147,9 +148,10 @@ export default function LocalInvoiceDetailScreen() {
   }
 
   const isOverdue = isInvoiceOverdue(inv);
-  const st = invoiceStatus(isOverdue ? "gecikti" : inv.money_state === "refund" ? "iade" : inv.display_status === "gecikti" && inv.money_state ? "gonderildi" : inv.display_status || inv.status);
+  // İki eksen (web invoiceStatus.js): belge + Resmileşmedi (Paraşüt bağlıysa) + tahsilat.
+  const st = invoiceStatusView(inv, { parasutConnected: parasutConnected === true });
   const cur = inv.currency;
-  const remaining = Number(inv.remaining_amount ?? Number(inv.total || 0) - Number(inv.paid_amount || 0));
+  const remaining = Number(inv.remaining_amount ?? collectAmount(inv) - Number(inv.paid_amount || 0));
   const isCancelled = inv.status === "iptal";
   // Resmileştirme Paraşüt üzerinden yapılır. Sunucu, Paraşüt'e gitmemiş her faturayı (taslak, gönderildi, gecikti,
   // tahsilatı tamamlanmış "ödendi") resmileştirir; düğme web paneliyle aynı koşulda görünür.
@@ -178,8 +180,10 @@ export default function LocalInvoiceDetailScreen() {
       setBusy(null);
     }
   };
-  const canOfficialize =
-    mayWrite && parasutConnected === true && !inv.parasut_invoice_id && inv.status !== "resmilesti" && !isCancelled;
+  const officializeCandidate = mayWrite && parasutConnected === true && !inv.parasut_invoice_id && inv.status !== "resmilesti" && !isCancelled;
+  // G2 §6: tevkifat / ÖTV-ÖİV / konaklama / stopaj Paraşüt'e taşınamaz; düğme yerine açıklama (sunucu yine reddeder).
+  const onlyObiHub = officializeCandidate ? parasutUnsupportedText(inv) : null;
+  const canOfficialize = officializeCandidate && !onlyObiHub;
   // Aşama 4 P6: e-belge tutarı Paraşüt'le uyuşmadığında (blocked_mismatch) sunucu tahsilatı 409 ile reddeder; düğme gizlenir.
   // İade faturasına tahsilat alınmaz (sunucu 409 INVOICE_IS_REFUND).
   const canCollect = mayWrite && !isCancelled && inv?.money_state !== "refund" && remaining > 0.004 && inv?.edoc_state !== "blocked_mismatch";
@@ -393,7 +397,8 @@ export default function LocalInvoiceDetailScreen() {
   const lines = inv.items || [];
   const payments = inv.payments || [];
 
-  const total = Number(inv.total || 0);
+  // İlerleme tahsil edilecek tutara göre (tevkifat/stopaj düşülmüş).
+  const total = collectAmount(inv);
   const paid = Number(inv.paid_amount || 0);
   const settled = remaining <= 0.004;
   const paidRatio = total > 0 ? Math.min(1, Math.max(0, paid / total)) : 0;
@@ -422,8 +427,14 @@ export default function LocalInvoiceDetailScreen() {
             </View>
           }
           title={inv.customer_name || "Müşteri"}
-          subtitle={[inv.invoice_number, formatDate(inv.issue_date)].filter(Boolean).join(" · ")}
-          badge={<StatusBadge label={st.label} kind={st.kind} size="sm" />}
+          subtitle={[String(inv.document_name || "").trim() || null, inv.invoice_number, formatDate(inv.issue_date)].filter(Boolean).join(" · ")}
+          badge={
+            <View style={styles.badges} testID="invoice-status-badges">
+              <StatusBadge label={st.document.label} kind={st.document.kind} size="sm" />
+              {st.notOfficial ? <StatusBadge label={st.notOfficial.label} kind={st.notOfficial.kind} size="sm" /> : null}
+              {st.payment ? <StatusBadge label={st.payment.label} kind={st.payment.kind} size="sm" /> : null}
+            </View>
+          }
           value={formatMoney(inv.total, cur)}
           valueLabel="Fatura toplamı"
           stats={stats}
@@ -486,6 +497,12 @@ export default function LocalInvoiceDetailScreen() {
           </SafeAnimatedView>
         ) : null}
 
+        {onlyObiHub ? (
+          <View testID="invoice-only-obihub" style={[styles.note, { backgroundColor: colors.infoBg }]}>
+            <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{onlyObiHub}</Text>
+          </View>
+        ) : null}
+
         {canEditInvoice ? (
           <SafeAnimatedView entering={FadeInDown.delay(95).duration(380)} style={styles.actions}>
             <Button
@@ -513,11 +530,15 @@ export default function LocalInvoiceDetailScreen() {
         <SafeAnimatedView entering={FadeInDown.delay(140).duration(380)}>
           <SectionTitle title="Tutarlar" />
           <Card style={styles.block}>
-            <ListRow title="Ara toplam" trailing={<Text style={amount(colors.textPrimary)}>{formatMoney(inv.subtotal, cur)}</Text>} />
-            {Number(inv.discount_amount || 0) > 0 ? (
-              <ListRow divider title="İndirim" trailing={<Text style={amount(colors.textPrimary)}>-{formatMoney(inv.discount_amount, cur)}</Text>} />
-            ) : null}
-            <ListRow divider title="KDV" trailing={<Text style={amount(colors.textPrimary)}>{formatMoney(inv.vat_amount, cur)}</Text>} />
+            {amountRows(inv).map((r, i) => (
+              <ListRow
+                key={r.key}
+                testID={`invoice-amount-${r.key}`}
+                divider={i > 0}
+                title={r.label}
+                trailing={<Text style={amount(colors.textPrimary, r.strong)}>{r.amount < 0 ? `-${formatMoney(-r.amount, cur)}` : formatMoney(r.amount, cur)}</Text>}
+              />
+            ))}
             <ListRow divider title="Ödenen" trailing={<Text style={amount(colors.success)}>{formatMoney(inv.paid_amount || 0, cur)}</Text>} />
             <ListRow
               divider
@@ -615,6 +636,8 @@ export default function LocalInvoiceDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  badges: { flexDirection: "column", alignItems: "flex-end", gap: 4 },
+  note: { marginHorizontal: spacing.lg, marginBottom: spacing.sm, padding: spacing.sm, borderRadius: radius.md },
   wrap: { flex: 1 },
   hero: { marginTop: spacing.sm },
   block: { marginHorizontal: spacing.lg },
