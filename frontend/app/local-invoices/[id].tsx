@@ -589,6 +589,16 @@ export default function LocalInvoiceDetailScreen() {
               {mayWrite && lc.archive ? (
                 <Button testID="invoice-archive" size="sm" variant="secondary" label={inv.archived ? "Arşivden çıkar" : "Arşivle"} busy={busy === "archive"} disabled={Boolean(busy)} onPress={onArchive} />
               ) : null}
+              {mayWrite && lc.edit_meta && !canEditInvoice ? (
+                <Button
+                  testID="invoice-meta"
+                  size="sm"
+                  variant="secondary"
+                  label="Bilgileri düzenle"
+                  disabled={Boolean(busy)}
+                  onPress={() => router.push({ pathname: "/local-invoices/meta", params: { id: inv.id, title: inv.invoice_number || "" } })}
+                />
+              ) : null}
               <Button
                 testID="invoice-events"
                 size="sm"

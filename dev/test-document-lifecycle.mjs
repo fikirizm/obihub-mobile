@@ -55,4 +55,17 @@ t("iade gövdesi: virgüllü miktar, kalanı aşamaz, en az bir kalem", () => {
   assert.equal(m.returnLines(rows, { ln_1: "abc" }).errors.ln_1, "Geçerli bir miktar girin.");
   assert.equal(m.returnLines(rows, {}).error, "En az bir kalem için iade miktarı girin.");
 });
+t("kesilmiş faturada bilgi düzenleme: yalnız izinli alanlar (S-4), kırpılmış; vade boşsa null", () => {
+  assert.deepEqual(m.metaBody({ document_name: " Kasım ", notes: "Not", order_no: " S-1 ", due_date: "2026-12-14" }), { document_name: "Kasım", notes: "Not", order_no: "S-1", due_date: "2026-12-14" });
+  assert.deepEqual(m.metaBody({ document_name: "", notes: "", order_no: "", due_date: "" }), { document_name: "", notes: "", order_no: "", due_date: null });
+  assert.equal(m.metaProblem({ due_date: "2026-11-01" }, "2026-11-10"), "Vade, fatura tarihinden önce olamaz.");
+  assert.equal(m.metaProblem({ due_date: "" }, "2026-11-10"), null);
+});
+
+t("teklif paylaşımı alıcıları: virgül/boşlukla ayrılır; geçersiz adres söylenir", () => {
+  assert.deepEqual(m.shareRecipients("a@x.com, b@y.com;c@z.com"), { list: ["a@x.com", "b@y.com", "c@z.com"], error: null });
+  assert.equal(m.shareRecipients("").error, "En az bir alıcı e-posta adresi girin.");
+  assert.equal(m.shareRecipients("a@x.com yanlis").error, "Geçersiz e-posta adresi: yanlis");
+});
+
 console.log(`\n${n} test geçti`);

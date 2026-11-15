@@ -39,6 +39,7 @@ import {
   type DocType,
 } from "../document-form";
 import { convertText, quoteActions, quoteOutcomeView } from "../quote-status";
+import { lifecycleActions } from "../document-lifecycle";
 import { StatusBadge } from "../components/StatusBadge";
 import { todayIso } from "../finance";
 import { useDebounce } from "../hooks/useDebounce";
@@ -972,6 +973,15 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
                       <Button testID="quote-accept" variant="secondary" size="sm" label="Kabul edildi" disabled={busy || Boolean(actBusy)} onPress={() => markQuote("accepted")} style={{ flex: 1 }} />
                       <Button testID="quote-reject" variant="secondary" size="sm" label="Reddedildi" disabled={busy || Boolean(actBusy)} onPress={() => markQuote("rejected")} style={{ flex: 1 }} />
                     </View>
+                  ) : null}
+                  {lifecycleActions(record).share ? (
+                    <Button
+                      testID="quote-share"
+                      variant="secondary"
+                      label="E-posta ile paylaş"
+                      disabled={busy || Boolean(actBusy)}
+                      onPress={() => router.push({ pathname: "/quotes/share", params: { id: editId, title: editNumber || "Teklif", email: String(record?.customer_email || "") } })}
+                    />
                   ) : null}
                   {acts.remove ? <Button testID="quote-remove" variant="ghost" label="Teklifi sil" disabled={busy || Boolean(actBusy)} onPress={removeQuote} /> : null}
                 </>

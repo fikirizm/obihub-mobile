@@ -124,3 +124,24 @@ export function returnLines(rows: ReturnRow[], qty: Record<string, string>) {
   const error = !Object.keys(errors).length && !lines.length ? "En az bir kalem için iade miktarı girin." : null;
   return { lines, errors, error };
 }
+
+// S-4: kesilmiş faturada yalnız izinli alanlar kısmi PUT ile değişir (not, fatura ismi, sipariş no, vade; kategori/etiket ayrı).
+export type MetaForm = { document_name: string; notes: string; order_no: string; due_date: string };
+export function metaBody(f: MetaForm) {
+  return {
+    document_name: String(f.document_name || "").trim(),
+    notes: String(f.notes || ""),
+    order_no: String(f.order_no || "").trim(),
+    due_date: f.due_date ? f.due_date : null,
+  };
+}
+export const metaProblem = (f: Partial<MetaForm>, issueDate: string) =>
+  f.due_date && issueDate && f.due_date < issueDate ? "Vade, fatura tarihinden önce olamaz." : null;
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export function shareRecipients(text: string): { list: string[]; error: string | null } {
+  const list = String(text || "").split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
+  if (!list.length) return { list, error: "En az bir alıcı e-posta adresi girin." };
+  const bad = list.find((a) => !EMAIL.test(a));
+  return { list, error: bad ? `Geçersiz e-posta adresi: ${bad}` : null };
+}

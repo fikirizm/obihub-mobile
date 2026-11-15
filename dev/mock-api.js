@@ -1160,7 +1160,7 @@ http
     }
     // D-12 yaşam döngüsü: iptal (gerekçe, e-belge adımı), iade, kopya, arşiv, geçmiş, PDF.
     let lcm;
-    if ((lcm = path.match(/^\/local-invoices\/([^/]+)\/(cancel|cancel\/edoc|returns|copy|archive|unarchive|events|pdf)$/))) {
+    if ((lcm = path.match(/^\/local-invoices\/([^/]+)\/(cancel|cancel\/edoc|returns|copy|archive|unarchive|events|pdf|share)$/))) {
       const inv = localInvoices.find((i) => i.id === lcm[1]);
       if (!inv) return send(res, 404, { code: "NOT_FOUND", detail: "Fatura bulunamadı." });
       const ev = (type, summary, data = {}) => (inv.events = [{ id: "ev" + Date.now() + Math.random(), type, at: new Date().toISOString(), actor: { name: "Demo Kullanıcı" }, summary, data }, ...(inv.events || [])]);
@@ -1178,6 +1178,10 @@ http
           return send(res, 200, { ok: true, id: inv.id, status: "iptal", lifecycle: "cancelled", replayed: false });
         }
         if (op === "cancel/edoc") { inv.edoc_cancelled = true; return send(res, 200, { ok: true }); }
+        if (op === "share") {
+          if (b.confirm !== true) return send(res, 409, { code: "CONFIRM_REQUIRED", detail: "Onay gerekli." });
+          ev("shared", "Paylaşıldı"); return send(res, 200, { ok: true, sent_to: (b.to || []).map((a) => a.replace(/^(.).*@/, "$1***@")), replayed: false });
+        }
         if (op === "returns") {
           inv.returned_totals = inv.returned_totals || {};
           for (const l of b.lines || []) inv.returned_totals[l.source_line_key] = String(Number(inv.returned_totals[l.source_line_key] || 0) + Number(l.quantity));
@@ -1199,6 +1203,16 @@ http
       const inv = localInvoices.find((i) => i.id === invMatch[1]);
       if (!inv) return send(res, 404, { detail: "Fatura bulunamadı" });
       // C4: düzenle (PUT) ve sil (DELETE) — yalnız taslak/gecikti, gönderilmemiş ve ödemesiz.
+      // D-12 S-4: kesilmiş faturada yalnız izinli alanlar (kısmi PUT).
+      if (!invMatch[2] && req.method === "PUT" && ["gonderildi", "resmilesti", "gecikti", "odendi"].includes(inv.status))
+        return readBody((b) => {
+          const META = ["note", "notes", "document_name", "tag_ids", "category_id", "due_date", "order_no", "idempotency_key", "id"];
+          const locked = Object.keys(b).filter((k) => !META.includes(k));
+          if (locked.length) return send(res, 409, { code: "ISSUED_AMOUNTS_LOCKED", detail: "Kesilmiş faturada tutar alanları değiştirilemez.", locked_fields: locked });
+          console.log("WRITE META PUT", path, JSON.stringify(b));
+          for (const k of ["notes", "document_name", "due_date", "order_no"]) if (k in b) inv[k] = b[k];
+          return send(res, 200, inv);
+        });
       if (!invMatch[2] && (req.method === "PUT" || req.method === "DELETE")) {
         if (!["taslak", "gecikti"].includes(inv.status) || inv.parasut_invoice_id || inv.paid_amount > 0) return send(res, 400, { detail: "Bu fatura düzenlenemez" });
         if (req.method === "DELETE") { localInvoices.splice(localInvoices.indexOf(inv), 1); console.log("WRITE DELETE", path); return send(res, 200, { message: "Silindi" }); }
