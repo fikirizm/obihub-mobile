@@ -99,6 +99,17 @@ const expenseState = {
 // Dalga 3 / C1: gelen fatura içeri alma durumları.
 const importState = { in2: "applied" };
 const remembered = {};
+const inboxDoc = (k, no, name, tax, date, amt, status, label, extra = {}) => ({ provider: "parasut", document_key: k, native_id: k, ettn: null, invoice_no: no, issue_date: date, supplier: { name, tax_no: tax },
+  payable_amount: amt, tax_exclusive_amount: Math.round((amt / 1.2) * 100) / 100, currency: "TRY", provider_status: status, status, status_label: label, response_days_left: null, response_deadline: null,
+  type_label: "e-Fatura · Temel", invoice_type_label: "Satış", imported_elsewhere: false, user_state: "new", archived: false, response_request: null, can_respond: false,
+  import_status: "none", import_state: "not_imported", import_state_label: "İçeri alınmadı", ...extra });
+const inboxDocs = [
+  inboxDoc("in1", "ABC2026000123", "Kargo Lojistik A.Ş.", "1111111111", "2026-11-09", 1840.6, "awaiting_response", "Onay bekliyor", { response_days_left: 3, can_respond: true, type_label: "e-Fatura · Ticari" }),
+  inboxDoc("in3", "TED2026000777", "Ofis Kırtasiye", "2222222222", "2026-11-12", 412.5, "accepted_basic", "Kabul edildi (temel)"),
+  inboxDoc("in4", "PRS2026000010", "Yazılım Ltd.", "3333333333", "2026-11-05", 2400, "accepted_basic", "Kabul edildi (temel)", { import_state: "imported_elsewhere", import_state_label: "Paraşüt'te içeri alındı" }),
+  inboxDoc("in5", "RED2026000001", "Hatalı Tedarik", "4444444444", "2026-11-01", 999, "rejected", "Reddedildi"),
+  inboxDoc("in6", "ARS2026000002", "Eski Tedarikçi", "5555555555", "2026-10-20", 150, "accepted_basic", "Kabul edildi (temel)", { archived: true }),
+];
 const posSales = [];
 const entryKeys = new Set();
 const hjCustomers = [
@@ -250,7 +261,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -1208,7 +1219,7 @@ http
     }
     // Web eşitleme (src/api-gider.ts): yetenekler, gider ayarı, ObiHub gider defteri. Okuma modeli ve gelen kutusu 404 → eski uçlara düşüş.
     if (path === "/ui-capabilities")
-      return send(res, 200, { version: 1, capabilities: { obihub_os: false, inbox_read: false, payable_payment: true, expense_ledger: true, expense_manual_entry: true, manual_entry_reason: null, parasut_connected: true, parasut_expense_view: true, inventory_owner: { owner: state.iaOwner ? "accounting" : "obihub", program: "bizimhesap" } }, workspace_scope: null });
+      return send(res, 200, { version: 1, capabilities: { obihub_os: false, inbox_read: Boolean(state.inbox), payable_payment: true, expense_ledger: true, expense_manual_entry: true, manual_entry_reason: null, parasut_connected: true, parasut_expense_view: true, inventory_owner: { owner: state.iaOwner ? "accounting" : "obihub", program: "bizimhesap" } }, workspace_scope: null });
     if (path === "/accounting/expense-settings") return send(res, 200, { expense_module_enabled: true, parasut_expense_view_enabled: true, parasut_connected: true });
     if (path === "/accounting/expense-invoices/summary") return send(res, 200, { currencies: [{ currency: "TRY", payable: "9400.00", overdue: "1250.50" }] });
     // --- Dalga 3 / C2: gider detayı ve borç ödeme. e1 ödenebilir, e2'de ikinci ödeme 409 PAYMENT_EXCEEDS_OUTSTANDING denenir.
@@ -1302,6 +1313,41 @@ http
       const out = rows.filter((r) => !pay || (sets[pay] || []).includes(r.payment_status));
       return send(res, 200, { items: out, total: out.length, page: 1, per_page: 20 });
     }
+    // D-17 gelen kutusu (/__mode?inbox=1): görünümler, arşiv, kabul/red, toplu indirme.
+    if (state.inbox && path === "/incoming-inbox" && req.method === "GET") {
+      const view = url.searchParams.get("view") || "all";
+      const qq = (url.searchParams.get("q") || "").toLocaleLowerCase("tr");
+      const srt = url.searchParams.get("sort") || "-issue_date";
+      const inView = (d) => view === "all" || (view === "archived" ? d.archived : view === "rejected" ? !d.archived && ["rejected", "returned"].includes(d.status) : !d.archived && !["rejected", "returned"].includes(d.status) && d.import_state === "not_imported");
+      const match = (d) => !qq || [d.invoice_no, d.supplier.name, d.supplier.tax_no].join(" ").toLocaleLowerCase("tr").includes(qq);
+      let rows = inboxDocs.filter((d) => match(d) && inView(d));
+      const key = srt.replace("-", ""); const dir = srt.startsWith("-") ? -1 : 1;
+      rows = rows.slice().sort((a, b) => (key === "amount" ? a.payable_amount - b.payable_amount : String(a.issue_date).localeCompare(String(b.issue_date))) * dir);
+      const vc = {}; for (const v of ["all", "unprocessed", "archived", "rejected"]) vc[v] = inboxDocs.filter((d) => match(d) && (v === "all" || (v === "archived" ? d.archived : v === "rejected" ? !d.archived && ["rejected", "returned"].includes(d.status) : !d.archived && !["rejected", "returned"].includes(d.status) && d.import_state === "not_imported"))).length;
+      return send(res, 200, { items: rows, total: rows.length, counts: {}, page: 1, page_size: 30, view, view_counts: vc, capabilities: { respond: true, archive: true, download: true }, total_is_lower_bound: false, sync: null });
+    }
+    if (state.inbox && path === "/incoming-inbox/archive" && req.method === "POST")
+      return readBody((b) => { console.log("WRITE archive", JSON.stringify(b)); const upd = []; for (const k of b.document_keys || []) { const d = inboxDocs.find((x) => x.document_key === k); if (d) { d.archived = b.archived === true; upd.push(k); } } send(res, 200, { provider: b.provider, archived: b.archived, updated: upd, not_found: [] }); });
+    let ibm;
+    if (state.inbox && (ibm = path.match(/^\/incoming-inbox\/([^/]+)\/([^/]+)\/response$/)) && req.method === "POST")
+      return readBody((b) => {
+        console.log("WRITE response", ibm[2], JSON.stringify(b));
+        if (b.confirm_irreversible !== true) return send(res, 422, { detail: { code: "RESPONSE_CONFIRMATION_REQUIRED", message: "Yanıtın geri alınamayacağını onaylayın." } });
+        const d = inboxDocs.find((x) => x.document_key === ibm[2]);
+        if (!d) return send(res, 404, { detail: { code: "INBOX_DOCUMENT_NOT_FOUND", message: "Belge bulunamadı." } });
+        if (d.status !== "awaiting_response") return send(res, 409, { detail: { code: "RESPONSE_NOT_ALLOWED", message: "Bu belge yanıt beklemiyor." } });
+        d.status = b.decision === "accept" ? "accepted" : "rejected"; d.status_label = b.decision === "accept" ? "Kabul edildi" : "Reddedildi"; d.can_respond = false; d.response_days_left = null;
+        d.response_request = { decision: b.decision, state: "done", requested_at: new Date().toISOString(), message: null };
+        send(res, 200, { provider: "parasut", document_key: d.document_key, decision: b.decision, status: d.status, status_label: d.status_label, response_request: d.response_request });
+      });
+    if (state.inbox && (ibm = path.match(/^\/incoming-inbox\/([^/]+)\/download$/)) && req.method === "POST")
+      return readBody((b) => {
+        console.log("WRITE download", JSON.stringify(b));
+        if ((b.document_keys || []).length > 20) return send(res, 422, { detail: { code: "DOWNLOAD_TOO_MANY", message: "En çok 20 belge indirilebilir." } });
+        const zip = Buffer.from("504b0506000000000000000000000000000000000000", "hex");
+        res.writeHead(200, { "Content-Type": "application/zip", "X-Download-Count": String(b.document_keys.length - 1), "X-Download-Missing": "1", "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "X-Download-Count, X-Download-Missing" });
+        return res.end(zip);
+      });
     if (path.startsWith("/accounting/read-model/") || path === "/incoming-inbox") return send(res, 404, { detail: "Not Found" });
     if (path === "/parasut/expense-invoices")
       return send(res, 200, { invoices: [{ id: "x1", invoice_no: "GF-88", supplier_name: "Tedarikçi A.Ş.", issue_date: "2026-11-03", due_date: "2026-11-18", gross_total: 9400, currency: "TRL", status: "unpaid" }], total: 1, page: 1, per_page: 30 });

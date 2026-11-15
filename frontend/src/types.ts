@@ -440,6 +440,16 @@ export type IncomingInvoice = {
   import_reimportable?: boolean;
   // PDF için sağlayıcı kimliği (gelen kutusunda native_id; eski listede id ile aynı).
   pdf_id?: string;
+  // D-17 gelen kutusu satırı (src/inbox-ui.ts inboxRow): durum metni, tür, içeri alma durumu, arşiv, kabul/red.
+  inbox_row?: boolean;
+  statusText?: string | null;
+  statusKind?: "success" | "info" | "warning" | "error" | "neutral";
+  type_label?: string | null;
+  importLabel?: string | null;
+  importedElsewhere?: boolean;
+  archived?: boolean;
+  can_respond?: boolean;
+  response_request?: { decision?: string; state?: string; requested_at?: string | null; message?: string | null } | null;
 };
 
 export type SupportTicket = {

@@ -8,7 +8,9 @@ import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { getIncomingInvoicePdf } from "../../src/api";
-import { getUiCapabilities } from "../../src/api-gider";
+import { getUiCapabilities, respondInbox } from "../../src/api-gider";
+import { respondDoneText } from "../../src/inbox-ui";
+import { RespondSheet } from "../../src/components/RespondSheet";
 import {
   answerArgs,
   canCreateSupplier,
@@ -113,7 +115,7 @@ function PreviewSkeleton() {
 }
 
 export default function IncomingImportScreen() {
-  const params = useLocalSearchParams<{ id: string; provider: string; status?: string; reimportable?: string; title?: string; pdf?: string }>();
+  const params = useLocalSearchParams<{ id: string; provider: string; status?: string; reimportable?: string; title?: string; pdf?: string; respond?: string }>();
   const id = String(params.id || "");
   const provider = String(params.provider || "");
   const rowStatus = String(params.status || "none");
@@ -154,6 +156,10 @@ export default function IncomingImportScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [ownerAccounting, setOwnerAccounting] = useState(false);
   const navigation = useNavigation();
+  // D-17: onay bekleyen ticari faturaya Kabul et / Reddet (GİB'e gider, geri alınamaz; onay penceresiyle).
+  const [respondOpen, setRespondOpen] = useState<null | "accept" | "reject">(null);
+  const [responded, setResponded] = useState<string | null>(null);
+  const canRespond = params.respond === "1" && canManage(user, "billing") && !responded;
 
   // Önizleme: başarısız denemede seçimler son başarılı isteğe döner (ekrandaki görünümle eşleşsin).
   const load = useCallback(
@@ -468,6 +474,33 @@ export default function IncomingImportScreen() {
       <Button testID="import-pdf" size="sm" variant="secondary" label="Faturayı görüntüle" icon={<DownloadIcon size={16} color={colors.textPrimary} />} busy={pdfBusy} onPress={openPdf} />
     ) : null;
 
+  const submitRespond = async (body: Record<string, unknown>) => {
+    if (!token) return;
+    const res = await respondInbox(token, provider, id, body);
+    const text = respondDoneText(res, String(body.decision));
+    toast(text, "success");
+    setRespondOpen(null);
+    setResponded(text);
+  };
+  const respondCard = canRespond ? (
+    <View testID="import-respond" style={[styles.notice, styles.ackBox, { backgroundColor: colors.warningBg }]}>
+      <View style={{ flexDirection: "row", gap: spacing.xs, alignItems: "flex-start" }}>
+        <AlertIcon size={16} color={colors.amber} />
+        <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>Bu ticari fatura yanıtınızı bekliyor. Kabul ya da red GİB üzerinden tedarikçiye gönderilir ve geri alınamaz.</Text>
+      </View>
+      <View style={{ flexDirection: "row", gap: spacing.sm }}>
+        <Button testID="import-respond-accept" size="sm" label="Kabul et" onPress={() => setRespondOpen("accept")} style={{ flex: 1 }} />
+        <Button testID="import-respond-reject" size="sm" variant="secondary" label="Reddet" onPress={() => setRespondOpen("reject")} style={{ flex: 1 }} />
+      </View>
+    </View>
+  ) : responded ? (
+    <View testID="import-responded" style={[styles.notice, { backgroundColor: colors.infoBg }]}>
+      <CheckIcon size={16} color={colors.info} />
+      <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{responded}</Text>
+    </View>
+  ) : null;
+  const respondSheet = <RespondSheet decision={respondOpen} subtitle={params.title ? String(params.title) : undefined} onClose={() => setRespondOpen(null)} onSubmit={submitRespond} />;
+
   const header = <StackHeader title="İçeri al" subtitle={params.title ? String(params.title) : undefined} />;
 
   // ---- Durumlar ----
@@ -483,8 +516,10 @@ export default function IncomingImportScreen() {
     return (
       <View style={[styles.wrap, { backgroundColor: colors.background }]}>
         {header}
+        {respondCard}
         <EmptyState icon={<InboxIcon size={30} color={colors.amber} />} title="İçeri alma kapalı" description="Bu fatura kaynağı için içeri alma şu an kullanılamıyor." />
         <View style={styles.pad}>{pdfButton}</View>
+        {respondSheet}
       </View>
     );
   }
@@ -547,7 +582,9 @@ export default function IncomingImportScreen() {
         ) : (
           <PreviewSkeleton />
         )}
+        {failed ? respondCard : null}
         {failed ? <View style={styles.pad}>{pdfButton}</View> : null}
+        {respondSheet}
       </View>
     );
   }
@@ -679,6 +716,7 @@ export default function IncomingImportScreen() {
             <Text style={[type.footnote, { color: colors.error, flex: 1 }]}>{rejectionText(rejection)}</Text>
           </View>
         ) : null}
+        {respondCard}
         {decision?.reimport?.allowed === true ? (
           <View style={[styles.notice, { backgroundColor: colors.infoBg }]}>
             <AlertIcon size={16} color={colors.info} />
@@ -895,6 +933,7 @@ export default function IncomingImportScreen() {
           {pdfButton}
         </View>
       </ScrollView>
+      {respondSheet}
     </View>
   );
 }

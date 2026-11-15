@@ -1,6 +1,7 @@
 // Gider, cari ve gelen kutusu okuma uçları — web paneliyle aynı uç seçimi ve geri düşüş.
 // Kaynaklar: frontend/src/pages/ExpenseInvoicesPage.js, CustomersPage.js, IncomingEInvoicesPage.js, components/layout/Sidebar.js.
-import { getParties, getPartyLedger, request } from "./api";
+import { API_BASE_URL, getParties, getPartyLedger, request } from "./api";
+import { bytesToBase64, inboxQuery, inboxRow } from "./inbox-ui";
 import type {
   ExpenseLedgerRow,
   ExpenseSummaryRow,
@@ -271,39 +272,65 @@ export async function getLegacyPartyCurrency(token: string, id: string): Promise
 // ---------------------------------------------------------------------------
 export class InboxUnavailable extends Error {}
 
-export async function getIncomingInbox(token: string, provider: IncomingSource, page = 1): Promise<Paged<IncomingInvoice>> {
+export type InboxMeta = { viewCounts: Record<string, number> | null; capabilities: { respond?: boolean; archive?: boolean; download?: boolean } };
+
+// D-17: görünüm (varsayılan işlenmemiş), arama, sıralama sunucuda; `view_counts` ve `capabilities` onMeta ile verilir.
+export async function getIncomingInbox(
+  token: string,
+  provider: IncomingSource,
+  page = 1,
+  opts: { q?: string; view?: string; sort?: string; onMeta?: (m: InboxMeta) => void } = {}
+): Promise<Paged<IncomingInvoice>> {
   const perPage = 30;
-  const qs = new URLSearchParams({ provider, page: String(page), page_size: String(perPage) });
   let d: any;
   try {
-    d = await request<any>(`/incoming-inbox?${qs.toString()}`, { method: "GET" }, token);
+    d = await request<any>(`/incoming-inbox?${inboxQuery({ provider, page, pageSize: perPage, q: opts.q, view: opts.view, sort: opts.sort })}`, { method: "GET" }, token);
   } catch (e) {
     if (statusOf(e) === 404) throw new InboxUnavailable("inbox-404");
     throw e;
   }
-  // Web incomingSync.inboxRowToItem: kimlik document_key (Paraşüt/BenimPOS/Turkcell'de sağlayıcının kendi kimliği).
+  opts.onMeta?.({
+    viewCounts: d?.view_counts && typeof d.view_counts === "object" ? d.view_counts : null,
+    capabilities: d?.capabilities && typeof d.capabilities === "object" ? d.capabilities : {},
+  });
   const items: IncomingInvoice[] = (Array.isArray(d?.items) ? d.items : [])
-    .map((x: any) => {
-      const supplier = x?.supplier && typeof x.supplier === "object" ? x.supplier : {};
-      return {
-        id: String(x?.document_key || ""),
-        invoice_no: x?.invoice_no || undefined,
-        sender_name: supplier.name || "",
-        sender_tax_no: supplier.tax_no || "",
-        issue_date: x?.issue_date || "",
-        gross_total: x?.payable_amount ?? undefined,
-        currency: x?.currency || undefined,
-        status: x?.provider_status || "",
-        import_status: x?.import_status,
-        import_reimportable: x?.import_reimportable === true,
-        // Web incomingSync.legacyIdOf: PDF uçları sağlayıcının kendi kimliğini ister (yalnız satır bu sağlayıcıdansa).
-        pdf_id: x?.native_id && (!x?.source || x.source === provider) ? String(x.native_id) : String(x?.document_key || ""),
-      } as IncomingInvoice;
-    })
+    .map((x: any) => ({ ...inboxRow(x, provider), inbox_row: true }) as IncomingInvoice)
     .filter((x: IncomingInvoice) => x.id);
   const total = Number(d?.total || 0);
   const lowerBound = d?.total_is_lower_bound === true;
   return { items, total, hasMore: items.length > 0 && (page * perPage < total || (lowerBound && items.length >= perPage)) };
+}
+
+// Ticari faturaya Kabul et / Reddet (GİB'e gider, geri alınamaz): yalnız açık onaydan sonra; ağ hatasında yeniden gönderilmez.
+export async function respondInbox(token: string, provider: string, documentKey: string, body: Record<string, unknown>) {
+  return request<any>(`/incoming-inbox/${encodeURIComponent(provider)}/${encodeURIComponent(documentKey)}/response`, { method: "POST", body: JSON.stringify(body) }, token);
+}
+
+// Arşiv yalnız ObiHub görünümüdür; Paraşüt'e yazılmaz.
+export async function archiveInbox(token: string, provider: string, keys: string[], archived: boolean) {
+  return request<{ updated?: string[]; not_found?: string[] }>(
+    "/incoming-inbox/archive",
+    { method: "POST", body: JSON.stringify({ provider, document_keys: keys, archived }) },
+    token
+  );
+}
+
+// Toplu PDF/XML (en çok 20): zip baytları ve sayılar. Hata gövdesi JSON'dur ({detail:{code,message}} ya da {detail}).
+export async function downloadInbox(token: string, provider: string, keys: string[], format: "pdf" | "xml") {
+  const res = await fetch(`${API_BASE_URL}/incoming-inbox/${encodeURIComponent(provider)}/download`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ document_keys: keys, format }),
+  });
+  if (!res.ok) {
+    const j: any = await res.json().catch(() => null);
+    const msg = typeof j?.detail === "string" ? j.detail : typeof j?.detail?.message === "string" ? j.detail.message : "";
+    throw Object.assign(new Error(msg || "Belgeler indirilemedi."), { status: res.status, code: j?.detail?.code });
+  }
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const count = Number(res.headers.get("X-Download-Count"));
+  const missing = Number(res.headers.get("X-Download-Missing")) || 0;
+  return { base64: bytesToBase64(bytes), count: Number.isFinite(count) && res.headers.get("X-Download-Count") != null ? count : Math.max(0, keys.length - missing), missing };
 }
 
 // Web Sidebar.js + useNavVisibility.incomingSourceConnected: BizimHesap firmasında gelen fatura menüsü yalnız
