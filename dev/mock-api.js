@@ -275,7 +275,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -358,6 +358,13 @@ http
       return;
     }
     if (state.session === "expired") return send(res, 401, { detail: "Token süresi dolmuş" });
+    // D-30 ekip üyesi denemesi (/__mode?member=1): mali müşavir (her modül görüntüle, ayarlar yok).
+    if (path === "/auth/me" && state.member) return send(res, 200, { ...user, role: "member", full_name: "Ece Yılmaz" });
+    if (path === "/team/me")
+      return send(res, 200, state.member
+        ? { is_owner: false, member: { id: "m1", full_name: "Ece Yılmaz", preset: "mali_musavir" }, module_access: { sales: "view", expenses: "view", cash: "view", stock: "view", reports: "view", settings: "none" },
+            permissions: ["dashboard.view", "orders.view", "customers.view", "catalog.view", "inventory.view", "reports.view", "billing.view"] }
+        : { is_owner: true, member: null, permissions: ["*"] });
     if (path === "/auth/me") return send(res, 200, user);
     if (state.session === "locked")
       return send(res, 403, { detail: "Abonelik erişimi pasif. Aboneliğinizin süresi doldu. Devam etmek için paketinizi yenileyin." });

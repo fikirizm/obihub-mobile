@@ -10,6 +10,7 @@ import {
   getMe,
   getOrders,
   getOrderStats,
+  getTeamMe,
   getSupportNotifications,
   login as apiLogin,
   logoutSession,
@@ -441,6 +442,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     clearNotificationsStore();
     Notifications.setBadgeCountAsync(0).catch(() => {});
   }, []);
+
+  // D-30: ekip üyesinde (role "member") menü/düğme izinleri /team/me'den; değişiklik anında geçerli olduğu için her
+  // oturum açılışında ve kullanıcı yenilenince okunur. Okunamazsa izinler boş kalır (sunucu zaten 403 verir).
+  useEffect(() => {
+    if (!token || !user || String(user.role || "").toLowerCase() !== "member" || (user as any)._team === token) return;
+    let live = true;
+    getTeamMe(token)
+      .then(async (t) => {
+        if (!live) return;
+        const next = { ...user, permissions: Array.isArray(t?.permissions) ? t.permissions : [], is_owner: t?.is_owner === true, module_access: t?.module_access || {}, _team: token } as User;
+        setUser(next);
+        await Storage.setItemAsync(USER_KEY, JSON.stringify(next)).catch(() => {});
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [token, user]);
 
   // Uzun oturum: 401'de ya da süresi yaklaşınca sessiz yenileme (aynı anda gelen isteklerde tek yenileme).
   // Kullanıcı yalnız yenileme gerçekten reddedilirse çıkışa düşer; ağ/sunucu hatasında oturum korunur.

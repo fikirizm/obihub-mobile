@@ -1215,3 +1215,12 @@ export async function patchNotificationPrefs(token: string, patch: Partial<Notif
 export async function sendPushTest(token: string) {
   return request<{ ok?: boolean; devices?: number }>("/mobile/push-test", { method: "POST", body: "{}" }, token);
 }
+
+// D-30: ekip üyesi yetkileri (herkes çağırabilir). Firma sahibinde is_owner true, permissions ["*"].
+export async function getTeamMe(token: string) {
+  return request<{ is_owner?: boolean; company_name?: string; module_access?: Record<string, string>; permissions?: string[]; member?: any }>(
+    "/team/me",
+    { method: "GET" },
+    token
+  );
+}
