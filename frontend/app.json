@@ -19,9 +19,6 @@
           "remote-notification"
         ]
       },
-      "entitlements": {
-        "com.apple.developer.usernotifications.time-sensitive": true
-      },
       "runtimeVersion": "1.1.09"
     },
     "androidStatusBar": {

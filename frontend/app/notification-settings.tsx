@@ -16,6 +16,8 @@ import { useFeedback } from "../src/ui/Feedback";
 import { StackHeader } from "../src/ui/Header";
 import { Card, ListRow, SectionTitle } from "../src/ui/ListRow";
 
+const TIME_SENSITIVE_AVAILABLE = false;
+
 const QUIET_PRESETS = [
   { label: "22:00 – 08:00", start: "22:00", end: "08:00" },
   { label: "23:00 – 07:00", start: "23:00", end: "07:00" },
@@ -103,7 +105,8 @@ export default function NotificationSettingsScreen() {
             <ListRow title="Yeni sipariş bildirimi" subtitle="Uygulama kapalıyken de kilit ekranına düşer" trailing={sw("notif-new-order", prefs.new_order, (v) => save({ new_order: v }))} />
             <ListRow divider title="Ses" subtitle="Sipariş sesiyle çalar; kapalıyken sessiz gelir" trailing={sw("notif-sound", prefs.sound, (v) => save({ sound: v }), !prefs.new_order)} />
             <ListRow divider title="Kilit ekranında tutarı göster" subtitle="Kapalıyken yalnız ürün sayısı görünür" trailing={sw("notif-amount", prefs.show_amount, (v) => save({ show_amount: v }), !prefs.new_order)} />
-            {Platform.OS === "ios" ? (
+            {/* "Zamana duyarlı" iOS yetkisi (time-sensitive entitlement) Apple profilinde açılınca gösterilecek; yetkisiz anahtar etkisiz kalır. */}
+            {TIME_SENSITIVE_AVAILABLE && Platform.OS === "ios" ? (
               <ListRow divider title="Zamana duyarlı" subtitle="Odak modunda da gösterilir" trailing={sw("notif-time-sensitive", prefs.time_sensitive, (v) => save({ time_sensitive: v }), !prefs.new_order)} />
             ) : null}
           </Card>
