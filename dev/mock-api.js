@@ -135,6 +135,22 @@ localInvoices.push({ id: "li6", doc_schema: 1, invoice_number: "OBI2026120", doc
   customer_id: "c2", customer_name: "Can Öztürk", issue_date: "2026-11-14", due_date: "2026-12-14", currency: "TRY", subtotal: 1150, discount_amount: 150, vat_amount: 201.25, other_taxes_total: 2.88,
   withholding_total: 100.63, accommodation_tax_rate: "1", accommodation_tax_total: 11.5, stopaj_rate: "10", stopaj_total: 115, total: 1365.63, payable_amount: 1150, paid_amount: 0, remaining_amount: 1150,
   payments: [], voided_payments: [], items: [{ line_key: "l-aaaaaaaaaaaa", description: "Danışmanlık", quantity: 2, unit_price: 500, vat_rate: 20, line_total: 1035 }, { line_key: "l-bbbbbbbbbbbb", description: "Konaklama paketi", quantity: 1, unit_price: 300, vat_rate: 10, line_total: 319.13 }] });
+// WP-21 teklifleri: q1 açık (düzenlenebilir), q2 faturaya çevrilmiş (li6), q3 süresi dolmuş.
+localInvoices.push(
+  { id: "q1", doc_schema: 1, invoice_type: "teklif", invoice_number: "TKL2026001", document_name: "Yıllık bakım", status: "taslak", quote_outcome: "open", valid_until: "2026-11-30",
+    customer_id: "c2", customer_name: "Can Öztürk", issue_date: "2026-11-14", currency: "TRY", subtotal: 1000, discount_amount: 0, vat_amount: 200, total: 1200, paid_amount: 0, remaining_amount: 0,
+    items: [{ line_key: "l-q1aaaaaaaaaa", description: "Bakım hizmeti", quantity: 1, unit: "ADET", unit_price: "1000", vat_rate: 20 }], payments: [], voided_payments: [] },
+  { id: "q2", doc_schema: 1, invoice_type: "teklif", invoice_number: "TKL2026002", status: "taslak", quote_outcome: "accepted", converted_invoice_id: "li6", valid_until: "2026-11-20",
+    customer_id: "c2", customer_name: "Can Öztürk", issue_date: "2026-11-10", currency: "TRY", subtotal: 1150, vat_amount: 201.25, total: 1365.63, items: [], payments: [], voided_payments: [] },
+  { id: "q3", doc_schema: 1, invoice_type: "teklif", invoice_number: "TKL2026003", status: "taslak", quote_outcome: "open", valid_until: "2026-11-01",
+    customer_name: "Elif Kaya", issue_date: "2026-10-20", currency: "TRY", subtotal: 500, vat_amount: 100, total: 600, items: [], payments: [], voided_payments: [] }
+);
+const QUOTE_FILTER = {
+  open: (q) => !q.converted_invoice_id && (q.quote_outcome || "open") === "open" && !(q.valid_until && q.valid_until < "2026-11-15"),
+  accepted: (q) => Boolean(q.converted_invoice_id) || q.quote_outcome === "accepted",
+  rejected: (q) => !q.converted_invoice_id && q.quote_outcome === "rejected",
+  expired: (q) => !q.converted_invoice_id && (q.quote_outcome === "expired" || ((q.quote_outcome || "open") === "open" && q.valid_until && q.valid_until < "2026-11-15")),
+};
 const VIEW_FILTER = {
   taslak: (i) => i.status === "taslak",
   kesildi: (i) => !["taslak", "iptal", "resmilesti"].includes(i.status) && i.edoc_state !== "done",
@@ -1104,7 +1120,9 @@ http
       const st = url.searchParams.get("status");
       const vw = url.searchParams.get("view");
       if (vw && !VIEW_FILTER[vw]) return send(res, 422, { code: "FILTER_INVALID", detail: "Görünüm geçersiz." });
-      const rows = localInvoices.filter((i) => (!st || i.status === st) && (!vw || VIEW_FILTER[vw](i)));
+      const it = url.searchParams.get("invoice_type") || "satis";
+      const qo = url.searchParams.get("quote_outcome");
+      const rows = localInvoices.filter((i) => (i.invoice_type || "satis") === it && (!st || i.status === st) && (!vw || VIEW_FILTER[vw](i)) && (!qo || QUOTE_FILTER[qo](i)));
       return send(res, 200, { items: rows, total: rows.length, page: 1, per_page: 30, total_pages: 1 });
     }
     // C4 eki: Paraşüt tahsilat senkronu
@@ -1123,7 +1141,7 @@ http
         send(res, 200, { ok: true });
       });
     }
-    const invMatch = path.match(/^\/local-invoices\/([^/]+)(?:\/(payment|resmilestir))?$/);
+    const invMatch = path.match(/^\/local-invoices\/([^/]+)(?:\/(payment|resmilestir|convert|quote-outcome))?$/);
     if (invMatch) {
       const inv = localInvoices.find((i) => i.id === invMatch[1]);
       if (!inv) return send(res, 404, { detail: "Fatura bulunamadı" });
@@ -1149,6 +1167,16 @@ http
         });
       }
       if (!invMatch[2]) return send(res, 200, inv);
+      if (invMatch[2] === "convert" && req.method === "POST") {
+        console.log("WRITE", path);
+        if (inv.invoice_type !== "teklif") return send(res, 422, { code: "NOT_A_QUOTE", detail: "Yalnız teklif faturaya çevrilebilir." });
+        if (inv.converted_invoice_id) return send(res, 200, { ...localInvoices.find((x) => x.id === inv.converted_invoice_id), replayed: true });
+        const ni = { ...inv, id: "li" + Date.now(), invoice_type: "satis", source_quote_id: inv.id, invoice_number: "", status: "taslak", display_status: "taslak", money_state: "not_issued", converted_invoice_id: undefined, quote_outcome: undefined, valid_until: undefined };
+        localInvoices.unshift(ni); inv.converted_invoice_id = ni.id; inv.quote_outcome = "accepted";
+        return send(res, 200, ni);
+      }
+      if (invMatch[2] === "quote-outcome" && req.method === "PATCH")
+        return readBody((b) => { console.log("WRITE", path, b.outcome); inv.quote_outcome = b.outcome; send(res, 200, inv); });
       if (invMatch[2] === "resmilestir") {
         inv.status = inv.display_status = "resmilesti"; inv.parasut_invoice_id = "ps1";
         // K8: carinin serbest alacağı faturayı kendiliğinden kapatır

@@ -193,13 +193,13 @@ export default function FinanceScreen() {
               onPress={() => router.push("/invoices")}
             />
           ) : null}
-          {billing && parasutConnected ? (
+          {billing ? (
             <ListRow
               testID="finance-offers"
               divider
               leading={<IconTile tint={colors.amberSoft}><TagIcon size={18} color={colors.amber} /></IconTile>}
               title="Teklifler"
-              subtitle="Paraşüt satış teklifleri"
+              subtitle="Teklif hazırla, faturaya çevir"
               chevron
               onPress={() => router.push("/offers")}
             />

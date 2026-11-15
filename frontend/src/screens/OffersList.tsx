@@ -130,9 +130,10 @@ async function fetchAllOffers(token: string): Promise<{ offers: SalesOffer[]; to
 }
 
 // Teklifler ekranına gömülen Paraşüt teklif listesi.
-export function OffersList() {
+// readOnly: web TekliflerPage'teki gibi Paraşüt teklifleri salt okuma sekmesidir; yeni teklif ObiHub'da (yerel) açılır.
+export function OffersList({ readOnly = false }: { readOnly?: boolean } = {}) {
   const { token, user } = useAuth();
-  const canCreate = canManage(user, "billing");
+  const canCreate = !readOnly && canManage(user, "billing");
   const { colors } = useTheme();
   const [list, setList] = useState<SalesOffer[]>([]);
   const [loading, setLoading] = useState(true);

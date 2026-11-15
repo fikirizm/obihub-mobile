@@ -144,4 +144,22 @@ t("kayıttan forma: note_options ve birim geri okunur", () => {
   assert.equal(f.lines[0].unit, "KGM");
 });
 
+t("teklif gövdesi (docType quote): invoice_type teklif, vade yok, geçerlilik tarihi, stok kipi yok", () => {
+  const f = { ...base(), valid_until: "2026-11-30" };
+  const b = m.buildBody(f, { stockMode: "with_document", docType: "quote", createKey: "frm-q" });
+  assert.equal(b.invoice_type, "teklif");
+  assert.equal(b.due_date, null);
+  assert.equal(b.valid_until, "2026-11-30");
+  assert.ok(!("stock_mode" in b));
+  assert.ok(!b.items.some((x) => "warehouse_id" in x));
+  assert.equal(m.previewBody(f, null, "quote").type, "quote");
+  assert.ok(!("valid_until" in m.buildBody({ ...base(), valid_until: "2026-11-30" }, {})));
+});
+t("teklif doğrulaması: tarih metni ve geçerlilik tarihi teklif tarihinden önce olamaz", () => {
+  const e = m.validateForm({ ...base(), issue_date: "", valid_until: "" }, { docType: "quote" });
+  assert.equal(e.issue, "Teklif tarihi zorunludur.");
+  assert.equal(m.validateForm({ ...base(), valid_until: "2026-11-01" }, { docType: "quote" }).valid, "Geçerlilik tarihi, teklif tarihinden önce olamaz.");
+  assert.equal(m.validateForm({ ...base(), due_date: "2026-11-01" }, { docType: "quote" }).due, undefined);
+});
+
 console.log(`\n${n} test geçti`);

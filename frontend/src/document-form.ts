@@ -46,7 +46,10 @@ export type DocForm = {
   include_iban: boolean;
   iban: string;
   include_balance: boolean;
+  // Teklif (WP-21): geçerlilik tarihi; teklifte vade, stok ve tahsilat yoktur.
+  valid_until: string;
 };
+export type DocType = "sales" | "quote";
 
 const rid = () => Math.random().toString(16).slice(2, 14).padEnd(12, "0");
 export const newLineKey = () => `l-${rid()}`;
@@ -82,7 +85,7 @@ export function blankForm(today: string): DocForm {
   return {
     customer_id: null, customer_name: "", customer_tax_no: "", customer_tax_office: "", customer_address: "",
     document_name: "", issue_date: today, due_date: today, stock_mode: null, lines: [], doc_discount: null, stopaj_rate: "", accommodation_rate: "",
-    withholding_all: null, notes: "", include_iban: false, iban: "", include_balance: false,
+    withholding_all: null, notes: "", include_iban: false, iban: "", include_balance: false, valid_until: "",
   };
 }
 
@@ -105,14 +108,17 @@ function lineBody(l: DocLine, stockMode: string | null) {
   return out;
 }
 
-export function buildBody(f: DocForm, opts: { action?: "save_draft" | "issue"; createKey?: string; stockMode?: string | null } = {}) {
+export function buildBody(f: DocForm, opts: { action?: "save_draft" | "issue"; createKey?: string; stockMode?: string | null; docType?: DocType } = {}) {
+  const quote = opts.docType === "quote";
+  const stockMode = quote ? null : opts.stockMode || null;
   const body: Record<string, any> = {
     customer_id: f.customer_id || null, customer_name: String(f.customer_name || "").trim(), customer_tax_no: f.customer_tax_no, customer_tax_office: f.customer_tax_office,
-    customer_address: f.customer_address, issue_date: f.issue_date, due_date: f.due_date || null, currency: "TRY", notes: f.notes, invoice_type: "satis",
-    action: opts.action || "save_draft", items: f.lines.map((l) => lineBody(l, opts.stockMode || null)),
+    customer_address: f.customer_address, issue_date: f.issue_date, due_date: quote ? null : f.due_date || null, currency: "TRY", notes: f.notes,
+    invoice_type: quote ? "teklif" : "satis", action: opts.action || "save_draft", items: f.lines.map((l) => lineBody(l, stockMode)),
   };
   if (opts.createKey) body.create_key = opts.createKey;
-  if (opts.stockMode) body.stock_mode = opts.stockMode;
+  if (quote && f.valid_until) body.valid_until = f.valid_until;
+  if (stockMode) body.stock_mode = stockMode;
   if (has(f.document_name)) body.document_name = f.document_name.trim();
   const dd = f.doc_discount;
   if (dd && has(dd.value)) {
@@ -129,9 +135,9 @@ export function buildBody(f: DocForm, opts: { action?: "save_draft" | "issue"; c
   return body;
 }
 
-export function previewBody(f: DocForm, stockMode: string | null) {
-  const b = buildBody(f, { stockMode });
-  const out: Record<string, any> = { type: "sales", lines: b.items, currency: "TRY" };
+export function previewBody(f: DocForm, stockMode: string | null, docType: DocType = "sales") {
+  const b = buildBody(f, { stockMode, docType });
+  const out: Record<string, any> = { type: docType === "quote" ? "quote" : "sales", lines: b.items, currency: "TRY" };
   if (b.invoice_discount_type) out.doc_discount = { type: b.invoice_discount_type, value: b.invoice_discount_value };
   for (const k of ["stopaj_rate", "accommodation_tax_rate", "withholding_all", "note_options", "stock_mode"]) if (b[k] !== undefined) out[k] = b[k];
   if (b.customer_name) {
@@ -141,11 +147,13 @@ export function previewBody(f: DocForm, stockMode: string | null) {
   return out;
 }
 
-export function validateForm(f: DocForm, opts: { stockMode?: string | null } = {}): Record<string, string> {
+export function validateForm(f: DocForm, opts: { stockMode?: string | null; docType?: DocType } = {}): Record<string, string> {
   const e: Record<string, string> = {};
+  const quote = opts.docType === "quote";
   if (!String(f.customer_name || "").trim()) e.customer = "Müşteri zorunludur.";
-  if (!f.issue_date) e.issue = "Fatura tarihi zorunludur.";
-  if (f.due_date && f.issue_date && f.due_date < f.issue_date) e.due = "Vade, fatura tarihinden önce olamaz.";
+  if (!f.issue_date) e.issue = quote ? "Teklif tarihi zorunludur." : "Fatura tarihi zorunludur.";
+  if (!quote && f.due_date && f.issue_date && f.due_date < f.issue_date) e.due = "Vade, fatura tarihinden önce olamaz.";
+  if (quote && f.valid_until && f.issue_date && f.valid_until < f.issue_date) e.valid = "Geçerlilik tarihi, teklif tarihinden önce olamaz.";
   f.lines.forEach((l, i) => {
     if (!l.product_id && !has(l.description)) e[`line${i}`] = "Bir ürün seçin ya da açıklama yazın.";
     const q = dotAmount(l.quantity, 3);
@@ -233,6 +241,7 @@ export function fromInvoice(inv: any, today: string): DocForm {
     stopaj_rate: inv?.stopaj_rate ? String(inv.stopaj_rate) : "", accommodation_rate: inv?.accommodation_tax_rate == null ? "" : String(inv.accommodation_tax_rate),
     withholding_all: null, notes: inv?.notes || "",
     include_iban: Boolean(inv?.note_options?.include_iban), iban: String(inv?.note_options?.iban || ""), include_balance: Boolean(inv?.note_options?.include_customer_balance),
+    valid_until: String(inv?.valid_until || "").slice(0, 10),
   };
 }
 
