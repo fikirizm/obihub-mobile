@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { mirrorBadge } from "../../src/mirror";
 import { StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
@@ -142,6 +143,7 @@ export default function LocalInvoicesScreen() {
                   <StatusBadge label={st.document.label} kind={st.document.kind} size="sm" />
                   {st.notOfficial ? <StatusBadge label={st.notOfficial.label} kind={st.notOfficial.kind} size="sm" /> : null}
                   {st.payment ? <StatusBadge label={st.payment.label} kind={st.payment.kind} size="sm" /> : null}
+                  {mirrorBadge(inv) ? <StatusBadge label="Paraşüt" kind="neutral" size="sm" /> : null}
                 </View>
               }
               onPress={() => router.push({ pathname: "/local-invoices/[id]", params: { id: inv.id } })}

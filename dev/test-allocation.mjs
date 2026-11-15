@@ -129,4 +129,10 @@ t("M3: metinlerde 'avans' kalmadı (K10)", () => {
   for (const x of all) assert.ok(!/avans/i.test(x), x);
 });
 
+t("G4-30: Paraşüt faturası (collect_blocked) dağıtılamaz; ayrı listede gösterilir", () => {
+  const list = [{ id: "a", remaining: "10.00", status: "gonderildi" }, { id: "p", remaining: "20.00", status: "gonderildi", collect_blocked: true, read_only: true }];
+  assert.deepEqual(m.allocatableInvoices(list).map((x) => x.id), ["a"]);
+  assert.deepEqual(m.parasutOnlyInvoices(list).map((x) => x.id), ["p"]);
+  assert.deepEqual(m.parasutOnlyInvoices(null), []);
+});
 console.log(`\n${n} test geçti`);

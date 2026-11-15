@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { isReadOnly, mirrorBadge } from "../../src/mirror";
 import { InlineEmpty } from "../../src/components/InlineEmpty";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
@@ -164,9 +165,9 @@ export default function CashAccountScreen() {
             title={account.name}
             subtitle={heroSubtitle || undefined}
             badge={
-              account.is_default ? (
+              account.is_default || mirrorBadge(account) ? (
                 <View style={styles.heroPill}>
-                  <Text style={styles.heroPillText}>Varsayılan</Text>
+                  <Text style={styles.heroPillText}>{mirrorBadge(account) ? "Paraşüt" : "Varsayılan"}</Text>
                 </View>
               ) : undefined
             }
@@ -186,7 +187,12 @@ export default function CashAccountScreen() {
             </View>
           </DetailHero>
 
-          {canManage(user, "billing") ? (
+          {isReadOnly(account) ? (
+            <View testID="cash-mirror-notice" style={[styles.mirrorNote, { backgroundColor: colors.infoBg }]}>
+              <Text style={[type.footnote, { color: colors.textSecondary }]}>Bu hesap Paraşüt'ten geliyor; hareketleri Paraşüt'te girin.</Text>
+            </View>
+          ) : null}
+          {canManage(user, "billing") && !isReadOnly(account) && (account as any)?.actions?.add_movement !== false ? (
             <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)} style={styles.actions}>
               <Button testID="cash-add-income" label="Gelir ekle" busy={busy === "income"} disabled={Boolean(busy)} onPress={() => add("income")} style={{ flex: 1 }} />
               <Button testID="cash-add-expense" label="Gider ekle" variant="secondary" busy={busy === "expense"} disabled={Boolean(busy)} onPress={() => add("expense")} style={{ flex: 1 }} />
@@ -240,6 +246,7 @@ export default function CashAccountScreen() {
 }
 
 const styles = StyleSheet.create({
+  mirrorNote: { marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: spacing.sm, borderRadius: radius.md },
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },
   actions: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md, marginHorizontal: spacing.lg },

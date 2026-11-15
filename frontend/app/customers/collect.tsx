@@ -2,6 +2,8 @@
 // POST /customers/{id}/payments + Idempotency-Key.  Dağıtım: Otomatik (alan gönderilmez, sunucu en eski vadeden dağıtır) |
 // Ben seçeyim (satır tutarları) | Faturalara işleme (allocations: []; tutar alacak bakiyesinde kalır, K10).  K4: taslak faturalar listelenmez.
 // Tutar dize gider; belirsiz sonuçta alanlar kilitlenir ve AYNI anahtarla yeniden gönderilir (src/useMoneyWrite).
+import { parasutOnlyInvoices } from "../../src/allocation";
+import { COLLECT_IN_PARASUT_TEXT } from "../../src/mirror";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
@@ -125,6 +127,7 @@ export default function CustomerCollectScreen() {
   }, [loadAccounts, loadAllocation]);
 
   const invoices = allocState && allocState !== "error" ? allocatableInvoices(allocState.open_invoices) : [];
+  const parasutOnly = allocState && allocState !== "error" ? parasutOnlyInvoices(allocState.open_invoices) : [];
   const advance = allocState && allocState !== "error" ? toMinor(allocState.advance) ?? 0n : 0n;
   const amountDot = parseTrAmount(amountText);
   const amt = amountDot ? toMinor(amountDot) : null;
@@ -236,6 +239,11 @@ export default function CustomerCollectScreen() {
           {accountErr ? <Text style={[type.caption, styles.err, { color: colors.error }]}>{accountErr}</Text> : null}
 
           <SectionTitle title="Açık faturalara dağıt" />
+          {parasutOnly.length ? (
+            <Text testID="collect-parasut-only" style={[type.caption, { color: colors.textTertiary, marginHorizontal: spacing.lg, marginBottom: spacing.xs }]}>
+              {`${parasutOnly.length} fatura Paraşüt'te (${parasutOnly.map((i) => i.invoice_number || "Fatura").slice(0, 3).join(", ")}${parasutOnly.length > 3 ? "…" : ""}): ${COLLECT_IN_PARASUT_TEXT}.`}
+            </Text>
+          ) : null}
           <View testID="collect-allocation">
             {allocState === null ? (
               <View style={[styles.block, { gap: spacing.sm }]}>

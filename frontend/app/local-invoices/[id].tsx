@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { isReadOnly, mirrorBadge } from "../../src/mirror";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
@@ -162,7 +163,9 @@ export default function LocalInvoiceDetailScreen() {
   // tahsilatı tamamlanmış "ödendi") resmileştirir; düğme web paneliyle aynı koşulda görünür.
   const mayWrite = canManage(user, "billing");
   // C4: web SalesInvoiceFormOS editable kuralı; silme de aynı koşulda sunulur (sunucu ayrıca doğrular).
-  const canEditInvoice = mayWrite && isInvoiceEditable(inv as any);
+  // G4-30: Paraşüt aynalı fatura salt okunur (düzenle/sil/tahsilat/resmileştir yok; yazım uçları 409 MIRROR_READ_ONLY).
+  const readOnly = isReadOnly(inv);
+  const canEditInvoice = mayWrite && !readOnly && isInvoiceEditable(inv as any);
   const lc = lifecycleActions(inv as any);
   const onCopy = async () => {
     if (!token || busy) return;
@@ -232,13 +235,13 @@ export default function LocalInvoiceDetailScreen() {
       setBusy(null);
     }
   };
-  const officializeCandidate = mayWrite && parasutConnected === true && !inv.parasut_invoice_id && inv.status !== "resmilesti" && !isCancelled;
+  const officializeCandidate = mayWrite && !readOnly && parasutConnected === true && !inv.parasut_invoice_id && inv.status !== "resmilesti" && !isCancelled;
   // G2 §6: tevkifat / ÖTV-ÖİV / konaklama / stopaj Paraşüt'e taşınamaz; düğme yerine açıklama (sunucu yine reddeder).
   const onlyObiHub = officializeCandidate ? parasutUnsupportedText(inv) : null;
   const canOfficialize = officializeCandidate && !onlyObiHub;
   // Aşama 4 P6: e-belge tutarı Paraşüt'le uyuşmadığında (blocked_mismatch) sunucu tahsilatı 409 ile reddeder; düğme gizlenir.
   // İade faturasına tahsilat alınmaz (sunucu 409 INVOICE_IS_REFUND).
-  const canCollect = mayWrite && !isCancelled && inv?.money_state !== "refund" && remaining > 0.004 && inv?.edoc_state !== "blocked_mismatch";
+  const canCollect = mayWrite && !readOnly && !isCancelled && inv?.money_state !== "refund" && remaining > 0.004 && inv?.edoc_state !== "blocked_mismatch";
 
   const onOfficialize = async () => {
     if (!token) return;
@@ -485,6 +488,7 @@ export default function LocalInvoiceDetailScreen() {
               <StatusBadge label={st.document.label} kind={st.document.kind} size="sm" />
               {st.notOfficial ? <StatusBadge label={st.notOfficial.label} kind={st.notOfficial.kind} size="sm" /> : null}
               {st.payment ? <StatusBadge label={st.payment.label} kind={st.payment.kind} size="sm" /> : null}
+              {mirrorBadge(inv) ? <StatusBadge label="Paraşüt" kind="neutral" size="sm" /> : null}
             </View>
           }
           value={formatMoney(inv.total, cur)}

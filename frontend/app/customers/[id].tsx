@@ -47,6 +47,7 @@ export default function CustomerDetailScreen() {
     edit?: string;
     del?: string;
     orders?: string;
+    ro?: string;
   }>();
   const id = String(params.id || "");
   // Liste okuma modelinden mi (/accounting/read-model/parties) yoksa eski /customers ucundan mı geldi; web CustomersPage.js ile aynı ayrım.
@@ -60,8 +61,8 @@ export default function CustomerDetailScreen() {
   const { toast, confirm } = useFeedback();
   // C5: düzenle / sil / siparişler (liste satırının actions bayrakları; müşteri yönetme yetkisi).
   const mayManage = canManage(user, "customers");
-  const canEditParty = mayManage && params.edit === "1";
-  const canDeleteParty = mayManage && params.del === "1";
+  const canEditParty = mayManage && params.edit === "1" && params.ro !== "1";
+  const canDeleteParty = mayManage && params.del === "1" && params.ro !== "1";
   const showOrders = params.orders === "1";
   const [orders, setOrders] = useState<PartyOrder[] | null>(null);
   const [ordersTotal, setOrdersTotal] = useState(0);
@@ -96,7 +97,9 @@ export default function CustomerDetailScreen() {
   // Tahsilat yalnızca kayıtlı carilerde yapılabilir; siparişlerden türetilen carilerde uç 404 döner.
   const registered = params.registered === "1";
   // Web (CustomersPage.js): kaynağı ObiHub defteri olan caride tahsilat bu ekrandan alınmaz.
-  const mayCollect = (canManage(user, "customers") || canManage(user, "billing")) && source !== "obihub";
+  // G4-30: Paraşüt aynalı cari (ro=1) ObiHub'da tahsil edilmez/düzenlenmez; Paraşüt'te yönetilir.
+  const readOnlyParty = params.ro === "1";
+  const mayCollect = (canManage(user, "customers") || canManage(user, "billing")) && source !== "obihub" && !readOnlyParty;
   const mayVoidAny = canManage(user, "customers") || canManage(user, "billing");
   // Sunucu (88a086a17) `account_id`'yi para birimiyle denetler; web gibi dövizli caride de tahsilat alınır,
   // yalnız carinin para birimindeki hesaplar listelenir.
@@ -371,6 +374,14 @@ export default function CustomerDetailScreen() {
           </SafeAnimatedView>
         ) : null}
 
+        {readOnlyParty ? (
+          <View testID="customer-mirror-notice" style={[styles.notice, { backgroundColor: colors.infoBg }]}>
+            <AlertIcon size={18} color={colors.info} />
+            <Text style={[type.footnote, styles.noticeText, { color: colors.textSecondary }]}>
+              Bu cari Paraşüt'ten geliyor. Tahsilat, virman ve düzenleme Paraşüt'te yapılır; burada yalnız görüntülenir.
+            </Text>
+          </View>
+        ) : null}
         {canEditParty || canDeleteParty ? (
           <SafeAnimatedView entering={FadeInDown.delay(90).duration(380)} style={styles.manageRow}>
             {canEditParty ? (

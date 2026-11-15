@@ -81,4 +81,11 @@ t("Paraşüt'e taşınamayan alanlar (G2 §6): tevkifat, ÖTV/ÖİV, konaklama, 
   assert.equal(m.parasutUnsupportedText({ total: 100 }), null);
 });
 
+t("Sürüm 3: Paraşüt kaynaklı belge (source parasut / parasut_mirror ya da source_kind parasut) resmi sayılır", () => {
+  assert.equal(m.documentAxis({ status: "gonderildi", source: "parasut_mirror" }), "official");
+  assert.equal(m.documentAxis({ status: "gonderildi", source: "parasut" }), "official");
+  assert.equal(m.documentAxis({ status: "gonderildi", source_kind: "parasut" }), "official");
+  assert.equal(m.invoiceStatusView({ status: "gonderildi", source_kind: "parasut" }, { parasutConnected: true }).notOfficial, null);
+});
+
 console.log(`\n${n} test geçti`);

@@ -109,7 +109,7 @@ t("M7: bakiye ipucu: eksi bakiyede 'Alacak bakiyesi'", () => {
 t("partyRouteParams: cari listesi ve sipariş ayrıntısı aynı parametrelerle cari ekranını açar", () => {
   const base = { id: "c1", name: "Elif Kaya", balance: 4725, currency: "TRY", source: "registered", origin: "customers", balanceAvailable: true,
     actions: { collect: true, view_ledger: true, edit: true, delete: false, view_orders: true } };
-  assert.deepEqual(m.partyRouteParams(base), { id: "c1", name: "Elif Kaya", balance: "4725", registered: "1", origin: "customers", source: "registered", ledger: "1", edit: "1", del: "0", orders: "1", currency: "TRY" });
+  assert.deepEqual(m.partyRouteParams(base), { id: "c1", name: "Elif Kaya", balance: "4725", registered: "1", origin: "customers", source: "registered", ledger: "1", edit: "1", del: "0", ro: "0", orders: "1", currency: "TRY" });
   const legacy = { ...base, origin: "read_model", source: "legacy", balanceAvailable: false, company_name: "Kaya Ltd." };
   const r = m.partyRouteParams(legacy);
   assert.equal(r.name, "Kaya Ltd."); assert.equal(r.balance, "0"); assert.equal(r.currency, ""); assert.equal(r.registered, "1");
@@ -117,4 +117,12 @@ t("partyRouteParams: cari listesi ve sipariş ayrıntısı aynı parametrelerle 
   assert.equal(m.partyRouteParams({ ...base, source: "orders" }).registered, "0");
 });
 
+t("G4-30 ayna: read_only caride düzenle/sil kapalı, ro=1 (tahsilat ve virman ekranda gizlenir)", () => {
+  const p = m.partyRouteParams({ id: "c1", name: "Paraşüt Cari", origin: "read_model", source: "legacy", balanceAvailable: true, balance: 10, read_only: true, actions: { collect: true, edit: true, delete: true, view_ledger: true } });
+  assert.equal(p.edit, "0");
+  assert.equal(p.del, "0");
+  assert.equal(p.ro, "1");
+  const q = m.partyRouteParams({ id: "c2", origin: "read_model", source: "legacy", actions: { edit: true } });
+  assert.equal(q.ro, "0");
+});
 console.log(`\n${n} test geçti`);

@@ -530,6 +530,8 @@ export type PartyActions = { view_ledger: boolean; view_orders: boolean; edit: b
 
 // Cari listesi satırı: okuma modeli (/accounting/read-model/parties) ya da eski uç (/customers) aynı biçime çevrilir.
 export type PartyView = Party & {
+  read_only?: boolean;
+  source_kind?: string;
   // "read_model": yeni okuma modeli; "customers": eski uç (okuma modeli 404 döndü).
   origin: "read_model" | "customers";
   // `source`: okuma modelinde "obihub" | "legacy"; eski uçta "registered" | "orders".

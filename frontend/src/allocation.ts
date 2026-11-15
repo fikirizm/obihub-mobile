@@ -5,7 +5,19 @@
 // Uçlar: GET /customers/{id}/allocation-state, POST /customers/{id}/payments {…, allocations?}, POST /customers/{id}/allocations.
 // K4: taslak (kesilmemiş) faturaya dağıtım yapılmaz; sunucu yalnız kesilmiş faturaları döndürür, istemci ayrıca eler.
 
-export type OpenInvoice = { id: string; invoice_number?: string; invoice_date?: string; due_date?: string; total?: string; remaining: string; status?: string; invoice_type?: string };
+export type OpenInvoice = {
+  id: string;
+  invoice_number?: string;
+  invoice_date?: string;
+  due_date?: string;
+  total?: string;
+  remaining: string;
+  status?: string;
+  invoice_type?: string;
+  // G4-30: Paraşüt faturası ObiHub'da tahsil edilmez (gösterilir, seçilmez).
+  collect_blocked?: boolean;
+  read_only?: boolean;
+};
 export type AllocationItem = { invoice_id: string; amount: string };
 export type Allocations = { items: AllocationItem[]; total: bigint; errors: Record<string, string> };
 export type AllocationMode = "auto" | "manual" | "advance";
@@ -61,7 +73,7 @@ const money = (v: unknown, cur: string) => formatMinor(toMinor(v) ?? 0n, cur);
 
 export function allocatableInvoices(list: OpenInvoice[] | null | undefined): OpenInvoice[] {
   return (Array.isArray(list) ? list : []).filter((i) => {
-    if (!i || !i.id) return false;
+    if (!i || !i.id || i.collect_blocked === true) return false;
     if (["taslak", "iptal"].includes(String(i.status || "")) || i.invoice_type === "teklif") return false;
     const r = toMinor(i.remaining);
     return r !== null && r > 0n;
@@ -199,4 +211,9 @@ export function allocateDoneTexts(r: any, total: bigint, currency: string): stri
   const cur = r?.currency || currency;
   const rest = r?.advance_remaining !== undefined && r?.advance_remaining !== null ? `; kalan alacak ${money(r.advance_remaining, cur)}` : "";
   return [`${formatMinor(total, cur)} faturalarla eşleştirildi${rest}.`, ...skippedText(r)];
+}
+
+// Paraşüt'te tahsil edilecek açık faturalar (yalnız bilgi; "Paraşüt'te tahsil edin").
+export function parasutOnlyInvoices(list: OpenInvoice[] | null | undefined): OpenInvoice[] {
+  return (Array.isArray(list) ? list : []).filter((i) => i && i.id && i.collect_blocked === true);
 }

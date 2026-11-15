@@ -43,7 +43,9 @@ export function documentAxis(inv: Inv): "draft" | "issued" | "official" | "cance
   const st = inv?.status;
   if (st === "taslak") return "draft";
   if (st === "iptal") return "cancelled";
-  if (st === "resmilesti" || inv?.edoc_state === "done" || inv?.source === "parasut_import") return "official";
+  // Sürüm 3: Paraşüt'te doğmuş ya da aynalanmış belge de resmidir (sunucu view=resmilesti ile aynı kural).
+  if (st === "resmilesti" || inv?.edoc_state === "done" || ["parasut_import", "parasut", "parasut_mirror"].includes(String(inv?.source || "")) || inv?.source_kind === "parasut")
+    return "official";
   return "issued";
 }
 

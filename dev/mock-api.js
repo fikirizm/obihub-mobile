@@ -172,6 +172,9 @@ const QUOTE_FILTER = {
   rejected: (q) => !q.converted_invoice_id && q.quote_outcome === "rejected",
   expired: (q) => !q.converted_invoice_id && (q.quote_outcome === "expired" || ((q.quote_outcome || "open") === "open" && q.valid_until && q.valid_until < "2026-11-15")),
 };
+// G4-30 ayna denemesi: li4 Paraşüt'ten gelen salt okunur fatura; a2 Paraşüt hesabı.
+{ const li4 = localInvoices.find((i) => i.id === "li4"); if (li4) Object.assign(li4, { source_kind: "parasut", read_only: true, mirror: { provider: "parasut", synced_at: "2026-11-15T10:00:00Z", state: "synced" } }); }
+{ const a2 = accounts.find((a) => a.id === "a2"); if (a2) Object.assign(a2, { source_kind: "parasut", read_only: true, group: "parasut", actions: { add_movement: false } }); }
 const VIEW_FILTER = {
   taslak: (i) => i.status === "taslak",
   kesildi: (i) => !["taslak", "iptal", "resmilesti"].includes(i.status) && i.edoc_state !== "done",

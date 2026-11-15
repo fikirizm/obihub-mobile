@@ -163,6 +163,9 @@ function partyFromReadModel(item: any): PartyView {
     origin: "read_model",
     actions,
     balanceAvailable,
+    // G4-30 Paraşüt aynası (firma Paraşüt bağlıyken cari salt okunur).
+    read_only: item?.read_only === true,
+    source_kind: typeof item?.source_kind === "string" ? item.source_kind : undefined,
   };
 }
 
@@ -200,7 +203,7 @@ export async function getPartiesCompat(
       : LEGACY_ACTIONS;
     // Aşama 4 P5a: `balance` carinin kendi para birimindedir; birimi `balance_currency`.
     const currency = raw.balance_currency || p.currency;
-    return { ...p, currency, origin: "customers", actions, balanceAvailable: raw.balance_available !== false };
+    return { ...p, currency, origin: "customers", actions, balanceAvailable: raw.balance_available !== false, read_only: (raw as any).read_only === true };
   });
   return { items, total: res.total, hasMore: res.hasMore, summary: res.summary ?? null, origin: "customers" };
 }
