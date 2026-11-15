@@ -242,7 +242,11 @@ export async function getPartyLedgerCompat(
         debit: x?.side === "debit" ? amount : undefined,
         credit: x?.side === "credit" ? amount : undefined,
         balance: decimalOf(x?.balance_after) ?? undefined,
-      };
+        // 15 Kas 2026 ödeme silme: borç ödemesi satırında collection (type payable, path, confirm_text) + actions.void.
+        reversed: x?.reversed === true,
+        collection: x?.collection && typeof x.collection === "object" ? x.collection : null,
+        actions: x?.actions && typeof x.actions === "object" ? x.actions : null,
+      } as PartyLedgerRow;
     });
     const balances = Array.isArray(d?.balances) ? d.balances : [];
     const preferred = balances.find((b: any) => b?.currency === "TRY") || balances[0];
@@ -435,7 +439,9 @@ export type PayableInfo = {
   currency: string;
   status: string;
   canPay: boolean;
-  items: { id: string; date: string; amount: string; currency: string; account_name: string; completed: boolean }[];
+  items: { id: string; date: string; amount: string; currency: string; account_name: string; completed: boolean; canVoid: boolean }[];
+  // 15 Kas 2026 ödeme silme: silinen ödemeler (status voided, voided_at).
+  voidedItems: { id: string; date: string; amount: string; currency: string; account_name: string; voided_at: string }[];
 };
 
 const curOf = (c: unknown) => {
@@ -460,6 +466,15 @@ export async function getPayableInfo(token: string, ref: string): Promise<Payabl
       currency: curOf(x?.currency),
       account_name: String(x?.account_name || ""),
       completed: x?.status === "completed",
+      canVoid: x?.can_void === true,
+    })),
+    voidedItems: (Array.isArray(d?.voided_items) ? d.voided_items : []).map((x: any) => ({
+      id: String(x?.id || ""),
+      date: String(x?.date || ""),
+      amount: String(x?.amount ?? "0"),
+      currency: curOf(x?.currency),
+      account_name: String(x?.account_name || ""),
+      voided_at: String(x?.voided_at || ""),
     })),
   };
 }

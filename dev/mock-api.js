@@ -1242,11 +1242,27 @@ http
         reversed: false, actions: { can_pay: ex.remaining > 0, can_reverse: false },
       });
     }
+    // 15 Kas 2026 ödeme silme: DELETE /accounting/payables/{ref}/payments/{pid} (ters kayıt; borç tekrar ödenecek).
+    if ((gm = path.match(/^\/accounting\/payables\/(.+)\/payments\/([^/]+)$/)) && req.method === "DELETE") {
+      const ex = expenseState[decodeURIComponent(gm[1])];
+      if (!ex) return send(res, 404, { code: "PAYABLE_NOT_FOUND", detail: "Borç kaydı bulunamadı." });
+      const pid = decodeURIComponent(gm[2]);
+      console.log("WRITE DELETE", path);
+      const done = (ex.voided || []).find((x) => x.id === pid);
+      const p = ex.payments.find((x) => x.id === pid);
+      if (!p && !done) return send(res, 404, { code: "PAYMENT_NOT_FOUND", detail: "Ödeme kaydı bulunamadı." });
+      if (p) {
+        ex.payments = ex.payments.filter((x) => x.id !== pid);
+        ex.remaining = Math.round((ex.remaining + Number(p.amount)) * 100) / 100;
+        ex.voided = [...(ex.voided || []), { ...p, status: "voided", voided_at: new Date().toISOString() }];
+      }
+      return send(res, 200, { status: "VOIDED", replayed: !p, payment: { id: pid, status: "voided", can_void: false }, payable: { id: decodeURIComponent(gm[1]), remaining: ex.remaining.toFixed(2), status: "open" } });
+    }
     if ((gm = path.match(/^\/accounting\/payables\/(.+)\/payments$/))) {
       const ref = decodeURIComponent(gm[1]);
       const ex = expenseState[ref];
       if (!ex) return send(res, 404, { code: "NOT_FOUND", detail: "Bulunamadı" });
-      const view = () => ({ payable: { total: ex.total, paid: (Number(ex.total) - ex.remaining).toFixed(2), remaining: ex.remaining.toFixed(2), currency: "TRY", status: ex.remaining <= 0 ? "paid" : "open" }, can_pay: ex.remaining > 0, items: ex.payments });
+      const view = () => ({ payable: { total: ex.total, paid: (Number(ex.total) - ex.remaining).toFixed(2), remaining: ex.remaining.toFixed(2), currency: "TRY", status: ex.remaining <= 0 ? "paid" : "open" }, can_pay: ex.remaining > 0, items: ex.payments.map((x) => ({ ...x, can_void: x.status === "completed" })), voided_items: ex.voided || [] });
       if (req.method === "GET") return send(res, 200, view());
       let raw = "";
       req.on("data", (c) => (raw += c));

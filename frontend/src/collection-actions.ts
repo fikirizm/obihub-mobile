@@ -5,7 +5,8 @@
 //  • Ekstre satırında düğmeler YALNIZ sunucunun `actions: {edit, void}` alanına göre gösterilir.
 //  • K5: Paraşüt'e işlenmiş tahsilatta Paraşüt'e dokunulmaz; yanıttaki `warning_texts` uyarı olarak gösterilir.
 
-export type CollectionType = "customer" | "invoice";
+// "payable": borç (gider/alış faturası) ödemesi — 15 Kas 2026 ödeme silme (docs/pm/tasarim/odeme-silme.md).
+export type CollectionType = "customer" | "invoice" | "payable";
 export type Collection = {
   type: CollectionType;
   id: string;
@@ -21,6 +22,10 @@ export type Collection = {
   allocated_amount?: number | string;
   invoices?: { invoice_id: string; invoice_number?: string; amount?: number | string }[];
   parasut?: boolean;
+  payable_ref?: string;
+  // Sunucunun silme yolu (/api öneksiz) ve onay metni; varsa esastır.
+  path?: string | null;
+  confirm_text?: string | null;
 };
 export type RowActions = { edit: boolean; void: boolean };
 
@@ -32,6 +37,8 @@ const REPLAYED_TEXT = "Bu işlem zaten kaydedilmişti; ikinci kez işlenmedi.";
 
 const enc = encodeURIComponent;
 export function collectionPath(c: Collection): string {
+  if (typeof c.path === "string" && c.path.startsWith("/")) return c.path.replace(/^\/api(?=\/)/, "");
+  if (c.type === "payable") return `/accounting/payables/${enc(String(c.payable_ref || ""))}/payments/${enc(c.id)}`;
   return c.type === "invoice"
     ? `/local-invoices/${enc(String(c.invoice_id || ""))}/payments/${enc(c.id)}`
     : `/customers/${enc(String(c.customer_id || ""))}/payments/${enc(c.id)}`;
@@ -207,3 +214,12 @@ export function orderInvoiceLabel(o: { invoice_number?: unknown; parasut_invoice
   }
   return null;
 }
+
+// Silme onayı (odeme-silme.md §3): sunucunun confirm_text'i; yoksa türe göre web metni.
+export function voidConfirmText(c: Collection): string {
+  if (typeof c.confirm_text === "string" && c.confirm_text.trim()) return c.confirm_text.trim();
+  if (c.type === "payable") return "Bu ödeme silinecek; fatura tekrar ödenecek duruma geçer.";
+  if (c.type === "invoice" || (c.invoices || []).some((i) => i && i.invoice_id)) return "Bu tahsilat silinecek; fatura tekrar tahsil edilecek duruma geçer.";
+  return "Bu tahsilat silinecek; tutar carinin bakiyesinden düşer.";
+}
+export const voidTitle = (c: { type?: string }) => (c.type === "payable" ? "Ödeme silinsin mi?" : "Tahsilat silinsin mi?");

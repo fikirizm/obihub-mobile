@@ -39,6 +39,7 @@ import { Skeleton } from "../../src/components/Skeleton";
 import { Button } from "../../src/ui/Button";
 import { Chip, ChipRow } from "../../src/ui/Chip";
 import { useFeedback } from "../../src/ui/Feedback";
+import { runVoidCollection } from "../../src/collection-flow";
 import { FormField } from "../../src/ui/FormField";
 import { StackHeader } from "../../src/ui/Header";
 import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
@@ -81,7 +82,7 @@ export default function PayablePayScreen() {
   const ref = String(params.ref || "");
   const { token, user } = useAuth();
   const { colors } = useTheme();
-  const { toast } = useFeedback();
+  const { toast, confirm: ask } = useFeedback();
   const mayWrite = canManage(user, "billing");
 
   const [info, setInfo] = useState<PayableInfo | null>(null);
@@ -219,6 +220,48 @@ export default function PayablePayScreen() {
     }
   };
 
+  // Önceki ödemeler (15 Kas 2026 ödeme silme): sunucu can_void verirse "Sil" (ters kayıt; fatura tekrar ödenecek olur).
+  const voidPayment = async (p: PayableInfo["items"][number]) => {
+    if (!token || !info) return;
+    const changed = await runVoidCollection({
+      token,
+      c: { type: "payable", id: p.id, payable_ref: ref, amount: p.amount, date: p.date, currency: p.currency },
+      currency: p.currency,
+      confirm: ask,
+      toast,
+    });
+    if (changed) load();
+  };
+  const paymentsList =
+    info && (info.items.length || info.voidedItems.length) ? (
+      <>
+        <SectionTitle title="Ödemeler" />
+        <Card style={styles.block}>
+          {info.items.map((p, i) => (
+            <View key={p.id || i} testID={`payable-payment-${p.id}`} style={[styles.prev, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
+              <Text style={[type.callout, { color: colors.textSecondary, flex: 1 }]} numberOfLines={1}>
+                {[formatDate(p.date), p.account_name || null, p.completed ? null : "kayıt tamamlanıyor"].filter(Boolean).join(" · ")}
+              </Text>
+              <Text style={[type.callout, tabular, { color: colors.textPrimary, fontWeight: "600" }]}>{formatMoney(p.amount, p.currency)}</Text>
+              {p.canVoid ? <Button testID={`payable-payment-${p.id}-void`} size="sm" variant="ghost" label="Sil" onPress={() => voidPayment(p)} /> : null}
+            </View>
+          ))}
+          {info.voidedItems.map((p, i) => (
+            <View
+              key={`v-${p.id || i}`}
+              testID={`payable-voided-${p.id}`}
+              style={[styles.prev, (info.items.length > 0 || i > 0) && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
+            >
+              <Text style={[type.callout, { color: colors.textTertiary, flex: 1 }]} numberOfLines={1}>
+                {[formatDate(p.date), p.account_name || null, "Ödeme silindi"].filter(Boolean).join(" · ")}
+              </Text>
+              <Text style={[type.callout, tabular, { color: colors.textTertiary, textDecorationLine: "line-through" }]}>{formatMoney(p.amount, p.currency)}</Text>
+            </View>
+          ))}
+        </Card>
+      </>
+    ) : null;
+
   const body = () => {
     if (!mayWrite)
       return (
@@ -251,6 +294,7 @@ export default function PayablePayScreen() {
       );
     if (!info.canPay)
       return (
+        <ScrollView contentContainerStyle={styles.body}>
         <EmptyState
           icon={<WalletIcon size={30} color={colors.textTertiary} />}
           title="Ödeme eklenemez"
@@ -262,6 +306,8 @@ export default function PayablePayScreen() {
                 : "Bu faturanın içeri alınması henüz tamamlanmadı; ödeme eklenemez."
           }
         />
+        {paymentsList}
+        </ScrollView>
       );
     return (
       <KeyboardAvoidingView
@@ -302,50 +348,7 @@ export default function PayablePayScreen() {
             </View>
           </HeroCard>
 
-          {info.items.length ? (
-            <>
-              <SectionTitle title="Önceki ödemeler" />
-              <Card style={styles.block}>
-                {info.items.map((p, i) => (
-                  <View
-                    key={p.id || i}
-                    style={[
-                      styles.prev,
-                      i > 0 && {
-                        borderTopWidth: StyleSheet.hairlineWidth,
-                        borderTopColor: colors.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        type.callout,
-                        { color: colors.textSecondary, flex: 1 },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {[
-                        formatDate(p.date),
-                        p.account_name || null,
-                        p.completed ? null : "kayıt tamamlanıyor",
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </Text>
-                    <Text
-                      style={[
-                        type.callout,
-                        tabular,
-                        { color: colors.textPrimary, fontWeight: "600" },
-                      ]}
-                    >
-                      {formatMoney(p.amount, p.currency)}
-                    </Text>
-                  </View>
-                ))}
-              </Card>
-            </>
-          ) : null}
+          {paymentsList}
 
           <View style={styles.form}>
             <FormField

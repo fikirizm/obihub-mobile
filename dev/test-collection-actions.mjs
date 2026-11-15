@@ -133,4 +133,21 @@ t("cari siparişleri: fatura no, yoksa Paraşüt no, yoksa Faturalanmadı", () =
   assert.equal(m.orderInvoiceLabel({}), null);
 });
 
+t("Ödeme silme (15 Kas): borç ödemesi yolu; sunucunun path'i önceliklidir (/api öneksiz)", () => {
+  assert.equal(m.collectionPath({ type: "payable", id: "9f3c", payable_ref: "obihub:inv-123" }), "/accounting/payables/obihub%3Ainv-123/payments/9f3c");
+  assert.equal(m.collectionPath({ type: "payable", id: "9f3c", payable_ref: "x", path: "/accounting/payables/obihub:inv-123/payments/9f3c" }), "/accounting/payables/obihub:inv-123/payments/9f3c");
+  assert.equal(m.collectionPath({ type: "invoice", id: "op1", invoice_id: "inv1", path: "/api/local-invoices/inv1/payments/op1" }), "/local-invoices/inv1/payments/op1");
+});
+t("silme onay metni: sunucunun confirm_text'i; yoksa türe göre (borç ödemesi / faturalı / faturasız tahsilat)", () => {
+  assert.equal(m.voidConfirmText({ type: "payable", id: "1", confirm_text: "Sunucu metni." }), "Sunucu metni.");
+  assert.equal(m.voidConfirmText({ type: "payable", id: "1" }), "Bu ödeme silinecek; fatura tekrar ödenecek duruma geçer.");
+  assert.equal(m.voidConfirmText({ type: "invoice", id: "1" }), "Bu tahsilat silinecek; fatura tekrar tahsil edilecek duruma geçer.");
+  assert.equal(m.voidConfirmText({ type: "customer", id: "1", invoices: [{ invoice_id: "i1" }] }), "Bu tahsilat silinecek; fatura tekrar tahsil edilecek duruma geçer.");
+  assert.equal(m.voidConfirmText({ type: "customer", id: "1", invoices: [] }), "Bu tahsilat silinecek; tutar carinin bakiyesinden düşer.");
+  assert.equal(m.voidTitle({ type: "payable" }), "Ödeme silinsin mi?");
+  assert.equal(m.voidTitle({ type: "invoice" }), "Tahsilat silinsin mi?");
+});
+t("ekstre satırı: borç ödemesinde düzenle yok, sil var (sunucu actions)", () => {
+  assert.deepEqual(m.ledgerRowActions({ collection: { type: "payable", id: "p" }, actions: { edit: false, void: true } }), { edit: false, void: true });
+});
 console.log(`\n${n} test geçti`);

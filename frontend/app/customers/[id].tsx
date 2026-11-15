@@ -97,6 +97,7 @@ export default function CustomerDetailScreen() {
   const registered = params.registered === "1";
   // Web (CustomersPage.js): kaynağı ObiHub defteri olan caride tahsilat bu ekrandan alınmaz.
   const mayCollect = (canManage(user, "customers") || canManage(user, "billing")) && source !== "obihub";
+  const mayVoidAny = canManage(user, "customers") || canManage(user, "billing");
   // Sunucu (88a086a17) `account_id`'yi para birimiyle denetler; web gibi dövizli caride de tahsilat alınır,
   // yalnız carinin para birimindeki hesaplar listelenir.
   const foreign = false;
@@ -447,7 +448,8 @@ export default function CustomerDetailScreen() {
                 const credit = Number(r.credit || 0);
                 const isCredit = credit > 0;
                 const rowCur = (r.currency || curLabel).toUpperCase().replace("TRL", "TRY");
-                const acts = mayCollect ? ledgerRowActions(r) : null;
+                // 15 Kas 2026 ödeme silme: borç ödemesi satırı okuma modeli ekstresinde de gelir; düğme yalnız sunucunun actions'ına göre.
+                const acts = mayCollect || mayVoidAny ? ledgerRowActions(r) : null;
                 const tActs = mayCollect && !acts ? transferRowActions(r) : null;
                 return (
                   <View key={r.id || i}>
