@@ -4,12 +4,22 @@
 // Parametreler: id (liste satırı kimliği), provider (parasut | turkcell-efatura), status (import_status), reimportable, title.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { getIncomingInvoicePdf } from "../../src/api";
+import { getUiCapabilities } from "../../src/api-gider";
 import {
+  answerArgs,
+  canCreateSupplier,
   collectIssues,
+  kurusNotice,
+  newCardCount,
+  REMEMBER_TEXT,
+  rememberErrorAction,
+  rememberProducts,
+  stockUnavailableText,
+  type RememberedLine,
   confirmErrorOutcome,
   confirmOutcome,
   confirmQuickImport,
@@ -133,6 +143,16 @@ export default function IncomingImportScreen() {
   const confirmingRef = useRef(false);
   const savingRef = useRef(false);
   const warehouseTouched = useRef(false);
+  // Paraşüt akışı (15 Kas 2026): tek soru → (Evet) depo + remember-products → dolu gider formu.
+  const [answer, setAnswer] = useState<null | "yes" | "no">(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [remembered, setRemembered] = useState<Record<number, RememberedLine>>({});
+  const [pickedWh, setPickedWh] = useState<string | null>(null);
+  const [rememberBusy, setRememberBusy] = useState(false);
+  const [rememberError, setRememberError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [ownerAccounting, setOwnerAccounting] = useState(false);
+  const navigation = useNavigation();
 
   // Önizleme: başarısız denemede seçimler son başarılı isteğe döner (ekrandaki görünümle eşleşsin).
   const load = useCallback(
@@ -188,6 +208,7 @@ export default function IncomingImportScreen() {
       if (!cap) return setGate("off");
       setConfirmOn(cap.confirm);
       if (cap.confirm) getQuickImportCategories(token).then((c) => live && setCategories(c)).catch(() => live && setCategories(null));
+      getUiCapabilities(token).then((c) => live && setOwnerAccounting(c.inventoryOwner?.owner === "accounting"));
       const reimportable = params.reimportable === "1";
       if (rowStatus !== "none" && (isStatusOnly(rowStatus, reimportable) || rowStatus === "reversed")) {
         try {
@@ -261,11 +282,12 @@ export default function IncomingImportScreen() {
   // Olası mükerrer eski kayıt: açık kabul kutusu (kabul edilince önizleme legacy_duplicate_ack ile yenilenir, madde kalkar).
   const showLegacyAck = issues.some((i) => i.kind === "ack") || args.legacyAck;
   const ready = !stale && !loading && decision?.status === "FAST_READY" && decision?.business_ready === true && !issues.some((i) => i.kind !== "notice");
-  const canSave = confirmOn && decision?.confirmation_available === true && decision?.can_confirm === true && ready && !confirming && mayWrite;
+  const canSave = formOpen && confirmOn && decision?.confirmation_available === true && decision?.can_confirm === true && ready && !confirming && mayWrite;
   // Kullanıcı tedarikçiyi seçtikten sonra durum "matched" olur; seçim görünür ve değiştirilebilir kalsın.
+  // D-18k: VKN ile eşleşen kayıtlı cari varsa "Yeni cari" önerilmez.
+  const createOk = canCreateSupplier(view);
   const supplierBlock =
-    (supplier.state !== "matched" || Boolean(args.supplierId) || args.createSupplier) &&
-    ((supplier.candidates || []).length > 0 || decisions.supplier?.create_new?.available === true);
+    (supplier.state !== "matched" || Boolean(args.supplierId) || args.createSupplier) && ((supplier.candidates || []).length > 0 || createOk);
   const stockLines = (view?.lines || []).filter((l: any) => l.kind === "product" && l.stock?.eligible);
 
   // ---- Kararlar (web useQuickImportPreview) ----
@@ -326,6 +348,61 @@ export default function IncomingImportScreen() {
     load({ ...args, warehouseId: options[0].id });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [decision]);
+
+  // ---- Paraşüt akışı ----
+  const chooseAnswer = (a: "yes" | "no") => {
+    if (busyNow() || !view) return;
+    setAnswer(a);
+    setRememberError(null);
+    setFormOpen(a === "no");
+    warehouseTouched.current = false;
+    load(answerArgs(committed.current || args, view, a));
+  };
+  const expenseOnly = (text: string | null) => {
+    setAnswer("no");
+    setFormOpen(true);
+    setNotice(text);
+    if (view) load(answerArgs(committed.current || args, view, "no"));
+  };
+  // Stok sahibi muhasebe programıysa soru sorulmaz (Hayır gibi, bilgi notu).
+  useEffect(() => {
+    if (ownerAccounting && view && answer === null && !loading) expenseOnly(REMEMBER_TEXT.ownerAccounting);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownerAccounting, view, answer, loading]);
+  const whOptions: any[] = (wh.options || []).filter((o: any) => o?.id);
+  const whPicked = pickedWh || args.warehouseId || wh.selected_id || (whOptions.length === 1 ? whOptions[0].id : null);
+  const continueWarehouse = async () => {
+    if (!token || rememberBusy || loading) return;
+    setRememberBusy(true);
+    setRememberError(null);
+    try {
+      setRemembered(await rememberProducts(token, id));
+      setFormOpen(true);
+      if (whPicked) warehouseTouched.current = true;
+      load({ ...(committed.current || args), warehouseId: whPicked || null });
+    } catch (e: any) {
+      const act = rememberErrorAction(e);
+      if ("expenseOnly" in act) expenseOnly(REMEMBER_TEXT.ownerAccounting);
+      else setRememberError(act.message);
+    } finally {
+      setRememberBusy(false);
+    }
+  };
+  // Hatırlansın ile açılan kartlar kaydetmeden çıkılırsa stok 0 ile katalogda kalır: çıkmadan önce söylenir.
+  const openedCards = newCardCount(remembered);
+  useEffect(() => {
+    if (!openedCards || outcome || answer !== "yes") return;
+    const off = navigation.addListener("beforeRemove" as any, (e: any) => {
+      e.preventDefault();
+      ask({
+        title: "Fatura kaydedilmedi",
+        message: `Bu faturadan ${openedCards} ürün kartı açıldı. Kaydetmeden çıkarsanız kartlar stok 0 ile ürün listenizde kalır; faturayı daha sonra içeri aldığınızda aynı kartlar kullanılır ve adetler o zaman depoya girer.`,
+        confirmLabel: "Yine de çık",
+        cancelLabel: "Forma dön",
+      }).then((ok) => ok && navigation.dispatch(e.data.action));
+    });
+    return off;
+  }, [navigation, openedCards, outcome, answer, ask]);
 
   const save = async () => {
     const d = decisionRef.current;
@@ -475,13 +552,82 @@ export default function IncomingImportScreen() {
   }
 
   const payable = doc.legal_payable ?? decision?.document_summary?.payable;
+  const kurus = kurusNotice(doc);
+  const whPhase: "loading" | "ready" | "unavailable" = loading ? "loading" : stockAction.available === false ? "unavailable" : "ready";
+  const stepCard =
+    answer === null ? (
+      <SafeAnimatedView entering={FadeInDown.delay(60).duration(380)}>
+        <View testID="import-question">
+          <Card style={[styles.block, styles.step]}>
+            <Text style={[type.title, { color: colors.textPrimary }]}>{REMEMBER_TEXT.question}</Text>
+            <Text style={[type.callout, { color: colors.textSecondary }]}>{REMEMBER_TEXT.yes}</Text>
+            <Text style={[type.footnote, { color: colors.textTertiary }]}>{REMEMBER_TEXT.no}</Text>
+            <View style={styles.stepButtons}>
+              <Button testID="import-answer-no" variant="secondary" label="Hayır" disabled={loading || !confirmOn} onPress={() => chooseAnswer("no")} style={{ flex: 1 }} />
+              <Button testID="import-answer-yes" label="Evet" disabled={loading || !confirmOn} onPress={() => chooseAnswer("yes")} style={{ flex: 1 }} />
+            </View>
+            <Text style={[type.caption, { color: colors.textTertiary }]}>{REMEMBER_TEXT.fromInvoice}</Text>
+          </Card>
+        </View>
+      </SafeAnimatedView>
+    ) : (
+      <SafeAnimatedView entering={FadeInDown.delay(60).duration(380)}>
+        <View testID="import-warehouse">
+          <Card style={[styles.block, styles.step]}>
+            <Text style={[type.title, { color: colors.textPrimary }]}>Depo seçimi</Text>
+            <Text style={[type.callout, { color: colors.textSecondary }]}>{REMEMBER_TEXT.warehouse}</Text>
+            {whPhase === "loading" ? <ActivityIndicator color={colors.primary} /> : null}
+            {whPhase === "unavailable" ? (
+              <Text testID="import-warehouse-unavailable" style={[type.footnote, { color: colors.textPrimary }]}>
+                {stockUnavailableText(stockAction) || "Bu faturada stok girişi yapılamıyor; fatura gider olarak işlenir."}
+              </Text>
+            ) : null}
+            {whPhase === "ready" && !whOptions.length ? <Text style={[type.footnote, { color: colors.textSecondary }]}>{REMEMBER_TEXT.noWarehouse}</Text> : null}
+            {whPhase === "ready"
+              ? whOptions.map((o: any) => {
+                  const sel = whPicked === o.id;
+                  return (
+                    <PressableScale key={o.id} testID={`import-pick-wh-${o.id}`} accessibilityRole="radio" accessibilityState={{ checked: sel }} onPress={() => setPickedWh(o.id)} style={styles.option}>
+                      <View style={[styles.radio, { borderColor: sel ? colors.primary : colors.textTertiary }]}>{sel ? <View style={[styles.radioDot, { backgroundColor: colors.primary }]} /> : null}</View>
+                      <Text style={[type.callout, { color: colors.textPrimary, flex: 1 }]}>{o.name || "Depo"}</Text>
+                    </PressableScale>
+                  );
+                })
+              : null}
+            {rememberError ? (
+              <Text testID="import-remember-error" style={[type.footnote, { color: colors.error }]}>
+                {rememberError}
+              </Text>
+            ) : null}
+            <View style={styles.stepButtons}>
+              {whPhase === "unavailable" ? (
+                <Button testID="import-expense-only" label="Gider olarak devam et" onPress={() => expenseOnly(stockUnavailableText(stockAction))} style={{ flex: 1 }} />
+              ) : (
+                <>
+                  <Button variant="secondary" label="Vazgeç" disabled={rememberBusy} onPress={() => setAnswer(null)} style={{ flex: 1 }} />
+                  <Button
+                    testID="import-warehouse-continue"
+                    label={rememberBusy ? "Ürünler hazırlanıyor…" : "Devam"}
+                    busy={rememberBusy}
+                    disabled={rememberBusy || whPhase !== "ready" || (whOptions.length > 0 && !whPicked)}
+                    onPress={continueWarehouse}
+                    style={{ flex: 1 }}
+                  />
+                </>
+              )}
+            </View>
+          </Card>
+        </View>
+      </SafeAnimatedView>
+    );
   const lines: any[] = view?.lines || [];
   const stats: HeroStat[] = [
     { label: "Tarih", value: doc.issue_date ? shortDate(String(doc.issue_date)) : "—" },
     { label: "Kalem", value: String(lines.length) },
     { label: "KDV", value: decision?.document_summary?.vat_total != null ? formatMoney(decision.document_summary.vat_total, currency) : "—" },
   ];
-  const statusLine: [string, string] | null = stale
+  // Soru/depo adımında karar sayısı gösterilmez (kararlar formda verilir).
+  const statusLine: [string, string] | null = !formOpen && !stale && !blocking.length ? null : stale
     ? ["warn", stale === "rate" ? "Çok hızlı değişiklik yapıldı; önceki önizleme gösteriliyor." : stale === "view" ? "Satırlar bu seçimle gösterilemedi; önceki önizleme gösteriliyor." : "Sunucu yanıt vermedi; önceki önizleme gösteriliyor."]
     : loading
       ? ["ok", "Önizleme güncelleniyor…"]
@@ -539,20 +685,32 @@ export default function IncomingImportScreen() {
           </View>
         ) : null}
 
+        {formOpen ? (
+          <>
+        {notice ? (
+          <View testID="import-notice" style={[styles.notice, { backgroundColor: colors.infoBg }]}>
+            <AlertIcon size={16} color={colors.info} />
+            <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{notice}</Text>
+          </View>
+        ) : null}
+        {kurus ? (
+          <View testID="import-kurus" style={[styles.notice, { backgroundColor: colors.warningBg }]}>
+            <AlertIcon size={16} color={colors.amber} />
+            <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{kurus}</Text>
+          </View>
+        ) : null}
         <SafeAnimatedView entering={FadeInDown.delay(60).duration(380)}>
-          <SectionTitle title="Bu faturayı nasıl işleyelim?" />
-          <ChipRow>
-            <Chip testID="import-mode-expense" label="Gider olarak işle" selected={!stockOn} onPress={() => chooseStock(false)} />
-            {stockAction.available === true ? <Chip testID="import-mode-stock" label="Stok ve gider olarak işle" selected={stockOn} onPress={() => chooseStock(true)} /> : null}
-          </ChipRow>
-          {stockAction.available !== true && stockAction.reason === "INVENTORY_OWNED_BY_ACCOUNTING" ? (
-            <Text style={[type.caption, styles.pad, { color: colors.textTertiary }]}>Stok sahibi muhasebe programınız; mal girişini orada yapın. Bu fatura gider olarak işlenir.</Text>
-          ) : null}
-          {stockAction.available !== true && stockAction.reason === "STOCK_ALREADY_RECEIVED" ? (
-            <Text testID="import-stock-received" style={[type.caption, styles.pad, { color: colors.textTertiary }]}>
-              Bu fatura daha önce Stoğa işle ile stoğa girdi; stok tekrar girmez. Fatura gider olarak işlenir.
+          <SectionTitle title="Stok takibi" />
+          {answer === "yes" && stockAction.available === true ? (
+            <ChipRow>
+              <Chip testID="import-stock-on" label="Yapılsın" selected={stockOn} onPress={() => chooseStock(true)} />
+              <Chip testID="import-stock-off" label="Yapılmasın" selected={!stockOn} onPress={() => chooseStock(false)} />
+            </ChipRow>
+          ) : (
+            <Text testID="import-stock-none" style={[type.caption, styles.pad, { color: colors.textTertiary }]}>
+              {answer === "yes" ? stockUnavailableText(stockAction) || "Stok girişi yapılamıyor; fatura gider olarak işlenir." : REMEMBER_TEXT.notRemembered}
             </Text>
-          ) : null}
+          )}
         </SafeAnimatedView>
 
         {supplierBlock ? (
@@ -577,7 +735,7 @@ export default function IncomingImportScreen() {
                   </PressableScale>
                 );
               })}
-              {decisions.supplier?.create_new?.available === true ? (
+              {createOk ? (
                 <PressableScale
                   testID="import-supplier-create"
                   accessibilityRole="radio"
@@ -624,7 +782,17 @@ export default function IncomingImportScreen() {
                     <Text style={[type.callout, tabular, { color: colors.textPrimary, fontWeight: "700" }]}>{formatMoney(amount, currency)}</Text>
                   </View>
                   {lineFix ? <Text style={[type.caption, { color: colors.amber }]}>{lineFix.text}</Text> : null}
-                  {needs || l.kind === "product" ? (
+                  {answer === "yes" && remembered[l.index]?.isNew ? (
+                    <View testID={`import-line-${l.index}-new`} style={[styles.newBadge, { backgroundColor: colors.successBg }]}>
+                      <Text style={[type.caption, { color: colors.success, fontWeight: "800" }]}>YENİ</Text>
+                    </View>
+                  ) : null}
+                  {answer === "yes" && remembered[l.index]?.status === "ambiguous" && remembered[l.index]?.suggestedName && !l.product?.selected_id ? (
+                    <Text style={[type.caption, { color: colors.textSecondary }]}>{`Önerilen ürün: ${remembered[l.index].suggestedName}`}</Text>
+                  ) : null}
+                  {answer === "no" ? (
+                    <Text style={[type.caption, { color: colors.textTertiary }]}>Gider kalemi</Text>
+                  ) : needs || l.kind === "product" ? (
                     <View style={{ marginHorizontal: -spacing.lg }}>
                       <ChipRow>
                         {lineOptions(l).map((o) => (
@@ -711,8 +879,13 @@ export default function IncomingImportScreen() {
           </View>
         ) : null}
 
+          </>
+        ) : (
+          stepCard
+        )}
+
         <View style={[styles.pad, { marginTop: spacing.lg, gap: spacing.sm }]}>
-          {confirmOn ? (
+          {!formOpen ? null : confirmOn ? (
             <Button testID="import-save" label={confirming ? "Kaydediliyor…" : "İçeri al"} icon={<CheckIcon size={18} color="#FFFFFF" />} busy={confirming} disabled={!canSave} onPress={save} />
           ) : (
             <Text style={[type.caption, { color: colors.textTertiary, textAlign: "center" }]}>Bu hesapta şimdilik yalnız önizleme yapılır; fatura kaydedilmez.</Text>
@@ -741,6 +914,9 @@ const styles = StyleSheet.create({
   line: { padding: spacing.md, gap: spacing.xs },
   lineTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   lineIcon: { width: 32, height: 32, borderRadius: radius.sm, alignItems: "center", justifyContent: "center" },
+  step: { padding: spacing.lg, gap: spacing.sm },
+  stepButtons: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.xs },
+  newBadge: { alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
   outcome: { alignItems: "center", gap: spacing.sm, padding: spacing.xl, borderRadius: radius.xl },
   outcomeIcon: { width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center" },
 });

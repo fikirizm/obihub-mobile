@@ -286,3 +286,78 @@ export function rejectionOf(e: any): { code: string; detail: string } | null {
   const d = typeof e?.message === "string" ? e.message.trim() : "";
   return d ? { code: e.code, detail: d } : null;
 }
+
+// ---- 15 Kas 2026: Paraşüt akışı (docs/pm/tasarim/iceri-al-parasut-akisi.md; web iceriAl/IceriAlAkis.jsx, SoruPencereleri.jsx) ----
+// Tek soru "Ürün kalemleri hatırlansın mı?" → (Evet) depo → POST …/remember-products → dolu gider formu. KDV/tutar sorulmaz.
+export const REMEMBER_TEXT = {
+  question: "Ürün kalemleri hatırlansın mı?",
+  yes: "Evet derseniz faturadaki ürünler ürün kartı olarak kaydedilir ve adetleri seçeceğiniz depoya girer; aynı ürün varsa üzerine eklenir.",
+  no: "Hayır derseniz fatura yalnızca gider ve cari borç olarak işlenir; ürün kartı açılmaz, stok değişmez.",
+  warehouse: "Faturadaki ürünlerin adetleri seçtiğiniz depoya girer.",
+  noWarehouse: "Tanımlı depo yok; ürünler “Ana depo”ya girer.",
+  ownerAccounting: "Stok sahibi muhasebe programınız; mal girişini orada yapın. Bu fatura gider olarak işlenir.",
+  notRemembered: "Ürünler hatırlanmadı: stok takibi yapılmaz, fatura gider ve cari borç olarak işlenir.",
+  fromInvoice: "Kalemler, KDV ve toplam faturanın kendisinden okunur; sizden tutar ya da KDV oranı istenmez.",
+};
+const REMEMBER_FALLBACK = "Ürünler şu an hatırlanamadı. Biraz sonra yeniden deneyin.";
+
+const digitsOnly = (v: unknown) => String(v ?? "").replace(/\D+/g, "");
+// D-18k: VKN ile eşleşen kayıtlı cariler (sunucu adayları VKN ile aranmıştır; adayda başka VKN yazıyorsa sayılmaz).
+export function supplierVkn(supplier: any): { id: string; label?: string }[] {
+  const own = digitsOnly(supplier?.tax_number);
+  return (supplier?.candidates || []).filter(
+    (c: any) => c?.id && ((own && (!digitsOnly(c.tax_number) || digitsOnly(c.tax_number) === own)) || c.match === "tax_number")
+  );
+}
+export const canCreateSupplier = (view: any) => view?.decisions?.supplier?.create_new?.available === true && supplierVkn(view?.supplier).length === 0;
+
+// Cevap verildiğinde tek istekle uygulanan seçimler: Evet → tüm kalemler ürün + stok; Hayır → gider kalemi, stok yok.
+export function answerArgs(a: ImportArgs, view: any, answer: "yes" | "no"): ImportArgs {
+  const yes = answer === "yes";
+  const lineChoices: LineChoice[] = (view?.lines || []).map(() => ({ ...EMPTY_CHOICE, kind: yes ? "product" : "service", stock: yes ? true : null }));
+  const supplier = view?.supplier || {};
+  const hits = supplierVkn(supplier);
+  const unresolved = supplier.state !== "matched" && !a.supplierId;
+  let sup: Partial<ImportArgs> = {};
+  if (unresolved && hits.length === 1) sup = { supplierId: hits[0].id, createSupplier: false };
+  else if (unresolved && hits.length === 0 && view?.decisions?.supplier?.create_new?.available === true) sup = { supplierId: null, createSupplier: true };
+  return { ...a, ...sup, mode: yes ? "expense_and_stock" : "expense_only", lineChoices, warehouseId: yes ? a.warehouseId : null };
+}
+
+export type RememberedLine = { isNew: boolean; status: string; productId: string | null; suggestedId: string | null; suggestedName: string | null };
+
+export async function rememberProducts(token: string, id: string): Promise<Record<number, RememberedLine>> {
+  const res = await request<any>(`/incoming-invoices/${encodeURIComponent(id)}/quick-import/remember-products`, { method: "POST", body: "{}" }, token);
+  const map: Record<number, RememberedLine> = {};
+  for (const l of Array.isArray(res?.lines) ? res.lines : []) {
+    if (!Number.isInteger(l?.index)) continue;
+    map[l.index] = {
+      isNew: l.is_new === true,
+      status: String(l.status || ""),
+      productId: l.product_id ? String(l.product_id) : null,
+      suggestedId: l.suggested_product_id ? String(l.suggested_product_id) : null,
+      suggestedName: l.suggested_product_name ? String(l.suggested_product_name) : null,
+    };
+  }
+  return map;
+}
+export const newCardCount = (map: Record<number, RememberedLine>) => Object.values(map).filter((r) => r.isNew).length;
+
+const isTurkishText = (t: unknown) => typeof t === "string" && Boolean(t.trim()) && !/^Sunucu hatası \(\d+\)$/.test(t.trim()) && /[ığüşöçİĞÜŞÖÇ]|[.!?]$/.test(t.trim());
+export function rememberErrorAction(e: any): { expenseOnly: true } | { message: string } {
+  if (Number(e?.status) === 409 && e?.code === "INVENTORY_OWNER_ACCOUNTING") return { expenseOnly: true };
+  return { message: isTurkishText(e?.message) ? String(e.message).trim() : REMEMBER_FALLBACK };
+}
+
+// D-02: ≤ 0,01 TL fark kayda engel değil; sarı uyarı (kayıt faturadaki toplamla yapılır).
+export function kurusNotice(doc: any): string | null {
+  if (doc?.reconciliation_level !== "warning") return null;
+  const diff = String(doc.lines_difference || doc.difference || "0.01").replace("-", "").replace(".", ",");
+  return `Satırlardan hesaplanan tutar ile fatura toplamı arasında ${diff} TL yuvarlama farkı var. Kayıt faturadaki toplamla yapılır.`;
+}
+
+export function stockUnavailableText(action: any): string | null {
+  if (action?.reason === "INVENTORY_OWNED_BY_ACCOUNTING") return REMEMBER_TEXT.ownerAccounting;
+  if (action?.reason === "STOCK_ALREADY_RECEIVED") return "Bu fatura daha önce “Stoğa işle” ile stoğa girdi; stok tekrar girmez. Bu fatura gider olarak işlenir.";
+  return null;
+}

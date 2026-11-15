@@ -98,6 +98,7 @@ const expenseState = {
 };
 // Dalga 3 / C1: gelen fatura içeri alma durumları.
 const importState = { in2: "applied" };
+const remembered = {};
 const posSales = [];
 const entryKeys = new Set();
 const hjCustomers = [
@@ -215,7 +216,8 @@ http
       }
     }
     if (url.pathname === "/__mode") {
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k in remembered) delete remembered[k];
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -1103,7 +1105,7 @@ http
     }
     // Web eşitleme (src/api-gider.ts): yetenekler, gider ayarı, ObiHub gider defteri. Okuma modeli ve gelen kutusu 404 → eski uçlara düşüş.
     if (path === "/ui-capabilities")
-      return send(res, 200, { version: 1, capabilities: { obihub_os: false, inbox_read: false, payable_payment: true, expense_ledger: true, expense_manual_entry: true, manual_entry_reason: null, parasut_connected: true, parasut_expense_view: true, inventory_owner: { owner: "obihub", program: "bizimhesap" } }, workspace_scope: null });
+      return send(res, 200, { version: 1, capabilities: { obihub_os: false, inbox_read: false, payable_payment: true, expense_ledger: true, expense_manual_entry: true, manual_entry_reason: null, parasut_connected: true, parasut_expense_view: true, inventory_owner: { owner: state.iaOwner ? "accounting" : "obihub", program: "bizimhesap" } }, workspace_scope: null });
     if (path === "/accounting/expense-settings") return send(res, 200, { expense_module_enabled: true, parasut_expense_view_enabled: true, parasut_connected: true });
     if (path === "/accounting/expense-invoices/summary") return send(res, 200, { currencies: [{ currency: "TRY", payable: "9400.00", overdue: "1250.50" }] });
     // --- Dalga 3 / C2: gider detayı ve borç ödeme. e1 ödenebilir, e2'de ikinci ödeme 409 PAYMENT_EXCEEDS_OUTSTANDING denenir.
@@ -1212,19 +1214,31 @@ http
       const st = importState[qm[1]] || "none";
       return send(res, 200, { status: st, reason: null, detail: null, result: st === "applied" ? { invoice_id: "x" } : null });
     }
+    // 15 Kas 2026 Paraşüt akışı: hatırlansın kartı açar (stok yazmaz); /__mode?iaOwner=1 → 409 INVENTORY_OWNER_ACCOUNTING.
+    if (req.method === "POST" && (qm = path.match(/^\/incoming-invoices\/([^/]+)\/quick-import\/remember-products$/))) {
+      if (state.iaOwner) return send(res, 409, { code: "INVENTORY_OWNER_ACCOUNTING", detail: "Stok sahibi muhasebe programınız." });
+      console.log("WRITE", path);
+      remembered[qm[1]] = true;
+      return send(res, 200, { lines: [
+        { index: 0, description: "Koli 40x40 çift oluklu", status: "created", product_id: "p-new", product_name: "Koli 40x40 çift oluklu", is_new: true, match: "created" },
+        { index: 1, description: "Nakliye bedeli", status: "ambiguous", product_id: null, product_name: null, is_new: false, match: null, suggested_product_id: "p5", suggested_product_name: "Deneme Ürün 5" },
+      ], created: 1, inventory_owner: "obihub" });
+    }
     if (req.method === "POST" && (qm = path.match(/^\/incoming-invoices\/([^/]+)\/quick-import\/(preview|confirm)$/))) {
       let raw = "";
       req.on("data", (c) => (raw += c));
       req.on("end", () => {
         const b = JSON.parse(raw || "{}");
         const lc = b.line_choices || [];
-        const c0 = lc[0] || {};
+        const c0raw = lc[0] || {};
+        // Hatırlansın sonrası ilk kalem açılan karta bağlanır (sunucu eşleştirme kuralı).
+        const c0 = remembered[qm[1]] && c0raw.kind === "product" && !c0raw.product_id ? { ...c0raw, product_id: "p-new" } : c0raw;
         const stock = b.mode === "expense_and_stock";
         const supplierChosen = Boolean(b.supplier_id) || b.create_supplier === true;
         const line0Kind = c0.kind || null;
         const lines = [
           { index: 0, description: "Koli 40x40 çift oluklu", quantity: "100", unit: { code: "C62", label: "adet" }, unit_price: "10.00", net_computed: "1000.00", line_extension_provider: "1000.00", vat_rate: "20",
-            kind: line0Kind, product: { state: c0.product_id ? "matched" : "ambiguous", selected_id: c0.product_id || null, remember_selected: c0.new_product_draft === true, candidates: [{ id: "p4", label: "Deneme Ürün 4", sku: "SKU-4" }, { id: "p5", label: "Deneme Ürün 5", sku: "SKU-5" }] },
+            kind: line0Kind, product: { state: c0.product_id ? "matched" : "ambiguous", selected_id: c0.product_id || null, remember_selected: c0.new_product_draft === true, candidates: c0.product_id === "p-new" ? [{ id: "p-new", label: "Koli 40x40 çift oluklu", sku: null }] : [{ id: "p4", label: "Deneme Ürün 4", sku: "SKU-4" }, { id: "p5", label: "Deneme Ürün 5", sku: "SKU-5" }] },
             stock: { eligible: line0Kind === "product" && Boolean(c0.product_id), selected: stock && c0.stock === true }, issues: line0Kind ? (line0Kind === "product" && !c0.product_id ? ["PRODUCT_MATCH_AMBIGUOUS"] : []) : ["LINE_CLASS_UNRESOLVED"] },
           { index: 1, description: "Nakliye bedeli", quantity: "1", unit: { code: "C62", label: "adet" }, unit_price: "200.00", net_computed: "200.00", line_extension_provider: "200.00", vat_rate: "20", kind: "service", product: { state: "not_applicable", candidates: [] }, stock: { eligible: false }, issues: [] },
         ];
@@ -1244,7 +1258,7 @@ http
           blocker_items: gateBlock ? [{ key: gateBlock, line_index: null }] : [], review_items: whIssues,
           document_view: {
             version: "dv1",
-            document: { number: "GIB2026000077", issue_date: "2026-11-10", currency: "TRY", legal_payable: "1440.00", computed_payable: "1440.00", document_issues: [] },
+            document: { number: "GIB2026000077", issue_date: "2026-11-10", currency: "TRY", legal_payable: "1440.00", computed_payable: state.iaKurus ? "1440.01" : "1440.00", document_issues: [], reconciliation_level: state.iaKurus ? "warning" : "ok", lines_difference: state.iaKurus ? "0.01" : null },
             supplier: { name: "Ambalaj Ltd.", tax_number: "9876543210", state: b.supplier_id ? "matched" : b.create_supplier ? "create" : "ambiguous", selected_id: b.supplier_id || null, create_selected: b.create_supplier === true, candidates: [{ id: "s1", label: "Ambalaj Limited Şirketi" }, { id: "s2", label: "Ambalaj Ltd. (eski kayıt)" }], issues: supIssues },
             lines,
             decisions: {
