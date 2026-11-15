@@ -115,4 +115,10 @@ await t("stok yapılamıyor metni (muhasebe stok sahibi / daha önce stoğa gird
   assert.equal(m.stockUnavailableText({ reason: null }), null);
 });
 
+await t("son çare satırları (MANUAL_LINE_REQUIRED): sunucu metni + web'e yönlendirme; diğer kodlarda yalnız metin", () => {
+  assert.equal(m.rejectionText({ code: "PREVIEW_PARASUT_MANUAL_LINE_REQUIRED", detail: "Fatura kalemleri alınamadı." }), "Fatura kalemleri alınamadı. Bu faturayı web'den (app.obihub.app) içeri alın.");
+  assert.equal(m.rejectionText({ code: "PREVIEW_PARASUT_UBL_INVALID", detail: "Fatura okunamadı." }), "Fatura okunamadı.");
+  assert.equal(m.rejectionText(null), null);
+});
+
 console.log(`\n${n} test geçti`);

@@ -32,6 +32,7 @@ import {
   isStatusOnly,
   previewQuickImport,
   rejectionOf,
+  rejectionText,
   RESULT_TEXT,
   resultTextKey,
   statusOutcome,
@@ -539,7 +540,7 @@ export default function IncomingImportScreen() {
           <EmptyState
             icon={<AlertIcon size={30} color={colors.error} />}
             title="Önizleme hazırlanamadı"
-            description={rejection?.detail || "Fatura şu an okunamadı. Biraz sonra yeniden deneyin."}
+            description={rejectionText(rejection) || "Fatura şu an okunamadı. Biraz sonra yeniden deneyin."}
             actionLabel="Tekrar dene"
             onAction={() => load(args)}
           />
@@ -675,7 +676,7 @@ export default function IncomingImportScreen() {
         {rejection && stale ? (
           <View style={[styles.notice, { backgroundColor: colors.errorBg }]}>
             <AlertIcon size={16} color={colors.error} />
-            <Text style={[type.footnote, { color: colors.error, flex: 1 }]}>{rejection.detail}</Text>
+            <Text style={[type.footnote, { color: colors.error, flex: 1 }]}>{rejectionText(rejection)}</Text>
           </View>
         ) : null}
         {decision?.reimport?.allowed === true ? (

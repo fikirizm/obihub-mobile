@@ -361,3 +361,9 @@ export function stockUnavailableText(action: any): string | null {
   if (action?.reason === "STOCK_ALREADY_RECEIVED") return "Bu fatura daha önce “Stoğa işle” ile stoğa girdi; stok tekrar girmez. Bu fatura gider olarak işlenir.";
   return null;
 }
+
+// Son çare kalem girişi mobilde yok (PM 15 Kas 2026): e-fatura XML'i alınamadığında web'e yönlendirilir.
+export function rejectionText(r: { code: string; detail: string } | null): string | null {
+  if (!r) return null;
+  return r.code === "PREVIEW_PARASUT_MANUAL_LINE_REQUIRED" ? `${r.detail} Bu faturayı web'den (app.obihub.app) içeri alın.` : r.detail;
+}
