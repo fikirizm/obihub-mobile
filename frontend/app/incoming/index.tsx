@@ -11,6 +11,7 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { getIncomingInvoicePdf, getIncomingInvoices, resolveIncomingSource } from "../../src/api";
 import { archiveInbox, downloadInbox, getIncomingInbox, getUiCapabilities, InboxUnavailable, type InboxMeta } from "../../src/api-gider";
 import { getQuickImportCapability } from "../../src/api-iceri-al";
+import { acceptGate } from "../../src/api-iceri-al";
 import { archiveText, DEFAULT_VIEW, downloadProblem, downloadText, MAX_DOWNLOAD, responseNote, SORT_OPTIONS, VIEW_OPTIONS, viewLabel } from "../../src/inbox-ui";
 import { canManage } from "../../src/auth/permissions";
 import { router, useFocusEffect } from "expo-router";
@@ -193,6 +194,8 @@ export default function IncomingInvoicesScreen() {
           pdf: inv.pdf_id || inv.id,
           respond: inv.can_respond && caps.respond !== false ? "1" : "0",
           elsewhere: inv.importedElsewhere ? "1" : "0",
+          block: inv.importBlock?.code || "",
+          blockDetail: inv.importBlock?.detail || "",
         },
       });
     } else if (hasPdf && Platform.OS !== "web") openPdf(inv);
@@ -293,7 +296,9 @@ export default function IncomingInvoicesScreen() {
               const key = String(inv.import_status || "none");
               const imp = IMPORT_STATUS[key] || IMPORT_STATUS.none;
               const accent = inv.statusKind === "error" ? colors.error : key === "applied" || inv.importedElsewhere ? colors.success : inv.can_respond ? colors.warning : key === "in_progress" ? colors.info : undefined;
-              const note = inv.inbox_row ? responseNote(inv.response_request || null) : null;
+              // İçeri Al 2: onay bekleyen ticari fatura önce kabul edilir (import_block); not satırda söylenir.
+              const gate = acceptGate(inv.importBlock?.code);
+              const note = (inv.inbox_row ? responseNote(inv.response_request || null) : null) || (gate ? gate.title : null);
               const on = selected.includes(inv.id);
               return (
                 <RowCard

@@ -9,6 +9,7 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { getIncomingInvoicePdf } from "../../src/api";
 import { getUiCapabilities, respondInbox } from "../../src/api-gider";
+import { getCashAccounts } from "../../src/api";
 import { respondDoneText } from "../../src/inbox-ui";
 import { RespondSheet } from "../../src/components/RespondSheet";
 import {
@@ -17,6 +18,14 @@ import {
   collectIssues,
   kurusNotice,
   newCardCount,
+  acceptGate,
+  paymentMissing,
+  paymentResultText,
+  paymentStates,
+  discountText,
+  vatIncludedNote,
+  quickExpenseNotice,
+  plannedNotice,
   REMEMBER_TEXT,
   rememberErrorAction,
   rememberProducts,
@@ -47,6 +56,7 @@ import { haptic } from "../../src/haptics";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney } from "../../src/utils";
+import { todayIso } from "../../src/finance";
 import { AlertIcon, CheckIcon, ClockIcon, DownloadIcon, InboxIcon, PackageIcon, ReceiptIcon } from "../../src/components/Icons";
 import { EmptyState } from "../../src/components/EmptyState";
 import { PressableScale } from "../../src/components/KPICard";
@@ -115,7 +125,7 @@ function PreviewSkeleton() {
 }
 
 export default function IncomingImportScreen() {
-  const params = useLocalSearchParams<{ id: string; provider: string; status?: string; reimportable?: string; title?: string; pdf?: string; respond?: string }>();
+  const params = useLocalSearchParams<{ id: string; provider: string; status?: string; reimportable?: string; title?: string; pdf?: string; respond?: string; block?: string; blockDetail?: string }>();
   const id = String(params.id || "");
   const provider = String(params.provider || "");
   const rowStatus = String(params.status || "none");
@@ -289,7 +299,8 @@ export default function IncomingImportScreen() {
   // Olası mükerrer eski kayıt: açık kabul kutusu (kabul edilince önizleme legacy_duplicate_ack ile yenilenir, madde kalkar).
   const showLegacyAck = issues.some((i) => i.kind === "ack") || args.legacyAck;
   const ready = !stale && !loading && decision?.status === "FAST_READY" && decision?.business_ready === true && !issues.some((i) => i.kind !== "notice");
-  const canSave = formOpen && confirmOn && decision?.confirmation_available === true && decision?.can_confirm === true && ready && !confirming && mayWrite;
+  const canSave =
+    formOpen && confirmOn && decision?.confirmation_available === true && decision?.can_confirm === true && ready && !confirming && mayWrite && !paymentMissing(args.form);
   // Kullanıcı tedarikçiyi seçtikten sonra durum "matched" olur; seçim görünür ve değiştirilebilir kalsın.
   // D-18k: VKN ile eşleşen kayıtlı cari varsa "Yeni cari" önerilmez.
   const createOk = canCreateSupplier(view);
@@ -341,6 +352,20 @@ export default function IncomingImportScreen() {
     if (busyNow() || due === args.form.due_date) return;
     load({ ...args, form: { ...args.form, due_date: due } });
   };
+  // Ödeme durumu (İçeri Al 2): Ödendi'de hesap + tarih; ödeme alanları önizleme özetine girmez, onay aynısını gönderir.
+  const choosePayment = (patch: Partial<typeof args.form>) => {
+    if (busyNow()) return;
+    load({ ...args, form: { ...args.form, ...patch } });
+  };
+  const [payAccounts, setPayAccounts] = useState<{ id: string; name: string }[] | null>(null);
+  useEffect(() => {
+    if (!token || args.form.payment_state !== "paid" || payAccounts) return;
+    getCashAccounts(token)
+      .then((rows: any[]) =>
+        setPayAccounts(rows.filter((a) => a?.id && String(a.currency || "TRY").toUpperCase() === "TRY" && a.is_active !== false).map((a) => ({ id: String(a.id), name: String(a.name || "Hesap") })))
+      )
+      .catch(() => setPayAccounts([]));
+  }, [token, args.form.payment_state, payAccounts]);
   const chooseCategory = (cid: string | null) => {
     if (busyNow() || cid === args.form.expense_category_id) return;
     load({ ...args, form: { ...args.form, expense_category_id: cid } });
@@ -395,21 +420,9 @@ export default function IncomingImportScreen() {
       setRememberBusy(false);
     }
   };
-  // Hatırlansın ile açılan kartlar kaydetmeden çıkılırsa stok 0 ile katalogda kalır: çıkmadan önce söylenir.
-  const openedCards = newCardCount(remembered);
-  useEffect(() => {
-    if (!openedCards || outcome || answer !== "yes") return;
-    const off = navigation.addListener("beforeRemove" as any, (e: any) => {
-      e.preventDefault();
-      ask({
-        title: "Fatura kaydedilmedi",
-        message: `Bu faturadan ${openedCards} ürün kartı açıldı. Kaydetmeden çıkarsanız kartlar stok 0 ile ürün listenizde kalır; faturayı daha sonra içeri aldığınızda aynı kartlar kullanılır ve adetler o zaman depoya girer.`,
-        confirmLabel: "Yine de çık",
-        cancelLabel: "Forma dön",
-      }).then((ok) => ok && navigation.dispatch(e.data.action));
-    });
-    return off;
-  }, [navigation, openedCards, outcome, answer, ask]);
+  // İçeri Al 2 (Kıyas 2): remember-products yalnız plan döndürür; kartlar KAYDET'te açılır (REJECTED'de geri silinir).
+  // Kaydetmeden çıkışta katalogda kart kalmaz, çıkış uyarısı gerekmez.
+  const plannedCards = newCardCount(remembered);
 
   const save = async () => {
     const d = decisionRef.current;
@@ -419,7 +432,11 @@ export default function IncomingImportScreen() {
     savingRef.current = true;
     const ok = await ask({
       title: "Fatura içeri alınsın mı?",
-      message: `${supplier.name || "Tedarikçi"} faturası ${formatMoney(doc.legal_payable ?? decision?.document_summary?.payable, currency)} tutarla gider olarak${stockOn ? " ve stoğa" : ""} kaydedilir; tedarikçiye borç yazılır.`,
+      message:
+        `${supplier.name || "Tedarikçi"} faturası ${formatMoney(doc.legal_payable ?? decision?.document_summary?.payable, currency)} tutarla gider olarak${stockOn ? " ve stoğa" : ""} kaydedilir; tedarikçiye borç yazılır.` +
+        (args.form.payment_state === "paid"
+          ? ` Borcun tamamı ${(payAccounts || []).find((a) => a.id === args.form.payment_account_id)?.name || "seçilen hesaptan"} ödenmiş olarak yazılır (${args.form.payment_date}).`
+          : ""),
       confirmLabel: "İçeri al",
     });
     if (!ok) {
@@ -474,6 +491,9 @@ export default function IncomingImportScreen() {
       <Button testID="import-pdf" size="sm" variant="secondary" label="Faturayı görüntüle" icon={<DownloadIcon size={16} color={colors.textPrimary} />} busy={pdfBusy} onPress={openPdf} />
     ) : null;
 
+  // İçeri Al 2 kabul kapısı: önizleme 409 kodu ya da gelen kutusu satırının import_block'u.
+  const gateInfo = acceptGate(rejection?.code || params.block);
+  const gateDetail = (rejection && acceptGate(rejection.code) ? rejection.detail : "") || String(params.blockDetail || "") || gateInfo?.fallback || "";
   const submitRespond = async (body: Record<string, unknown>) => {
     if (!token) return;
     const res = await respondInbox(token, provider, id, body);
@@ -481,6 +501,8 @@ export default function IncomingImportScreen() {
     toast(text, "success");
     setRespondOpen(null);
     setResponded(text);
+    // Kabul tamamlandıysa içeri alma açılır: önizleme yeniden istenir (kuyruktaysa ACCEPT_PENDING gelir).
+    if (body.decision === "accept") load(committed.current || INITIAL_ARGS);
   };
   const respondCard = canRespond ? (
     <View testID="import-respond" style={[styles.notice, styles.ackBox, { backgroundColor: colors.warningBg }]}>
@@ -543,6 +565,11 @@ export default function IncomingImportScreen() {
               </Text>
               <Text style={[type.callout, { color: colors.textSecondary, textAlign: "center" }]}>{body}</Text>
               {outcome.detail ? <Text style={[type.footnote, { color: colors.textPrimary, textAlign: "center" }]}>{outcome.detail}</Text> : null}
+              {outcome.status === "APPLIED" && outcome.payment ? (
+                <Text testID="import-payment-result" style={[type.footnote, { color: outcome.payment.status === "failed" ? colors.amber : colors.textPrimary, textAlign: "center", fontWeight: "600" }]}>
+                  {paymentResultText(outcome.payment)}
+                </Text>
+              ) : null}
               {outcome.status === "IN_PROGRESS" && !pollExpired ? <ActivityIndicator color={fg} /> : null}
             </View>
           </SafeAnimatedView>
@@ -571,7 +598,16 @@ export default function IncomingImportScreen() {
     return (
       <View style={[styles.wrap, { backgroundColor: colors.background }]}>
         {header}
-        {failed ? (
+        {failed && gateInfo ? (
+          <View testID="import-accept-gate" style={[styles.notice, styles.ackBox, { backgroundColor: gateInfo.kind === "rejected" ? colors.errorBg : colors.warningBg }]}>
+            <Text style={[type.bodyStrong, { color: colors.textPrimary }]}>{gateInfo.title}</Text>
+            <Text style={[type.footnote, { color: colors.textPrimary }]}>{gateDetail}</Text>
+            {gateInfo.kind === "accept" && !canRespond && !responded ? (
+              <Text style={[type.caption, { color: colors.textSecondary }]}>Kabul ya da red için bu belgenin yanıt süresi uygun değil; Paraşüt'te kontrol edin.</Text>
+            ) : null}
+            {gateInfo.kind === "pending" || responded ? <Button testID="import-gate-refresh" size="sm" variant="secondary" label="Yenile" onPress={() => load(args)} /> : null}
+          </View>
+        ) : failed ? (
           <EmptyState
             icon={<AlertIcon size={30} color={colors.error} />}
             title="Önizleme hazırlanamadı"
@@ -582,7 +618,7 @@ export default function IncomingImportScreen() {
         ) : (
           <PreviewSkeleton />
         )}
-        {failed ? respondCard : null}
+        {failed && (!gateInfo || gateInfo.kind === "accept") ? respondCard : null}
         {failed ? <View style={styles.pad}>{pdfButton}</View> : null}
         {respondSheet}
       </View>
@@ -726,10 +762,12 @@ export default function IncomingImportScreen() {
 
         {formOpen ? (
           <>
-        {notice ? (
+        {[notice, answer === "no" ? quickExpenseNotice(doc) : null, answer === "yes" ? plannedNotice(plannedCards) : null].filter(Boolean).length ? (
           <View testID="import-notice" style={[styles.notice, { backgroundColor: colors.infoBg }]}>
             <AlertIcon size={16} color={colors.info} />
-            <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{notice}</Text>
+            <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>
+              {[notice, answer === "no" ? quickExpenseNotice(doc) : null, answer === "yes" ? plannedNotice(plannedCards) : null].filter(Boolean).join(" ")}
+            </Text>
           </View>
         ) : null}
         {kurus ? (
@@ -820,6 +858,11 @@ export default function IncomingImportScreen() {
                     </View>
                     <Text style={[type.callout, tabular, { color: colors.textPrimary, fontWeight: "700" }]}>{formatMoney(amount, currency)}</Text>
                   </View>
+                  {discountText(l) || vatIncludedNote(l) ? (
+                    <Text testID={`import-line-${l.index}-discount`} style={[type.caption, tabular, { color: colors.textSecondary }]}>
+                      {[discountText(l) ? `İskonto ${discountText(l)}` : null, vatIncludedNote(l)].filter(Boolean).join(" · ")}
+                    </Text>
+                  ) : null}
                   {lineFix ? <Text style={[type.caption, { color: colors.amber }]}>{lineFix.text}</Text> : null}
                   {answer === "yes" && remembered[l.index]?.isNew ? (
                     <View testID={`import-line-${l.index}-new`} style={[styles.newBadge, { backgroundColor: colors.successBg }]}>
@@ -860,7 +903,60 @@ export default function IncomingImportScreen() {
         {confirmOn ? (
           <SafeAnimatedView entering={FadeInDown.delay(160).duration(380)}>
             <SectionTitle title="Ödeme ve vade" />
-            <Text style={[type.caption, styles.pad, { color: colors.textSecondary, marginBottom: spacing.xs }]}>Ödeme durumu: Ödenecek (ödemeyi kayıttan sonra Gider faturalarından ekleyin).</Text>
+            <ChipRow>
+              {paymentStates(decision).map((st) => (
+                <Chip
+                  key={st.id}
+                  testID={`import-pay-${st.id}`}
+                  label={st.label}
+                  selected={args.form.payment_state === st.id}
+                  onPress={() =>
+                    st.available && st.id !== args.form.payment_state
+                      ? choosePayment(st.id === "paid" ? { payment_state: "paid", payment_date: args.form.payment_date || todayIso() } : { payment_state: st.id, payment_account_id: null, payment_date: null })
+                      : !st.available && st.reason
+                        ? toast(st.reason, "info")
+                        : undefined
+                  }
+                />
+              ))}
+            </ChipRow>
+            {paymentStates(decision)
+              .filter((st) => !st.available && st.reason)
+              .map((st) => (
+                <Text key={st.id} style={[type.caption, styles.pad, { color: colors.textTertiary }]}>
+                  {st.reason}
+                </Text>
+              ))}
+            {args.form.payment_state === "paid" ? (
+              <View testID="import-paid-fields" style={{ marginTop: spacing.xs }}>
+                <Text style={[type.caption, styles.pad, { color: colors.textSecondary }]}>Ödemenin yapıldığı hesap</Text>
+                {payAccounts === null ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : payAccounts.length ? (
+                  <ChipRow>
+                    {payAccounts.map((a) => (
+                      <Chip key={a.id} testID={`import-pay-acc-${a.id}`} label={a.name} selected={args.form.payment_account_id === a.id} onPress={() => choosePayment({ payment_account_id: a.id })} />
+                    ))}
+                  </ChipRow>
+                ) : (
+                  <Text style={[type.caption, styles.pad, { color: colors.error }]}>Uygun TL kasa ya da banka hesabı yok. Önce Kasa ve Banka'dan hesap ekleyin.</Text>
+                )}
+                <Text style={[type.caption, styles.pad, { color: colors.textSecondary, marginTop: spacing.xs }]}>Ödeme tarihi</Text>
+                <ChipRow>
+                  {[
+                    { label: "Bugün", value: todayIso() },
+                    { label: "Dün", value: addDays(todayIso(), -1) },
+                    ...(/^\d{4}-\d{2}-\d{2}$/.test(String(doc.issue_date || "")) && String(doc.issue_date) <= todayIso() ? [{ label: `Fatura tarihi (${shortDate(String(doc.issue_date))})`, value: String(doc.issue_date) }] : []),
+                  ]
+                    .filter((o, i, all) => all.findIndex((x) => x.value === o.value) === i)
+                    .map((o) => (
+                      <Chip key={o.value} testID={`import-pay-date-${o.label === "Bugün" ? "today" : o.label === "Dün" ? "yesterday" : "issue"}`} label={o.label} selected={args.form.payment_date === o.value} onPress={() => choosePayment({ payment_date: o.value })} />
+                    ))}
+                </ChipRow>
+                {paymentMissing(args.form) ? <Text style={[type.caption, styles.pad, { color: colors.amber }]}>Ödendi için ödemenin yapıldığı hesabı seçin.</Text> : null}
+              </View>
+            ) : null}
+            <Text style={[type.caption, styles.pad, { color: colors.textSecondary, marginTop: spacing.sm }]}>Vade</Text>
             <ChipRow>
               <Chip testID="import-due-none" label="Vadesiz" selected={!args.form.due_date} onPress={() => chooseDue(null)} />
               {/^\d{4}-\d{2}-\d{2}$/.test(String(doc.issue_date || ""))

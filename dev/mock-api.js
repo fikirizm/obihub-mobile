@@ -104,7 +104,8 @@ const inboxDoc = (k, no, name, tax, date, amt, status, label, extra = {}) => ({ 
   type_label: "e-Fatura · Temel", invoice_type_label: "Satış", imported_elsewhere: false, user_state: "new", archived: false, response_request: null, can_respond: false,
   import_status: "none", import_state: "not_imported", import_state_label: "İçeri alınmadı", ...extra });
 const inboxDocs = [
-  inboxDoc("in1", "ABC2026000123", "Kargo Lojistik A.Ş.", "1111111111", "2026-11-09", 1840.6, "awaiting_response", "Onay bekliyor", { response_days_left: 3, can_respond: true, type_label: "e-Fatura · Ticari" }),
+  inboxDoc("in1", "ABC2026000123", "Kargo Lojistik A.Ş.", "1111111111", "2026-11-09", 1840.6, "awaiting_response", "Onay bekliyor", { response_days_left: 3, can_respond: true, type_label: "e-Fatura · Ticari",
+    import_block: { code: "ACCEPT_REQUIRED", detail: "Önce faturayı kabul edin. Bu ticari fatura onay bekliyor; kabul etmeden gider ve borç olarak içeri alınamaz." } }),
   inboxDoc("in3", "TED2026000777", "Ofis Kırtasiye", "2222222222", "2026-11-12", 412.5, "accepted_basic", "Kabul edildi (temel)"),
   inboxDoc("in4", "PRS2026000010", "Yazılım Ltd.", "3333333333", "2026-11-05", 2400, "accepted_basic", "Kabul edildi (temel)", { import_state: "imported_elsewhere", import_state_label: "Paraşüt'te içeri alındı" }),
   inboxDoc("in5", "RED2026000001", "Hatalı Tedarik", "4444444444", "2026-11-01", 999, "rejected", "Reddedildi"),
@@ -1338,6 +1339,7 @@ http
         if (d.status !== "awaiting_response") return send(res, 409, { detail: { code: "RESPONSE_NOT_ALLOWED", message: "Bu belge yanıt beklemiyor." } });
         d.status = b.decision === "accept" ? "accepted" : "rejected"; d.status_label = b.decision === "accept" ? "Kabul edildi" : "Reddedildi"; d.can_respond = false; d.response_days_left = null;
         d.response_request = { decision: b.decision, state: "done", requested_at: new Date().toISOString(), message: null };
+        d.import_block = b.decision === "accept" ? null : { code: "DOCUMENT_REJECTED", detail: "Bu fatura reddedildi ya da iade edildi; içeri alınamaz." };
         send(res, 200, { provider: "parasut", document_key: d.document_key, decision: b.decision, status: d.status, status_label: d.status_label, response_request: d.response_request });
       });
     if (state.inbox && (ibm = path.match(/^\/incoming-inbox\/([^/]+)\/download$/)) && req.method === "POST")
@@ -1364,6 +1366,18 @@ http
       return send(res, 200, { status: st, reason: null, detail: null, result: st === "applied" ? { invoice_id: "x" } : null });
     }
     // 15 Kas 2026 Paraşüt akışı: hatırlansın kartı açar (stok yazmaz); /__mode?iaOwner=1 → 409 INVENTORY_OWNER_ACCOUNTING.
+    // İçeri Al 2 kabul kapısı (/__mode?inbox=1): onay bekleyen ticari fatura önce kabul edilir.
+    const acceptBlock = (key) => {
+      const d = state.inbox ? inboxDocs.find((x) => x.document_key === key) : null;
+      if (!d) return null;
+      if (d.status === "awaiting_response") return { code: "ACCEPT_REQUIRED", detail: "Önce faturayı kabul edin. Bu ticari fatura onay bekliyor; kabul etmeden gider ve borç olarak içeri alınamaz. Kabul yanıtı GİB'e gönderilir ve geri alınamaz." };
+      if (["rejected", "returned"].includes(d.status)) return { code: "DOCUMENT_REJECTED", detail: "Bu fatura reddedildi ya da iade edildi; içeri alınamaz." };
+      return null;
+    };
+    if (req.method === "POST" && (qm = path.match(/^\/incoming-invoices\/([^/]+)\/quick-import\/(preview|confirm|remember-products)$/)) && acceptBlock(qm[1])) {
+      const blk = acceptBlock(qm[1]);
+      return send(res, 409, { status: "REJECTED", reason: blk.code, code: blk.code, detail: blk.detail });
+    }
     if (req.method === "POST" && (qm = path.match(/^\/incoming-invoices\/([^/]+)\/quick-import\/remember-products$/))) {
       if (state.iaOwner) return send(res, 409, { code: "INVENTORY_OWNER_ACCOUNTING", detail: "Stok sahibi muhasebe programınız." });
       console.log("WRITE", path);
@@ -1386,7 +1400,7 @@ http
         const supplierChosen = Boolean(b.supplier_id) || b.create_supplier === true;
         const line0Kind = c0.kind || null;
         const lines = [
-          { index: 0, description: "Koli 40x40 çift oluklu", quantity: "100", unit: { code: "C62", label: "adet" }, unit_price: "10.00", net_computed: "1000.00", line_extension_provider: "1000.00", vat_rate: "20",
+          { index: 0, description: "Koli 40x40 çift oluklu", quantity: "100", unit: { code: "C62", label: "adet" }, unit_price: "13.333333", gross_computed: "1333.33", discount: "333.33", discount_rate: "25.00", document_unit_price: "16.00", price_includes_vat: true, net_computed: "1000.00", line_extension_provider: "1000.00", vat_rate: "20",
             kind: line0Kind, product: { state: c0.product_id ? "matched" : "ambiguous", selected_id: c0.product_id || null, remember_selected: c0.new_product_draft === true, candidates: c0.product_id === "p-new" ? [{ id: "p-new", label: "Koli 40x40 çift oluklu", sku: null }] : [{ id: "p4", label: "Deneme Ürün 4", sku: "SKU-4" }, { id: "p5", label: "Deneme Ürün 5", sku: "SKU-5" }] },
             stock: { eligible: line0Kind === "product" && Boolean(c0.product_id), selected: stock && c0.stock === true }, issues: line0Kind ? (line0Kind === "product" && !c0.product_id ? ["PRODUCT_MATCH_AMBIGUOUS"] : []) : ["LINE_CLASS_UNRESOLVED"] },
           { index: 1, description: "Nakliye bedeli", quantity: "1", unit: { code: "C62", label: "adet" }, unit_price: "200.00", net_computed: "200.00", line_extension_provider: "200.00", vat_rate: "20", kind: "service", product: { state: "not_applicable", candidates: [] }, stock: { eligible: false }, issues: [] },
@@ -1394,6 +1408,9 @@ http
         const whNeeded = stock && lines[0].stock.eligible;
         const whIssues = whNeeded && !b.warehouse_id ? [{ key: "WAREHOUSE_REQUIRED", line_index: 0 }] : [];
         const supIssues = supplierChosen ? [] : ["SUPPLIER_NOT_MATCHED"];
+        // Kıyas 2 hızlı gider: satır sorunları engellemez, tutarlar belge toplamından.
+        if (b.quick_expense === true && b.mode === "expense_only") for (const l of lines) l.issues = [];
+        if (b.payment_state === "paid" && (!b.payment_account_id || !b.payment_date)) return send(res, 422, { code: "PAYMENT_ACCOUNT_REQUIRED", detail: "Ödendi için ödemenin yapıldığı kasa ya da banka hesabını seçin." });
         // 14 Kas 2026 sözleşmesi (/__mode?iaGate=…): dup → POSSIBLE_LEGACY_DUPLICATE (kabulle kalkar); legacy → LEGACY_RECORD_EXISTS;
         // acct → ACCOUNTING_NOT_ACTIVE; disabled → EXPENSE_MODULE_DISABLED; confirm409 → onayda 409 EXPENSE_MODULE_DISABLED.
         const gate = state.iaGate || "";
@@ -1405,9 +1422,13 @@ http
           preview_fingerprint: "fp1", choices_digest: "cd-" + JSON.stringify(lc).length, decision_digest: "dd1",
           document_summary: { document_number: "GIB2026000077", issue_date: "2026-11-10", currency: "TRY", taxable: "1200.00", vat_total: "240.00", payable: "1440.00" },
           blocker_items: gateBlock ? [{ key: gateBlock, line_index: null }] : [], review_items: whIssues,
+          payment_options: { states: [{ id: "payable", label: "Ödenecek", available: true }, { id: "paid", label: "Ödendi", available: true, requires: ["account_id", "date"] },
+            { id: "employee", label: "Çalışan cebinden", available: false, reason: "Çalışan cebinden ödeme, çalışan kartları eklenince açılacak. Şimdilik Ödenecek ya da Ödendi seçin." }], accounts_endpoint: "/api/finance/accounts" },
+          payment: { state: b.payment_state || "payable", account_id: b.payment_account_id || null, date: b.payment_date || null },
           document_view: {
             version: "dv1",
-            document: { number: "GIB2026000077", issue_date: "2026-11-10", currency: "TRY", legal_payable: "1440.00", computed_payable: state.iaKurus ? "1440.01" : "1440.00", document_issues: [], reconciliation_level: state.iaKurus ? "warning" : "ok", lines_difference: state.iaKurus ? "0.01" : null },
+            document: { number: "GIB2026000077", issue_date: "2026-11-10", currency: "TRY", legal_payable: "1440.00", computed_payable: state.iaKurus ? "1440.01" : "1440.00", document_issues: [], reconciliation_level: state.iaKurus ? "warning" : "ok", lines_difference: state.iaKurus ? "0.01" : null,
+              quick_expense: b.quick_expense === true, totals_basis: b.quick_expense === true ? "document" : "lines" },
             supplier: { name: "Ambalaj Ltd.", tax_number: "9876543210", state: b.supplier_id ? "matched" : b.create_supplier ? "create" : "ambiguous", selected_id: b.supplier_id || null, create_selected: b.create_supplier === true, candidates: [{ id: "s1", label: "Ambalaj Limited Şirketi" }, { id: "s2", label: "Ambalaj Ltd. (eski kayıt)" }], issues: supIssues },
             lines,
             decisions: {
@@ -1424,7 +1445,9 @@ http
         if (gate === "dup" && b.legacy_duplicate_ack !== true) return send(res, 409, { status: "REJECTED", reason: "QUICK_CONFIRMATION_STALE", detail: "Önizleme değişti; yeniden önizleyin." });
         if (gate === "confirm409") return send(res, 409, { status: "REJECTED", reason: "EXPENSE_MODULE_DISABLED", detail: "Bir hata oluştu" });
         importState[qm[1]] = "applied";
-        return send(res, 200, { status: "APPLIED", result: { invoice_id: "ex1" } });
+        const acc = accounts.find((a) => a.id === b.payment_account_id);
+        return send(res, 200, { status: "APPLIED", detail: "Fatura giderlere işlendi.", result: { invoice_id: "ex1" },
+          ...(b.payment_state === "paid" ? { payment: { status: "recorded", payment: { id: "pp1", amount: "1440.00", currency: "TRY", date: b.payment_date, account_id: b.payment_account_id, account_name: acc ? acc.name : "Hesap", status: "completed" } } } : {}) });
       });
       return;
     }

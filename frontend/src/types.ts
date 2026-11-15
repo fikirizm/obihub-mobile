@@ -450,6 +450,7 @@ export type IncomingInvoice = {
   archived?: boolean;
   can_respond?: boolean;
   response_request?: { decision?: string; state?: string; requested_at?: string | null; message?: string | null } | null;
+  importBlock?: { code: string; detail: string } | null;
 };
 
 export type SupportTicket = {

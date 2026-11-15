@@ -28,8 +28,18 @@ export function isStatusOnly(importStatus?: string, reimportable?: boolean) {
 
 export type LineChoice = { kind: "product" | "service" | null; product_id: string | null; new_product_draft: boolean; stock: boolean | null; vat_exemption_code: null };
 export const EMPTY_CHOICE: LineChoice = { kind: null, product_id: null, new_product_draft: false, stock: null, vat_exemption_code: null };
-export type ImportForm = { payment_state: "payable"; due_date: string | null; expense_category_id: string | null };
-export const EMPTY_FORM: ImportForm = { payment_state: "payable", due_date: null, expense_category_id: null };
+// İçeri Al 2 (D-14b): Ödenecek · Ödendi (hesap + ödeme tarihi) · Çalışan cebinden (kapalı).
+export type ImportForm = {
+  payment_state: "payable" | "paid" | "employee";
+  payment_account_id: string | null;
+  payment_date: string | null;
+  due_date: string | null;
+  expense_category_id: string | null;
+};
+export const EMPTY_FORM: ImportForm = { payment_state: "payable", payment_account_id: null, payment_date: null, due_date: null, expense_category_id: null };
+export const paymentComplete = (f: Partial<ImportForm> | null | undefined) =>
+  f?.payment_state === "paid" && Boolean(f.payment_account_id) && /^\d{4}-\d{2}-\d{2}$/.test(String(f.payment_date || ""));
+export const paymentMissing = (f: Partial<ImportForm> | null | undefined) => f?.payment_state === "paid" && !paymentComplete(f);
 export type ImportArgs = {
   mode: "expense_only" | "expense_and_stock";
   lineChoices: LineChoice[];
@@ -39,8 +49,10 @@ export type ImportArgs = {
   form: ImportForm;
   // POSSIBLE_LEGACY_DUPLICATE uyarısının açık kabulü ("Bu farklı bir fatura"); seçim özetinin parçası, yalnız true iken gönderilir.
   legacyAck: boolean;
+  // Kıyas 2: "Hayır" = hızlı gider (kalemsiz; tutarlar belge toplamından), yalnız gider modunda gönderilir.
+  quickExpense?: boolean;
 };
-export const INITIAL_ARGS: ImportArgs = { mode: "expense_only", lineChoices: [], createSupplier: false, supplierId: null, warehouseId: null, form: EMPTY_FORM, legacyAck: false };
+export const INITIAL_ARGS: ImportArgs = { mode: "expense_only", lineChoices: [], createSupplier: false, supplierId: null, warehouseId: null, form: EMPTY_FORM, legacyAck: false, quickExpense: false };
 
 // web model.js payload()
 export function importPayload(a: ImportArgs, withForm: boolean) {
@@ -52,8 +64,14 @@ export function importPayload(a: ImportArgs, withForm: boolean) {
     line_choices: a.lineChoices,
   };
   if (a.legacyAck === true) body.legacy_duplicate_ack = true;
+  if (a.quickExpense === true && a.mode === "expense_only") body.quick_expense = true;
   if (withForm) {
-    body.payment_state = a.form.payment_state || "payable";
+    // Ödendi: hesap + tarih tamamsa gönderilir; eksikken önizleme Ödenecek gibi istenir (ödeme alanları özete girmez), kayıt kapalı kalır.
+    if (paymentComplete(a.form)) {
+      body.payment_state = "paid";
+      body.payment_account_id = a.form.payment_account_id;
+      body.payment_date = a.form.payment_date;
+    } else body.payment_state = a.form.payment_state === "paid" ? "payable" : a.form.payment_state || "payable";
     body.due_date = a.form.due_date || null;
     body.expense_category_id = a.form.expense_category_id || null;
   }
@@ -229,14 +247,44 @@ export function collectIssues(decision: any, view: any): Issue[] {
 }
 
 // ---- Kayıt sonucu (web model.js confirmOutcome / confirmErrorOutcome / statusOutcome / RESULT_TEXT) ----
-export type ImportOutcome = { status: "APPLIED" | "IN_PROGRESS" | "NEEDS_REVIEW" | "REJECTED" | "REVERSED" | "UNKNOWN" | "NONE"; detail: string | null; alreadyImported: boolean; reimportable?: boolean };
+export type ImportPayment = { status: "recorded" | "pending" | "failed"; code: string | null; detail: string | null; accountName: string | null };
+export type ImportOutcome = {
+  status: "APPLIED" | "IN_PROGRESS" | "NEEDS_REVIEW" | "REJECTED" | "REVERSED" | "UNKNOWN" | "NONE";
+  detail: string | null;
+  alreadyImported: boolean;
+  reimportable?: boolean;
+  payment?: ImportPayment | null;
+};
 const GENERIC = /status code|network|request failed|bir hata oluştu/i;
 const turkish = (t: unknown) => typeof t === "string" && t.trim().length > 3 && !/^[A-Z0-9_]+$/.test(t.trim()) && !GENERIC.test(t);
 
 export function confirmOutcome(res: any): ImportOutcome {
   const status = String(res?.status || "").toUpperCase();
   if (!["APPLIED", "IN_PROGRESS", "NEEDS_REVIEW", "REJECTED"].includes(status)) return { status: "UNKNOWN", detail: null, alreadyImported: false };
-  return { status: status as ImportOutcome["status"], detail: turkish(res?.detail) ? String(res.detail).trim() : null, alreadyImported: res?.already_imported === true };
+  return {
+    status: status as ImportOutcome["status"],
+    detail: turkish(res?.detail) ? String(res.detail).trim() : null,
+    alreadyImported: res?.already_imported === true,
+    payment: cleanPayment(res?.payment),
+  };
+}
+
+// İçeri Al 2: onay/durum yanıtındaki ödeme bölümü (yalnız Ödendi seçildiyse).
+export function cleanPayment(p: any): ImportPayment | null {
+  if (!p || typeof p !== "object" || !["recorded", "pending", "failed"].includes(p.status)) return null;
+  const pay = p.payment && typeof p.payment === "object" ? p.payment : {};
+  return {
+    status: p.status,
+    code: typeof p.code === "string" ? p.code : null,
+    detail: turkish(p.detail) ? String(p.detail).trim() : null,
+    accountName: typeof pay.account_name === "string" ? pay.account_name : null,
+  };
+}
+export function paymentResultText(p: ImportPayment | null | undefined): string | null {
+  if (!p) return null;
+  if (p.status === "recorded") return `Fatura kaydedildi ve ödendi${p.accountName ? ` (${p.accountName})` : ""}.`;
+  if (p.status === "pending") return p.detail || "Ödeme, içeri alma tamamlanınca kaydedilecek.";
+  return p.detail || 'Fatura kaydedildi ancak ödeme yazılamadı. Gider Faturaları\'ndan "Ödeme ekle" ile girebilirsiniz.';
 }
 
 // Ağ hatası / 5xx: istek sunucuya ulaşmış olabilir → "başarısız" denmez, durum sorulur.
@@ -257,7 +305,13 @@ const STATUS_MAP: Record<string, ImportOutcome["status"]> = { in_progress: "IN_P
 export function statusOutcome(res: any): ImportOutcome | null {
   const key = typeof res?.status === "string" ? STATUS_MAP[res.status] : undefined;
   if (!key) return null;
-  return { status: key, detail: turkish(res?.detail) ? String(res.detail).trim() : null, alreadyImported: false, reimportable: key === "REVERSED" && res?.reimportable === true };
+  return {
+    status: key,
+    detail: turkish(res?.detail) ? String(res.detail).trim() : null,
+    alreadyImported: false,
+    reimportable: key === "REVERSED" && res?.reimportable === true,
+    payment: cleanPayment(res?.payment),
+  };
 }
 
 export const RESULT_TEXT: Record<string, [string, string]> = {
@@ -321,7 +375,7 @@ export function answerArgs(a: ImportArgs, view: any, answer: "yes" | "no"): Impo
   let sup: Partial<ImportArgs> = {};
   if (unresolved && hits.length === 1) sup = { supplierId: hits[0].id, createSupplier: false };
   else if (unresolved && hits.length === 0 && view?.decisions?.supplier?.create_new?.available === true) sup = { supplierId: null, createSupplier: true };
-  return { ...a, ...sup, mode: yes ? "expense_and_stock" : "expense_only", lineChoices, warehouseId: yes ? a.warehouseId : null };
+  return { ...a, ...sup, mode: yes ? "expense_and_stock" : "expense_only", lineChoices, warehouseId: yes ? a.warehouseId : null, quickExpense: !yes };
 }
 
 export type RememberedLine = { isNew: boolean; status: string; productId: string | null; suggestedId: string | null; suggestedName: string | null };
@@ -367,3 +421,54 @@ export function rejectionText(r: { code: string; detail: string } | null): strin
   if (!r) return null;
   return r.code === "PREVIEW_PARASUT_MANUAL_LINE_REQUIRED" ? `${r.detail} Bu faturayı web'den (app.obihub.app) içeri alın.` : r.detail;
 }
+
+// ---- İçeri Al 2 (docs/pm/tasarim/iceri-al-2.md; web PaymentStatusField, KabulKapisi, GiderFormu) ----
+export const EMPLOYEE_REASON = "Çalışan cebinden ödeme, çalışan kartları eklenince açılacak. Şimdilik Ödenecek ya da Ödendi seçin.";
+export type PaymentStateOption = { id: "payable" | "paid" | "employee"; label: string; available: boolean; reason?: string };
+const FALLBACK_STATES: PaymentStateOption[] = [
+  { id: "payable", label: "Ödenecek", available: true },
+  { id: "paid", label: "Ödendi", available: true },
+  { id: "employee", label: "Çalışan cebinden", available: false, reason: EMPLOYEE_REASON },
+];
+export function paymentStates(decision: any): PaymentStateOption[] {
+  const list = decision?.payment_options?.states;
+  if (!Array.isArray(list) || !list.length) return FALLBACK_STATES;
+  return list
+    .filter((x: any) => ["payable", "paid", "employee"].includes(x?.id))
+    .map((x: any) => ({ id: x.id, label: String(x.label || x.id), available: x.available === true, ...(typeof x.reason === "string" && x.reason ? { reason: x.reason } : {}) }));
+}
+
+// "1227.5" → "1.227,50" (kuruş, float'sız metin işlemi).
+function trAmount(v: unknown): string | null {
+  const m = /^-?(\d+)(?:\.(\d+))?$/.exec(String(v ?? "").trim());
+  if (!m) return null;
+  const int = m[1].replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${int},${(m[2] || "").padEnd(2, "0").slice(0, 2)}`;
+}
+const isZeroAmount = (v: unknown) => v == null || v === "" || Number(v) === 0;
+export function discountText(l: any): string | null {
+  if (isZeroAmount(l?.discount)) return null;
+  const amt = trAmount(String(l.discount).replace(/^-/, ""));
+  if (!amt) return null;
+  const rate = isZeroAmount(l?.discount_rate) ? null : trAmount(l.discount_rate);
+  return `${rate ? `%${rate} · ` : ""}−${amt} ₺`;
+}
+export function vatIncludedNote(l: any): string | null {
+  if (l?.price_includes_vat !== true) return null;
+  const a = trAmount(l?.document_unit_price);
+  return a ? `Faturada KDV dahil ${a} ₺` : null;
+}
+
+// Ticari fatura kabul kapısı (gelen kutusu `import_block` ya da önizleme/onay 409 kodu).
+export function acceptGate(code: unknown): { kind: "accept" | "pending" | "rejected"; title: string; fallback: string } | null {
+  if (code === "ACCEPT_REQUIRED")
+    return { kind: "accept", title: "Önce faturayı kabul edin", fallback: "Bu ticari fatura onay bekliyor; kabul etmeden gider ve borç olarak içeri alınamaz. Kabul yanıtı GİB'e gönderilir ve geri alınamaz." };
+  if (code === "ACCEPT_PENDING") return { kind: "pending", title: "Kabul işleniyor", fallback: "Kabul yanıtınız Paraşüt'e gönderildi, sonucu bekleniyor." };
+  if (code === "DOCUMENT_REJECTED") return { kind: "rejected", title: "Fatura içeri alınamaz", fallback: "Bu fatura reddedildi ya da iade edildi; içeri alınamaz." };
+  return null;
+}
+
+export function quickExpenseNotice(doc: any): string | null {
+  return doc?.quick_expense === true && doc?.totals_basis === "document" ? "Tutarlar ve KDV fatura toplamlarından alındı; kalemler yalnız bilgi içindir." : null;
+}
+export const plannedNotice = (count: number) => (count > 0 ? `${count} yeni ürün kartı faturayı kaydettiğinizde açılır.` : null);

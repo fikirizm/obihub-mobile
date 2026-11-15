@@ -84,4 +84,11 @@ t("base64 (zip baytları dosyaya yazmak için)", () => {
   assert.equal(m.bytesToBase64(new TextEncoder().encode("Merhaba")), Buffer.from("Merhaba").toString("base64"));
   assert.equal(m.bytesToBase64(new Uint8Array([])), "");
 });
+t("İçeri Al 2: satırdaki import_block (kabul kapısı) taşınır; yoksa null", () => {
+  const r = m.inboxRow({ document_key: "1", status: "awaiting_response", import_block: { code: "ACCEPT_REQUIRED", detail: "Önce faturayı kabul edin." } }, "parasut");
+  assert.deepEqual(r.importBlock, { code: "ACCEPT_REQUIRED", detail: "Önce faturayı kabul edin." });
+  assert.equal(m.inboxRow({ document_key: "1", import_block: null }, "parasut").importBlock, null);
+  assert.equal(m.inboxRow({ document_key: "1", import_block: { detail: "x" } }, "parasut").importBlock, null);
+});
+
 console.log(`\n${n} test geçti`);

@@ -55,6 +55,8 @@ export type InboxRow = {
   archived: boolean;
   can_respond: boolean;
   response_request: ResponseRequest;
+  // İçeri Al 2: onay bekleyen ticari faturada içeri alma kapısı ({code: ACCEPT_REQUIRED|ACCEPT_PENDING|DOCUMENT_REJECTED, detail}).
+  importBlock: { code: string; detail: string } | null;
   pdf_id: string;
 };
 
@@ -86,6 +88,7 @@ export function inboxRow(x: any, provider: string): InboxRow {
     archived: x?.archived === true,
     can_respond: x?.can_respond === true,
     response_request: x?.response_request && typeof x.response_request === "object" ? x.response_request : null,
+    importBlock: x?.import_block && typeof x.import_block.code === "string" && x.import_block.code ? { code: x.import_block.code, detail: String(x.import_block.detail || "") } : null,
     // PDF uçları sağlayıcının kendi kimliğini ister (yalnız satır bu sağlayıcıdansa).
     pdf_id: x?.native_id && (!x?.source || x.source === provider) ? String(x.native_id) : docKey,
   };
