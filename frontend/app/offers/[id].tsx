@@ -1,15 +1,14 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Clipboard, Linking, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { Clipboard, Linking, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
-import { createOfferPayment, getOfferPayment, getSalesOfferDetail, getWooIntegrations, updateSalesOffer } from "../../src/api";
-import { offerErrorText, offerWriteKind } from "../../src/offer-form";
+import { getOfferPayment, getSalesOfferDetail } from "../../src/api";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney } from "../../src/utils";
 import type { StatusKind } from "../../src/utils";
-import { CheckIcon, FileTextIcon, LinkIcon, MailIcon, PlugIcon, TagIcon, WalletIcon } from "../../src/components/Icons";
+import { CheckIcon, FileTextIcon, LinkIcon, MailIcon, TagIcon, WalletIcon } from "../../src/components/Icons";
 import { EmptyState } from "../../src/components/EmptyState";
 import { PressableScale } from "../../src/components/KPICard";
 import { SafeAnimatedView } from "../../src/components/SafeAnimatedView";
@@ -104,40 +103,21 @@ export default function OfferDetail() {
   const offerId = String(params.id || "");
   const { token } = useAuth();
   const { colors } = useTheme();
-  const { toast, confirm } = useFeedback();
+  const { toast } = useFeedback();
 
   const [offer, setOffer] = useState<SalesOffer | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [payment, setPayment] = useState<OfferPayment | null>(null);
-  const [sendEmail, setSendEmail] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [statusUpdating, setStatusUpdating] = useState<"accepted" | "rejected" | null>(null);
-  const [wooIntegrations, setWooIntegrations] = useState<any[]>([]);
-  const [selectedIntegrationId, setSelectedIntegrationId] = useState<string>("");
 
   const load = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
-      const [detail, pay, integData] = await Promise.all([
-        getSalesOfferDetail(token, offerId),
-        getOfferPayment(token, offerId),
-        getWooIntegrations(token),
-      ]);
+      const [detail, pay] = await Promise.all([getSalesOfferDetail(token, offerId), getOfferPayment(token, offerId)]);
       setOffer(detail ?? null);
       setLoadError(null);
-      setSendEmail(!!(detail?.contact_email));
       setPayment(pay ?? null);
-
-      const intList: any[] = Array.isArray(integData)
-        ? integData
-        : Array.isArray(integData?.integrations)
-          ? integData.integrations
-          : [];
-      const wooList = intList.filter((i: any) => i.provider === "woocommerce" && i.status !== "deleted");
-      setWooIntegrations(wooList);
-      if (wooList.length === 1) setSelectedIntegrationId(wooList[0].id);
     } catch (e: any) {
       setLoadError(e?.message || "Teklif yüklenirken sorun oluştu.");
       toast("Teklif yüklenirken sorun oluştu.", "error");
@@ -147,58 +127,6 @@ export default function OfferDetail() {
   }, [token, offerId, toast]);
 
   useEffect(() => { load(); }, [load]);
-
-  const handleCreatePayment = useCallback(async () => {
-    if (!token) return;
-    if (!selectedIntegrationId) {
-      toast("Lütfen bir WooCommerce entegrasyonu seçin.", "info");
-      return;
-    }
-    setCreating(true);
-    try {
-      const res = await createOfferPayment(token, offerId, sendEmail, selectedIntegrationId);
-      setPayment(res);
-      toast(
-        sendEmail && res?.email_sent
-          ? "Ödeme linki oluşturuldu ve müşteriye e-posta gönderildi."
-          : "Ödeme linki oluşturuldu.",
-        "success"
-      );
-    } catch {
-      toast("Ödeme linki oluşturulurken sorun oluştu.", "error");
-    } finally {
-      setCreating(false);
-    }
-  }, [token, offerId, sendEmail, selectedIntegrationId, toast]);
-
-  const handleStatusChange = useCallback(async (newStatus: "accepted" | "rejected") => {
-    if (!token || !offer) return;
-    const accepting = newStatus === "accepted";
-    const ok = await confirm({
-      title: accepting ? "Teklif onaylansın mı?" : "Teklif reddedilsin mi?",
-      message: `Bu teklifi ${accepting ? "onaylamak" : "reddetmek"} istediğinize emin misiniz?`,
-      confirmLabel: accepting ? "Onayla" : "Reddet",
-      destructive: !accepting,
-    });
-    if (!ok) return;
-    setStatusUpdating(newStatus);
-    try {
-      await updateSalesOffer(token, offerId, { status: newStatus });
-      setOffer((prev) => prev ? { ...prev, status: newStatus } : prev);
-      toast(accepting ? "Teklif onaylandı." : "Teklif reddedildi.", "success");
-    } catch (e: any) {
-      // 13 Kas 2026: PATCH, POST ile aynı hata eşlemesini kullanır (anahtar yok). Sonuç belirsizse durum değişmiş olabilir:
-      // teklif yeniden okunur; kesin retlerde Paraşüt'ün metni gösterilir.
-      const kind = offerWriteKind(e);
-      if (kind === "rejected") toast(offerErrorText(e), "error");
-      else {
-        toast("Sonuç alınamadı; teklif durumu güncellenmiş olabilir. Teklif yeniden okunuyor.", "info");
-        load();
-      }
-    } finally {
-      setStatusUpdating(null);
-    }
-  }, [token, offerId, offer, confirm, toast, load]);
 
   const handleCopyLink = useCallback((url: string) => {
     Clipboard.setString(url);
@@ -238,7 +166,6 @@ export default function OfferDetail() {
   const isCancelled = payment?.status === "cancelled";
   const money = (v: number | string | undefined | null) => formatMoney(v, offer.currency);
   const totalDiscount = Number((offer as any).total_discount || offer.computed_total_discount || 0);
-  const canDecide = offer.status === "waiting" || offer.status === "sent" || offer.status === "draft" || offer.status === "approved";
   const title = offer.description || `Teklif #${offer.id}`;
   const heroTitle = offer.contact_name || title;
   const initials = initialsOf(offer.contact_name || "");
@@ -279,27 +206,10 @@ export default function OfferDetail() {
           />
         </View>
 
-        {canDecide ? (
-          <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)} style={styles.actions}>
-            <Button
-              testID="offer-approve"
-              label="Onayla"
-              busy={statusUpdating === "accepted"}
-              disabled={Boolean(statusUpdating)}
-              onPress={() => handleStatusChange("accepted")}
-              style={{ flex: 1 }}
-            />
-            <Button
-              testID="offer-reject"
-              label="Reddet"
-              variant="secondary"
-              busy={statusUpdating === "rejected"}
-              disabled={Boolean(statusUpdating)}
-              onPress={() => handleStatusChange("rejected")}
-              style={{ flex: 1 }}
-            />
-          </SafeAnimatedView>
-        ) : null}
+        {/* PM 15 Kas 2026 (web WP-21): Paraşüt teklifleri salt okuma; yeni teklif ObiHub'da açılır. */}
+        <View testID="offer-readonly-note" style={[styles.note, { backgroundColor: colors.infoBg }]}>
+          <Text style={[type.footnote, { color: colors.textPrimary }]}>Yeni teklifler ObiHub'da oluşturulur.</Text>
+        </View>
 
         {lineItems.length > 0 ? (
           <SafeAnimatedView entering={FadeInDown.delay(140).duration(380)}>
@@ -341,8 +251,8 @@ export default function OfferDetail() {
           </SafeAnimatedView>
         ) : null}
 
-        {/* Ödeme bölümü yalnızca WooCommerce entegrasyonu varsa veya ödeme zaten oluşturulmuşsa gösterilir. */}
-        {hasPayment || wooIntegrations.length > 0 ? (
+        {/* Salt okuma: yalnız daha önce oluşturulmuş ödeme linki ve durumu gösterilir. */}
+        {hasPayment ? (
           <SafeAnimatedView entering={FadeInDown.delay(210).duration(380)}>
             <SectionTitle title="Ödeme" />
             <Card padded style={styles.block}>
@@ -400,94 +310,12 @@ export default function OfferDetail() {
 
                   {isCancelled ? (
                     <Text style={[type.caption, { color: colors.error }]}>
-                      Bu ödeme iptal edilmiş; link artık geçerli olmayabilir. Yeni bir ödeme linki oluşturabilirsiniz.
+                      Bu ödeme iptal edilmiş; link artık geçerli olmayabilir.
                     </Text>
                   ) : null}
 
-                  {!isPaid ? (
-                    <Button
-                      testID="offer-payment-recreate"
-                      label="Yeniden oluştur"
-                      variant="secondary"
-                      busy={creating}
-                      onPress={handleCreatePayment}
-                    />
-                  ) : null}
                 </View>
-              ) : (
-                <View style={{ gap: spacing.sm }}>
-                  <View style={styles.payHead}>
-                    <IconTile tint={colors.violetSoft}>
-                      <WalletIcon size={18} color={colors.violet} />
-                    </IconTile>
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={1}>
-                        Ödeme linki oluşturun
-                      </Text>
-                      <Text style={[type.caption, { color: colors.textTertiary, marginTop: 1 }]} numberOfLines={2}>
-                        Müşteriniz teklif tutarını bu link üzerinden öder.
-                      </Text>
-                    </View>
-                  </View>
-                  {wooIntegrations.length > 1 ? (
-                    <View style={{ gap: spacing.xs }} accessibilityRole="radiogroup">
-                      <Text style={[type.caption, { color: colors.textSecondary }]}>Mağaza seçin</Text>
-                      {wooIntegrations.map((integ) => {
-                        const active = selectedIntegrationId === integ.id;
-                        return (
-                          <PressableScale
-                            key={integ.id}
-                            testID={`offer-integration-${integ.id}`}
-                            onPress={() => setSelectedIntegrationId(integ.id)}
-                            accessibilityRole="radio"
-                            accessibilityLabel={String(integ.name || integ.id)}
-                            accessibilityState={{ selected: active }}
-                            style={[
-                              styles.optionRow,
-                              {
-                                borderColor: active ? colors.primary : colors.border,
-                                backgroundColor: active ? colors.primarySoft : colors.surface,
-                              },
-                            ]}
-                          >
-                            <IconTile tint={active ? colors.surface : colors.surfaceMuted}>
-                              <PlugIcon size={18} color={active ? colors.primary : colors.textSecondary} />
-                            </IconTile>
-                            <Text style={[type.bodyStrong, { color: colors.textPrimary, flex: 1, minWidth: 0 }]} numberOfLines={1}>
-                              {integ.name || integ.id}
-                            </Text>
-                            {active ? <CheckIcon size={16} color={colors.primary} /> : null}
-                          </PressableScale>
-                        );
-                      })}
-                    </View>
-                  ) : null}
-
-                  {offer.contact_email ? (
-                    <View style={[styles.optionRow, { borderColor: colors.border, backgroundColor: colors.surfaceMuted }]}>
-                      <IconTile tint={colors.surface}>
-                        <MailIcon size={18} color={colors.textSecondary} />
-                      </IconTile>
-                      <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={1}>Müşteriye e-posta gönder</Text>
-                        <Text style={[type.caption, { color: colors.textTertiary, marginTop: 2 }]} numberOfLines={1}>
-                          {offer.contact_email}
-                        </Text>
-                      </View>
-                      <Switch
-                        testID="offer-send-email"
-                        value={sendEmail}
-                        onValueChange={setSendEmail}
-                        accessibilityLabel="Müşteriye e-posta gönder"
-                        trackColor={{ false: colors.border, true: colors.primary }}
-                        ios_backgroundColor={colors.border}
-                      />
-                    </View>
-                  ) : null}
-
-                  <Button testID="offer-payment-create" label="Ödeme linki oluştur" busy={creating} onPress={handleCreatePayment} />
-                </View>
-              )}
+              ) : null}
             </Card>
           </SafeAnimatedView>
         ) : null}
@@ -497,6 +325,7 @@ export default function OfferDetail() {
 }
 
 const styles = StyleSheet.create({
+  note: { marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: spacing.sm, borderRadius: radius.md },
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },
   avatar: {

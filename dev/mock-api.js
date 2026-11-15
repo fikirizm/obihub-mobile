@@ -175,7 +175,11 @@ const recon = [
 const colKeys = new Map();
 const transfers = [];
 const trKeys = new Map();
-const offers = [];
+const offers = [
+  // Salt okuma Paraşüt teklifi örneği (15 Kas 2026: Paraşüt teklifleri mobilde yalnız görüntülenir).
+  { id: "of1", description: "Ekim kampanyası", contact_name: "Elif Kaya", contact_email: "elif@example.test", status: "waiting", issue_date: "2026-10-25", due_date: "2026-11-25", currency: "TRL", net_total: 2400,
+    line_items: [{ id: "x1", description: "Paket A", quantity: 2, unit_price: 1000, net_total: 2000 }] },
+];
 const offerKeys = new Map();
 // P11: c1'in tahsilat satırları (cari tahsilatı + li1'in kendi tahsilatı); silinenler ters kayıtla.
 function colLedgerRows(party) {
