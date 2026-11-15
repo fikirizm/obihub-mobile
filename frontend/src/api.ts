@@ -31,6 +31,9 @@ const SUBSCRIPTION_LOCK_PREFIX = "Abonelik erişimi pasif.";
 
 type SessionHandlers = {
   onUnauthorized?: () => void;
+  // Uzun oturum: 401'de erişim anahtarı sessizce yenilenir (tek uçuş). Yeni anahtar döner; null = yenilenemedi
+  // (işleyici kesin retlerde çıkışı kendisi yapar, ağ hatasında oturumu korur).
+  onRefresh?: (staleToken: string) => Promise<string | null>;
   onSubscriptionLocked?: (message: string) => void;
 };
 
@@ -51,7 +54,7 @@ const STATUS_MESSAGES: Record<number, string> = {
   503: "Hizmet geçici olarak kullanılamıyor. Lütfen tekrar deneyin.",
 };
 
-export async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
+export async function request<T>(path: string, options: RequestInit = {}, token?: string, retried = false): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
@@ -102,7 +105,12 @@ export async function request<T>(path: string, options: RequestInit = {}, token?
     if (Number.isFinite(retryAfter) && retryAfter > 0) err.retryAfter = retryAfter;
     // Yalnızca oturumlu çağrılar: giriş ekranındaki hatalı şifre 401'i oturumu etkilemez.
     if (token) {
-      if (res.status === 401) {
+      if (res.status === 401 && !retried && sessionHandlers.onRefresh) {
+        // Sessiz yenileme ve isteğin bir kez tekrarı; yenileme başarısızsa hata çağırana gider (çıkış işleyicide karar verilir).
+        const fresh = await sessionHandlers.onRefresh(token).catch(() => null);
+        if (fresh && fresh !== token) return request<T>(path, options, fresh, true);
+      } else if (res.status === 401 && (retried || !sessionHandlers.onRefresh)) {
+        // Yenilenmiş anahtarla da 401: oturum gerçekten düşmüş.
         sessionHandlers.onUnauthorized?.();
       } else if (res.status === 403 && serverMessage.startsWith(SUBSCRIPTION_LOCK_PREFIX)) {
         err.code = "SUBSCRIPTION_LOCKED";
@@ -1105,4 +1113,32 @@ export async function getRecentOrders(token: string, limit = 5) {
 // F3 — web Header: POST /support/notifications/mark-read (destek yanıtlarını sunucuda okundu sayar; başka cihazda da düşer).
 export async function markSupportNotificationsRead(token: string) {
   return request<{ success?: boolean; updated?: number }>("/support/notifications/mark-read", { method: "POST" }, token);
+}
+
+// ---------------------------------------------------------------------------
+// Uzun oturum bağdaştırıcısı (docs/pm/tasarim/mobil-oturum-push.md). Sunucu alan adları sözleşme gelince burada kesinleşir;
+// uygulamanın geri kalanı yalnız { access, refresh } ile çalışır.
+// ---------------------------------------------------------------------------
+export type SessionTokens = { access: string; refresh: string | null };
+
+export function sessionTokensOf(data: any): SessionTokens | null {
+  const access = data?.access_token || data?.token;
+  if (typeof access !== "string" || !access) return null;
+  const refresh = typeof data?.refresh_token === "string" && data.refresh_token ? data.refresh_token : null;
+  return { access, refresh };
+}
+
+// Yenileme: her kullanımda yenileme anahtarı değişir; yenisi saklanır. Ortak request() kullanılmaz (401 döngüsü olmasın).
+export async function refreshSession(refreshToken: string): Promise<SessionTokens> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/auth/refresh`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refresh_token: refreshToken }) });
+  } catch {
+    throw { message: "Sunucuya bağlanılamıyor.", status: 0 } as ApiError;
+  }
+  const data: any = await res.json().catch(() => null);
+  if (!res.ok) throw { message: "Oturum yenilenemedi.", status: res.status, code: typeof data?.code === "string" ? data.code : typeof data?.detail?.code === "string" ? data.detail.code : undefined } as ApiError;
+  const t = sessionTokensOf(data);
+  if (!t) throw { message: "Oturum yenilenemedi.", status: 500 } as ApiError;
+  return { access: t.access, refresh: t.refresh || refreshToken };
 }

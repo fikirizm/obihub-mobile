@@ -99,6 +99,8 @@ const expenseState = {
 // Dalga 3 / C1: gelen fatura içeri alma durumları.
 const importState = { in2: "applied" };
 const remembered = {};
+let refreshCalls = 0;
+let currentRefresh = null;
 const inboxDoc = (k, no, name, tax, date, amt, status, label, extra = {}) => ({ provider: "parasut", document_key: k, native_id: k, ettn: null, invoice_no: no, issue_date: date, supplier: { name, tax_no: tax },
   payable_amount: amt, tax_exclusive_amount: Math.round((amt / 1.2) * 100) / 100, currency: "TRY", provider_status: status, status, status_label: label, response_days_left: null, response_deadline: null,
   type_label: "e-Fatura · Temel", invoice_type_label: "Satış", imported_elsewhere: false, user_state: "new", archived: false, response_request: null, can_respond: false,
@@ -263,7 +265,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -276,6 +278,23 @@ http
         return res.end(JSON.stringify({ code: E[1], detail: E[2] }));
       }
     }
+    // Uzun oturum denemesi (/__mode?expire=1): giriş "acc-old" verir; bu anahtarla her istek 401 döner. /auth/refresh
+    // geçerli yenileme anahtarıyla "acc-N" + yeni yenileme anahtarı verir (her kullanımda değişir); eski anahtar 401.
+    if (path === "/auth/refresh" && req.method === "POST") {
+      let rawBody = "";
+      req.on("data", (c) => (rawBody += c));
+      req.on("end", () => {
+        const b = JSON.parse(rawBody || "{}");
+        refreshCalls++;
+        console.log("REFRESH", JSON.stringify(b), "calls", refreshCalls);
+        if (!b.refresh_token || b.refresh_token !== currentRefresh) return send(res, 401, { code: "REFRESH_TOKEN_INVALID", detail: "Oturum yenilenemedi." });
+        currentRefresh = "r" + (refreshCalls + 1);
+        return send(res, 200, { access_token: "acc-" + refreshCalls, refresh_token: currentRefresh, token_type: "bearer" });
+      });
+      return;
+    }
+    if (path === "/auth/login" && state.expire) { currentRefresh = "r1"; return send(res, 200, { access_token: "acc-old", refresh_token: "r1", token_type: "bearer", user }); }
+    if (state.expire && req.headers.authorization === "Bearer acc-old") return send(res, 401, { detail: "Oturum süresi doldu." });
     if (path === "/auth/login") return send(res, 200, { access_token: "test-token", token_type: "bearer", user });
     // Şifre sıfırlama (sunucu kuralı: en az 8, harf + rakam, e-postayla aynı değil → 400 PASSWORD_WEAK). /__mode?pwWeak=1 → bir kez zayıf say.
     if (path === "/auth/password-reset/request-code" && req.method === "POST") return send(res, 200, { success: true, message: "Kod gönderildi", expires_in: 600 });

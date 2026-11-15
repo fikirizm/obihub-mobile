@@ -6,6 +6,7 @@ import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSprin
 import Svg, { Defs, LinearGradient, Path, RadialGradient, Stop, Circle } from "react-native-svg";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "../../src/auth/AuthProvider";
+import { PushPrompt } from "../../src/components/PushPrompt";
 import { canAccess } from "../../src/auth/permissions";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import type { Palette } from "../../src/theme/tokens";
@@ -242,13 +243,17 @@ export default function TabsLayout() {
   if (bootLoading || !token) return null;
 
   return (
-    <Tabs screenOptions={{ headerShown: false }} tabBar={(props) => <CustomTabBar {...props} />}>
-      <Tabs.Screen name="dashboard" />
-      <Tabs.Screen name="integrations" />
-      <Tabs.Screen name="orders" />
-      <Tabs.Screen name="finance" />
-      <Tabs.Screen name="menu" />
-    </Tabs>
+    <>
+      <Tabs screenOptions={{ headerShown: false }} tabBar={(props) => <CustomTabBar {...props} />}>
+        <Tabs.Screen name="dashboard" />
+        <Tabs.Screen name="integrations" />
+        <Tabs.Screen name="orders" />
+        <Tabs.Screen name="finance" />
+        <Tabs.Screen name="menu" />
+      </Tabs>
+      {/* Bildirim izni: önce açıklama, sonra sistem izni (yalnız izin hiç sorulmamışsa). */}
+      <PushPrompt />
+    </>
   );
 }
 

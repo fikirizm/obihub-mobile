@@ -11,18 +11,20 @@ import { SubscriptionLockOverlay } from "../src/components/SubscriptionLockOverl
 import { FeedbackProvider, useFeedback } from "../src/ui/Feedback";
 import { canOpenRoute } from "../src/auth/permissions";
 import { AppLockProvider } from "../src/security/AppLock";
+import { notificationRoute } from "../src/push-ui";
 import { DataCacheProvider } from "../src/context/DataCacheContext";
 
 function navigateToOrder(
   router: ReturnType<typeof useRouter>,
   data: Record<string, unknown>
 ) {
-  const orderId = data?.order_id;
+  // Sipariş kimliği ya da uygulama içi bağlantı yolu (sözleşme: docs/pm/tasarim/mobil-oturum-push.md).
+  const route = notificationRoute(data);
   const provider = data?.provider || "";
-  if (orderId) {
+  if (route) {
     router.push({
       pathname: "/orders/[id]",
-      params: { id: String(orderId), provider: String(provider) },
+      params: { id: route.params.id, provider: String(provider) },
     });
   }
 }
@@ -51,7 +53,7 @@ function useNotificationTapHandler() {
     Notifications.getLastNotificationResponseAsync()
       .then((response) => {
         const data = response?.notification.request.content.data as Record<string, unknown> | undefined;
-        if (data?.order_id) {
+        if (data && notificationRoute(data)) {
           pending.current = data;
           setPendingTick((n) => n + 1);
         }

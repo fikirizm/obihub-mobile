@@ -5,7 +5,10 @@ import * as BackgroundFetch from "expo-background-fetch";
 import * as TaskManager from "expo-task-manager";
 import { Platform } from "react-native";
 import * as Storage from "../storage";
-import { getAccountingSettings, getMe, getOrders, getSupportNotifications, login as apiLogin, registerPushToken, setSessionHandlers, unregisterPushToken } from "../api";
+import { getAccountingSettings, getMe, getOrders, getSupportNotifications, login as apiLogin, refreshSession, registerPushToken, sessionTokensOf, setSessionHandlers, unregisterPushToken } from "../api";
+import { refreshDue, refreshFailureKind, singleFlight } from "../session-refresh";
+import { orderNotificationText } from "../push-ui";
+import { AppState } from "react-native";
 import { displayOrderNo, formatOrderDateTime, isNewOrderStatus, providerLabel } from "../utils";
 import { clearCatalogCache } from "../catalogCache";
 import { clearAllCache } from "../offlineCache";
@@ -32,14 +35,27 @@ type AuthContextValue = {
   // Muhasebe ayarı bu oturumda sunucudan okunabildi mi (false iken accountingProvider güvenilir değildir).
   accountingLoaded: boolean;
   reloadAccounting: () => Promise<void>;
+  // Bildirim izni (null = henüz okunmadı) ve açıklama ekranının ertelendiği an.
+  pushStatus: string | null;
+  pushPromptAt: number | null;
+  enableNotifications: () => Promise<string>;
+  dismissPushPrompt: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 const TOKEN_KEY = "obihub_token";
 const USER_KEY = "obihub_user";
+// Uzun oturum: yenileme anahtarı (her kullanımda değişir) güvenli depoda.
+const REFRESH_KEY = "obihub_refresh_token";
 const SEEN_ORDER_IDS_KEY = "obihub_seen_order_ids";
 const ORDERS_CHANNEL_ID = "orders";
+// Özgün "yeni sipariş" sesi (assets/obihub/yeni-siparis.wav, 1,6 sn). Android kanal sesi oluşturulduktan sonra değişmez:
+// eski kanal (cha_ching) bir kez silinip yeni sesle kurulur.
+const ORDER_SOUND = "yeni-siparis.wav";
+const ORDERS_CHANNEL_VERSION_KEY = "obihub_orders_channel_v";
+const ORDERS_CHANNEL_VERSION = "2";
+const PUSH_PROMPT_KEY = "obihub_push_prompt_dismissed_at";
 const BG_TASK_NAME = "obihub-order-poll";
 const PARASUT_CONNECTED_KEY = "obihub_parasut_connected";
 
@@ -154,14 +170,21 @@ async function scheduleOrderNotification(orders: Order[]) {
   let body: string;
   let subtitle: string | undefined;
 
+  // Kullanıcı isteği (15 Kas 2026): kilit ekranında başlık "Yeni sipariş · Kanal", gövde tutar + ürün sayısı; müşteri adı yok.
+  const text = orderNotificationText(
+    orders.map((o) => ({
+      channel: providerLabel(String(o.integration_provider || o.provider || o.channel || "")),
+      amount: Number(o.total_amount || 0),
+      itemCount: Array.isArray(o.items) ? o.items.length : 0,
+    }))
+  );
   if (count === 1) {
-    title = `💰 Yeni Sipariş · ${emoji} ${label}`;
-    subtitle = `${formatAmount(amount)}${itemCount > 0 ? ` · ${itemCount} ürün` : ""}`;
-    body = [
-      customerName && customerName,
-      `#${displayOrderNo(first)}`,
-      formatOrderDateTime(first),
-    ].filter(Boolean).join(" · ");
+    title = text.title;
+    body = text.body;
+    subtitle = `#${displayOrderNo(first)}`;
+  } else if (count > 1) {
+    title = text.title;
+    body = text.body;
   } else {
     // Group by provider
     const byProvider: Record<string, number> = {};
@@ -193,7 +216,7 @@ async function scheduleOrderNotification(orders: Order[]) {
       title,
       ...(subtitle ? { subtitle } : {}),
       body,
-      sound: "cha_ching.wav",
+      sound: ORDER_SOUND,
       badge: 1,
       data: { order_id: first.id, provider: firstProvider },
       ...(attachments.length > 0 ? { attachments } : {}),
@@ -217,6 +240,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [accountingLoaded, setAccountingLoaded] = useState(false);
   // Ön plandaki yoklama ile push işleyicisinin ortak kullandığı "bildirimi verilmiş sipariş" kümesi.
   const seenOrderIdsRef = useRef<Set<string>>(new Set());
+  const [pushStatus, setPushStatus] = useState<string | null>(null);
+  const [pushPromptAt, setPushPromptAt] = useState<number | null>(null);
+  useEffect(() => {
+    Storage.getItemAsync(PUSH_PROMPT_KEY)
+      .then((v) => setPushPromptAt(v && Number.isFinite(Number(v)) ? Number(v) : null))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -240,8 +270,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUser(me);
             await Storage.setItemAsync(USER_KEY, JSON.stringify(me));
           } catch (e: any) {
-            // Token geçersiz/süresi dolmuş → temiz çıkış yap
-            if (e?.status === 401 || e?.status === 403) {
+            // Token geçersiz/süresi dolmuş → temiz çıkış yap. Uzun oturumda 401'i request() sessizce yeniledi; yenileme
+            // anahtarı varken buraya düşen hata ağ/sunucu kaynaklıdır ya da çıkış işleyicide yapılmıştır: oturum burada silinmez.
+            const hasRefresh = await Storage.getItemAsync(REFRESH_KEY).catch(() => null);
+            if ((e?.status === 401 || e?.status === 403) && !hasRefresh) {
               await Storage.deleteItemAsync(TOKEN_KEY);
               await Storage.deleteItemAsync(USER_KEY);
               if (!cancelled) {
@@ -264,12 +296,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Oturumu kaydet: erişim + (varsa) yenileme anahtarı. Eski sunucu yenileme anahtarı vermezse davranış eskisi gibidir.
+  const saveSession = useCallback(async (data: any) => {
+    const t = sessionTokensOf(data);
+    if (!t) throw { message: "Giriş yanıtı okunamadı.", status: 500 };
+    setToken(t.access);
+    await Storage.setItemAsync(TOKEN_KEY, t.access);
+    if (t.refresh) await Storage.setItemAsync(REFRESH_KEY, t.refresh);
+    else await Storage.deleteItemAsync(REFRESH_KEY);
+    return t.access;
+  }, []);
+
   const login = useCallback(async (email: string, password: string) => {
     // Web giriş akışı gibi e-posta küçük harfe çevrilir (sunucu web ucunda da böyle yapıyor).
     const data = await apiLogin(email.trim().toLowerCase(), password);
-    setToken(data.access_token);
+    await saveSession(data);
     setUser(data.user);
-    await Storage.setItemAsync(TOKEN_KEY, data.access_token);
     await Storage.setItemAsync(USER_KEY, JSON.stringify(data.user));
     try {
       const me = await getMe(data.access_token);
@@ -286,6 +328,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     pushTokenRef.current = null;
     if (authToken && pushToken && !opts?.sessionExpired) await unregisterPushToken(authToken, pushToken);
     await Storage.deleteItemAsync(TOKEN_KEY);
+    await Storage.deleteItemAsync(REFRESH_KEY);
     await Storage.deleteItemAsync(USER_KEY);
     await Storage.deleteItemAsync(PARASUT_CONNECTED_KEY);
     setToken(null);
@@ -302,17 +345,64 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     Notifications.setBadgeCountAsync(0).catch(() => {});
   }, []);
 
+  // Uzun oturum: 401'de ya da süresi yaklaşınca sessiz yenileme (aynı anda gelen isteklerde tek yenileme).
+  // Kullanıcı yalnız yenileme gerçekten reddedilirse çıkışa düşer; ağ/sunucu hatasında oturum korunur.
+  const refresh = useRef(
+    singleFlight(async (): Promise<string | null> => {
+      const rt = await Storage.getItemAsync(REFRESH_KEY).catch(() => null);
+      if (!rt) return null;
+      try {
+        const t = await refreshSession(rt);
+        tokenRef.current = t.access;
+        setToken(t.access);
+        await Storage.setItemAsync(TOKEN_KEY, t.access);
+        if (t.refresh) await Storage.setItemAsync(REFRESH_KEY, t.refresh);
+        return t.access;
+      } catch (e) {
+        if (refreshFailureKind(e) === "rejected") throw Object.assign(new Error("rejected"), { rejected: true });
+        return null;
+      }
+    })
+  ).current;
+
   // Oturumu sona eren (401) ve aboneliği kilitlenen (403) çağrıları tek yerden yakala.
-  // Oturum 24 saatte dolar ve yenilenmez; uygulama açıkken dolarsa giriş ekranına dönülür.
   useEffect(() => {
     setSessionHandlers({
       onUnauthorized: () => {
         logout({ sessionExpired: true }).catch(() => {});
       },
+      onRefresh: async (stale) => {
+        // Başka bir istek zaten yeniledi: güncel anahtarla tekrar.
+        if (tokenRef.current && tokenRef.current !== stale) return tokenRef.current;
+        const hasRefresh = await Storage.getItemAsync(REFRESH_KEY).catch(() => null);
+        if (!hasRefresh) {
+          // Eski oturum (yenileme anahtarı yok): eskisi gibi giriş ekranına dönülür.
+          logout({ sessionExpired: true }).catch(() => {});
+          return null;
+        }
+        try {
+          return await refresh();
+        } catch (e: any) {
+          if (e?.rejected) logout({ sessionExpired: true }).catch(() => {});
+          return null;
+        }
+      },
       onSubscriptionLocked: (message) => setSubscriptionLock(message),
     });
     return () => setSessionHandlers({});
-  }, [logout]);
+  }, [logout, refresh]);
+
+  // Uygulama öne gelince süresi yaklaşan erişim anahtarı yenilenir (istekler 401 görmeden).
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (st) => {
+      if (st === "active" && tokenRef.current && refreshDue(tokenRef.current)) {
+        refresh().catch((e: any) => {
+          if (e?.rejected) logout({ sessionExpired: true }).catch(() => {});
+        });
+      }
+    });
+    return () => sub.remove();
+  }, [refresh, logout]);
 
   const loadAccounting = useCallback(async (authToken: string) => {
     try {
@@ -455,11 +545,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         await hydrateNotifications();
         if (Platform.OS === "android") {
+          const chv = await Storage.getItemAsync(ORDERS_CHANNEL_VERSION_KEY).catch(() => null);
+          if (chv !== ORDERS_CHANNEL_VERSION) {
+            await Notifications.deleteNotificationChannelAsync(ORDERS_CHANNEL_ID).catch(() => {});
+            await Storage.setItemAsync(ORDERS_CHANNEL_VERSION_KEY, ORDERS_CHANNEL_VERSION).catch(() => {});
+          }
           await Notifications.setNotificationChannelAsync(ORDERS_CHANNEL_ID, {
             name: "Yeni Siparişler",
             description: "Yeni sipariş geldiğinde bildirim",
             importance: Notifications.AndroidImportance.MAX,
-            sound: "cha_ching.wav",
+            sound: ORDER_SOUND,
             vibrationPattern: [0, 300, 200, 300],
             enableLights: true,
             lightColor: "#22C55E",
@@ -470,33 +565,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         const { status: existing } = await Notifications.getPermissionsAsync();
-        let finalStatus = existing;
-        if (existing !== "granted") {
-          const { status } = await Notifications.requestPermissionsAsync({
-            ios: {
-              allowAlert: true,
-              allowBadge: true,
-              allowSound: true,
-              allowCriticalAlerts: false,
-              provideAppNotificationSettings: false,
-              allowProvisional: false,
-            },
-          });
-          finalStatus = status;
-        }
-
+        setPushStatus(existing);
+        const finalStatus = existing;
+        // Sistem izni önce açıklama ekranından sonra istenir (PushPrompt → enableNotifications); burada yalnız
+        // daha önce verilmiş izinle kayıt yapılır.
         // Register Expo Push Token with backend for server-side push delivery
-        if (finalStatus === "granted") {
-          try {
-            const pushTokenData = await Notifications.getExpoPushTokenAsync({
-              projectId: "90de2c08-4e66-4c91-a4f7-f5aa27669d82",
-            });
-            if (pushTokenData.data && token) {
-              await registerPushToken(token, pushTokenData.data);
-              pushTokenRef.current = pushTokenData.data;
-            }
-          } catch {}
-        }
+        if (finalStatus === "granted" && token) await registerDevicePush(token);
 
         const rawSeen = await Storage.getItemAsync(SEEN_ORDER_IDS_KEY);
         const parsed = rawSeen ? JSON.parse(rawSeen) : [];
@@ -533,6 +607,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [token]);
 
+  // Bu cihazın Expo push belirtecini sunucuya kaydeder (çıkışta silinir).
+  const registerDevicePush = useCallback(async (authToken: string) => {
+    try {
+      const pushTokenData = await Notifications.getExpoPushTokenAsync({ projectId: "90de2c08-4e66-4c91-a4f7-f5aa27669d82" });
+      if (pushTokenData.data) {
+        await registerPushToken(authToken, pushTokenData.data);
+        pushTokenRef.current = pushTokenData.data;
+      }
+    } catch {}
+  }, []);
+
+  // Açıklama ekranından sonra sistem izni; verilirse kayıt. Sonuç durumu döner.
+  const enableNotifications = useCallback(async () => {
+    try {
+      const { status } = await Notifications.requestPermissionsAsync({
+        ios: { allowAlert: true, allowBadge: true, allowSound: true, allowCriticalAlerts: false, provideAppNotificationSettings: false, allowProvisional: false },
+      });
+      setPushStatus(status);
+      if (status === "granted" && tokenRef.current) await registerDevicePush(tokenRef.current);
+      return status;
+    } catch {
+      return "denied";
+    }
+  }, [registerDevicePush]);
+  const dismissPushPrompt = useCallback(async () => {
+    setPushPromptAt(Date.now());
+    await Storage.setItemAsync(PUSH_PROMPT_KEY, String(Date.now())).catch(() => {});
+  }, []);
+
   const value = useMemo(
     () => ({
       token,
@@ -548,8 +651,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       accountingProgram,
       accountingLoaded,
       reloadAccounting,
+      pushStatus,
+      pushPromptAt,
+      enableNotifications,
+      dismissPushPrompt,
     }),
     [
+      pushStatus,
+      pushPromptAt,
+      enableNotifications,
+      dismissPushPrompt,
       token,
       user,
       bootLoading,
