@@ -54,3 +54,13 @@ export const hhmmValid = (v: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(
 export const toggleMuted = (list: string[], key: string) => (list.includes(key) ? list.filter((k) => k !== key) : [...list, key]);
 export const quietLabel = (q: { enabled?: boolean; start?: string; end?: string } | null | undefined) =>
   q?.enabled ? `${q.start} – ${q.end} arası sessiz` : "Kapalı";
+
+// Uygulama rozeti = bekleyen (işlenmemiş) sipariş sayısı; push yükündeki `badge` ile aynı tanım. Okunamazsa null (rozete dokunulmaz).
+export function badgeFromStats(stats: any): number | null {
+  const g = Number(stats?.groups?.pending);
+  if (Number.isFinite(g)) return Math.max(0, Math.floor(g));
+  const p = Number(stats?.pending);
+  const q = Number(stats?.processing);
+  if (Number.isFinite(p) || Number.isFinite(q)) return Math.max(0, Math.floor((Number.isFinite(p) ? p : 0) + (Number.isFinite(q) ? q : 0)));
+  return null;
+}

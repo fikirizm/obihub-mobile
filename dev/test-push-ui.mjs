@@ -61,4 +61,12 @@ t("bildirim tercihleri: sessiz saat HH:MM, kanal susturma aç/kapa (kısmi PATCH
   assert.equal(m.quietLabel({ enabled: false, start: "23:00", end: "07:00" }), "Kapalı");
 });
 
+t("rozet: bekleyen sipariş sayısı (stats.groups.pending; eski sunucuda pending+processing); geçersizde null", () => {
+  assert.equal(m.badgeFromStats({ groups: { pending: 4 }, pending: 9, processing: 9 }), 4);
+  assert.equal(m.badgeFromStats({ pending: 3, processing: 2 }), 5);
+  assert.equal(m.badgeFromStats({ groups: { pending: -2 } }), 0);
+  assert.equal(m.badgeFromStats(null), null);
+  assert.equal(m.badgeFromStats({}), null);
+});
+
 console.log(`\n${n} test geçti`);

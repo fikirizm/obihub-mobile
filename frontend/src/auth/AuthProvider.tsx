@@ -9,6 +9,7 @@ import {
   getAccountingSettings,
   getMe,
   getOrders,
+  getOrderStats,
   getSupportNotifications,
   login as apiLogin,
   logoutSession,
@@ -24,7 +25,7 @@ import {
 import { deviceIdValid, fallbackToLegacy, loginStep, newDeviceId, requestCodeBody, verifyCodeBody, type DeviceCtx } from "../mobile-auth";
 import Constants from "expo-constants";
 import { refreshDue, refreshFailureKind, singleFlight } from "../session-refresh";
-import { orderNotificationText } from "../push-ui";
+import { badgeFromStats, orderNotificationText } from "../push-ui";
 import { AppState } from "react-native";
 import { displayOrderNo, formatOrderDateTime, isNewOrderStatus, providerLabel } from "../utils";
 import { clearCatalogCache } from "../catalogCache";
@@ -250,7 +251,6 @@ async function scheduleOrderNotification(orders: Order[]) {
       ...(subtitle ? { subtitle } : {}),
       body,
       sound: ORDER_SOUND,
-      badge: 1,
       data: { order_id: first.id, provider: firstProvider },
       ...(attachments.length > 0 ? { attachments } : {}),
     },
@@ -597,8 +597,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let stopped = false;
     let timer: ReturnType<typeof setInterval> | null = null;
 
+    // Rozet = bekleyen sipariş sayısı (push yükündeki badge ile aynı tanım); siparişler işlendikçe düşer.
+    const syncBadge = async () => {
+      try {
+        const n = badgeFromStats(await getOrderStats(token));
+        if (n !== null && !stopped) await Notifications.setBadgeCountAsync(n);
+      } catch {}
+    };
+    const appSub = AppState.addEventListener("change", (st) => {
+      if (st === "active") syncBadge();
+    });
+
     const poll = async () => {
       if (stopped) return;
+      syncBadge();
       try {
         const seen = seenOrderIdsRef.current;
         // Uygulama arka plandayken sunucu push'u ile bildirilmiş siparişleri tekrar bildirme.
@@ -705,6 +717,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       stopped = true;
       if (timer) clearInterval(timer);
+      appSub.remove();
     };
   }, [token]);
 
