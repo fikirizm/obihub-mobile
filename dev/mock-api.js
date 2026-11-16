@@ -1356,6 +1356,36 @@ http
         return send(res, 200, { ok: true, archived: inv.archived });
       });
     }
+    // Dalga 3: çekler (portföy; kasaya girmez).
+    state.cheques = state.cheques || [{ id: "chq1", direction: "received", status: "portfoy", status_label: "Portföyde", amount: "2500.00", currency: "TRY", cheque_no: "A-1001", bank_name: "Garanti", due_date: "2026-11-20", days_to_due: 4, due_state: "soon", customer_name: "Elif Kaya", invoices: [{ invoice_id: "li1", invoice_number: "OBI2026101", amount: "2500.00" }], detached: false, actions: { collect: true, endorse: true, return: true, pay: false, delete: true, receipt: true } }];
+    let chm;
+    if (path === "/cheques" && req.method === "GET") {
+      const dir = url.searchParams.get("direction") || "received"; const st = url.searchParams.get("status") || "";
+      const all = state.cheques.filter((c) => c.direction === dir && c.status !== "silindi");
+      const tot = {}; all.forEach((c) => { (tot[c.status] = tot[c.status] || [{ currency: c.currency, amount: "0.00", count: 0 }]); tot[c.status][0].amount = (Number(tot[c.status][0].amount) + Number(c.amount)).toFixed(2); tot[c.status][0].count++; });
+      const items = all.filter((c) => !st || (st === "due_soon" ? c.due_state === "soon" : c.status === st));
+      return send(res, 200, { items, totals: tot, due_soon: [{ currency: "TRY", amount: "2500.00", count: 1 }], overdue: [] });
+    }
+    if (path === "/cheques/suppliers") return send(res, 200, { items: [{ party_id: "s1", name: "Kargo Lojistik A.Ş.", open_payables: [] }] });
+    if (path === "/cheques/receive" && req.method === "POST") return readBody((b) => {
+      if (!req.headers["idempotency-key"]) return send(res, 422, { code: "IDEMPOTENCY_KEY_REQUIRED", detail: "Anahtar gerekli." });
+      if (!b.due_date) return send(res, 422, { code: "CHEQUE_DUE_REQUIRED", detail: "Çekin vade tarihini girin." });
+      const c = { id: "chq" + Date.now(), direction: "received", status: "portfoy", status_label: "Portföyde", amount: b.amount, currency: "TRY", cheque_no: b.cheque_no || "", bank_name: b.bank_name || "", due_date: b.due_date, days_to_due: 10, due_state: "later", customer_name: b.drawer || "Müşteri", invoices: b.invoice_id ? [{ invoice_id: b.invoice_id, invoice_number: "", amount: b.amount }] : [], detached: false, actions: { collect: true, endorse: true, return: true, pay: false, delete: true, receipt: true } };
+      state.cheques.unshift(c);
+      const inv = b.invoice_id && localInvoices.find((x) => x.id === b.invoice_id);
+      if (inv) { inv.payments.push({ id: "pc" + Date.now(), amount: Number(b.amount), date: b.date || "2026-11-16", method: "cek", source: "cheque" }); inv.paid_amount += Number(b.amount); inv.remaining_amount -= Number(b.amount); }
+      console.log("WRITE CHEQUE RECEIVE", JSON.stringify(b)); return send(res, 200, { cheque: c, replayed: false });
+    });
+    if ((chm = path.match(/^\/cheques\/([^/]+)(?:\/(collect|endorse|return|pay))?$/)) && (req.method === "POST" || req.method === "DELETE")) {
+      const c = state.cheques.find((x) => x.id === chm[1]);
+      if (!c) return send(res, 404, { code: "CHEQUE_NOT_FOUND", detail: "Çek bulunamadı." });
+      return readBody((b) => {
+        const to = { collect: ["tahsil_edildi", "Tahsil edildi"], endorse: ["ciro_edildi", "Ciro edildi"], return: [b.reason === "bounced" ? "karsiliksiz" : "iade_edildi", b.reason === "bounced" ? "Karşılıksız" : "İade edildi"], pay: ["odendi", "Ödendi"] }[chm[2]] || ["silindi", "Silindi"];
+        if (chm[2] === "collect" && String(b.account_id || "").startsWith("prs")) return send(res, 409, { code: "MIRROR_ACCOUNT_READ_ONLY", detail: "Paraşüt hesabına tahsil edilemez." });
+        c.status = to[0]; c.status_label = to[1]; c.actions = { delete: true, receipt: true };
+        console.log("WRITE CHEQUE", req.method, path, JSON.stringify(b)); return send(res, 200, { cheque: c });
+      });
+    }
     // Dalga 2: yaşlandırma, tahsilat takibi, hatırlatma, cari zaman çizelgesi ve notlar.
     if (path === "/reports/aging") {
       const z = { current: "0.00", "1-30": "0.00", "31-60": "0.00", "61-90": "0.00", "90+": "0.00" };
@@ -1466,6 +1496,7 @@ http
       }
       return readBody((b) => {
         // Aşama 4 P2: anahtar (aynı anahtar → ilk sonuç + replayed); /__mode?payFail=1 → işlenir ama 500 (bir kez).
+        if (["cek", "çek"].includes(String(b.method || "").toLowerCase())) return send(res, 422, { code: "CHEQUE_USE_CHEQUES", detail: "Çekle tahsilat Çekler ekranından alınır." });
         const pk = req.headers["idempotency-key"];
         console.log("INV-PAY key=" + (pk || "-") + " account=" + (b.account_id || "-"));
         if (pk && payKeys.has(pk)) return send(res, 200, { ...payKeys.get(pk), replayed: true });

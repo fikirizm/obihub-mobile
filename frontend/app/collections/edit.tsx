@@ -16,6 +16,9 @@ import {
   collectionEditInPlace,
   collectionErrorText,
   collectionMethods,
+} from "../../src/collection-actions";
+import { editMethods } from "../../src/cheques";
+import {
   collectionWarnings,
   collectionWriteKind,
   EDIT_TEXT,
@@ -74,7 +77,8 @@ export default function CollectionEditScreen() {
   const { colors } = useTheme();
   const { toast } = useFeedback();
   const mayWrite = canManage(user, "billing") || canManage(user, "customers");
-  const methods = c ? collectionMethods(c.type) : [];
+  // Dalga 3: "Çek" yalnız eski satır zaten çekliyse kalır (yeni kasa yöntemi değil).
+  const methods = c ? editMethods(collectionMethods(c.type), c.method) : [];
 
   const [accounts, setAccounts] = useState<CashAccount[] | null>(null);
   const [amountText, setAmountText] = useState(() => trAmount(c?.amount));

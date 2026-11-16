@@ -232,6 +232,17 @@ export default function FinanceScreen() {
           ) : null}
           {financeRead ? (
             <ListRow
+              testID="finance-cheques"
+              divider
+              leading={<IconTile tint={colors.infoBg}><ReceiptIcon size={18} color={colors.info} /></IconTile>}
+              title="Çekler"
+              subtitle="Portföy, vadeler, tahsil ve ciro"
+              chevron
+              onPress={() => router.push("/cheques" as any)}
+            />
+          ) : null}
+          {financeRead ? (
+            <ListRow
               testID="finance-income-expense"
               divider
               leading={<IconTile tint={colors.successBg}><ChartIcon size={18} color={colors.success} /></IconTile>}

@@ -45,8 +45,10 @@ export function collectionPath(c: Collection): string {
 }
 
 // Ekstre satırı → gösterilecek düğmeler (yoksa null).  Değerler tam olarak `true` olmalı.
-export function ledgerRowActions(row: { collection?: Collection | null; actions?: { edit?: unknown; void?: unknown } | null }): RowActions | null {
+export function ledgerRowActions(row: { source?: string; collection?: Collection | null; actions?: { edit?: unknown; void?: unknown } | null }): RowActions | null {
   if (!row?.collection || !row.actions) return null;
+  // Dalga 3: çekli satır salt okunur (sunucu 409 COLLECTION_IS_CHEQUE); çek işlemleri Çekler ekranından.
+  if (row.source === "cheque" || (row.collection as any)?.source === "cheque") return null;
   const a = { edit: row.actions.edit === true, void: row.actions.void === true };
   return a.edit || a.void ? a : null;
 }
@@ -94,19 +96,20 @@ function parasutPayState(p: InvoicePaymentLike): string {
 export function invoicePaymentActions(
   inv: InvoiceLike,
   p: InvoicePaymentLike
-): (RowActions & { customerPayment: boolean; offset: boolean; release: boolean }) | null {
+): (RowActions & { customerPayment: boolean; offset: boolean; release: boolean; cheque: boolean }) | null {
   if (!p?.id || p.void_op) return null;
+  if (p.source === "cheque") return { edit: false, void: false, customerPayment: false, offset: false, release: false, cheque: true };
   // Dalga 2: mahsup tahsilat değil (sunucu sil/düzenlemede 409 COLLECTION_IS_OFFSET); yalnız "Geri al" (geri alınırken gizli).
   if (p.source === "offset")
-    return { edit: false, void: false, customerPayment: false, offset: true, release: Boolean(p.offset_id) && p.offset_status !== "releasing" };
-  if (p.source === "customer_payment") return { edit: false, void: false, customerPayment: true, offset: false, release: false };
+    return { edit: false, void: false, customerPayment: false, offset: true, release: Boolean(p.offset_id) && p.offset_status !== "releasing", cheque: false };
+  if (p.source === "customer_payment") return { edit: false, void: false, customerPayment: true, offset: false, release: false, cheque: false };
   const editable =
     !["iptal", "taslak"].includes(String(inv.status || "")) &&
     inv.invoice_type !== "teklif" &&
     inv.parasut_item_type !== "refund" &&
     inv.money_state !== "refund" &&
     inv.edoc_state !== "blocked_mismatch";
-  return { edit: editable, void: true, customerPayment: false, offset: false, release: false };
+  return { edit: editable, void: true, customerPayment: false, offset: false, release: false, cheque: false };
 }
 
 export const offsetReleasePath = (invoiceId: string, offsetId: string) => `/local-invoices/${enc(invoiceId)}/offsets/${enc(offsetId)}`;

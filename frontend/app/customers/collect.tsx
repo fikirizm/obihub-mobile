@@ -29,6 +29,7 @@ import {
   type AllocationMode,
 } from "../../src/allocation";
 import { CUSTOMER_METHODS } from "../../src/collection-actions";
+import { isChequeMethod } from "../../src/cheques";
 import { moneySubmitLabel, useMoneyWrite } from "../../src/useMoneyWrite";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
@@ -143,6 +144,15 @@ export default function CustomerCollectScreen() {
     setTried(true);
     if (!token || write.blocked) return;
     if (amt === null || amt <= 0n || !date) return;
+    // Dalga 3: çek kasa tahsilatı değil — çek alma ekranına (aynı tutar ve dağıtımla) geçilir; çek portföye girer.
+    if (isChequeMethod(method)) {
+      const aErr0 = invoices.length ? collectAllocationError(mode, alloc, amt) : "";
+      setAllocError(aErr0);
+      if (aErr0) return;
+      const allocs = invoices.length ? allocationBody(mode, alloc.items) : undefined;
+      router.replace({ pathname: "/cheques/receive", params: { customerId: id, amount: fromMinor(amt), title: String(params.name || ""), ...(allocs && allocs.length ? { allocations: JSON.stringify(allocs) } : {}) } } as any);
+      return;
+    }
     if (accounts === null) return;
     if (accounts.length > 0 && !accountId) return;
     const aErr = invoices.length ? collectAllocationError(mode, alloc, amt) : "";

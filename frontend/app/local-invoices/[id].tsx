@@ -17,6 +17,7 @@ import { Linking, Platform } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import { printOrShare } from "../../src/pdf";
 import { canOfficializeReturn } from "../../src/officialize";
+import { cashMethods } from "../../src/cheques";
 import { CollectionFollowupCard } from "../../src/components/CollectionFollowupCard";
 import { autoSettlementText, canUnmatch, UNMATCH_CONFIRM, unmatchDoneText, unmatchErrorText } from "../../src/cari-ui";
 import { runVoidCollection } from "../../src/collection-flow";
@@ -287,7 +288,8 @@ export default function LocalInvoiceDetailScreen() {
       initial: remaining,
       decimal: true,
       noteLabel: "Not (isteğe bağlı)",
-      methods: [...PAYMENT_METHODS],
+      // Dalga 3: çek kasa tahsilatı değil (422 CHEQUE_USE_CHEQUES) — "Çekle tahsil et" ayrı akış.
+      methods: cashMethods(PAYMENT_METHODS),
       accounts: usable.map((a) => ({ value: a.id, label: accountOptionLabel(a, usable.length > 1) })),
       accountsLabel: usable.length > 0 ? "Hesap" : undefined,
     });
@@ -551,6 +553,16 @@ export default function LocalInvoiceDetailScreen() {
         {canOfficialize || canCollect ? (
           <SafeAnimatedView entering={FadeInDown.delay(80).duration(380)} style={styles.actions}>
             {canCollect ? <Button testID="invoice-collect" label="Tahsilat ekle" busy={busy === "payment"} disabled={Boolean(busy)} onPress={onCollect} style={{ flex: 1 }} /> : null}
+            {canCollect && cur === "TRY" ? (
+              <Button
+                testID="invoice-cheque"
+                label="Çek al"
+                variant="secondary"
+                disabled={Boolean(busy)}
+                onPress={() => router.push({ pathname: "/cheques/receive", params: { invoiceId: inv.id, amount: String(remaining.toFixed(2)), title: [inv.invoice_number, inv.customer_name].filter(Boolean).join(" · "), drawer: inv.customer_name || "" } } as any)}
+                style={{ flex: 1 }}
+              />
+            ) : null}
             {canOfficialize ? (
               <Button testID="invoice-officialize" label="Resmileştir" variant="secondary" busy={busy === "official"} disabled={Boolean(busy)} onPress={onOfficialize} style={{ flex: 1 }} />
             ) : null}
@@ -714,9 +726,9 @@ export default function LocalInvoiceDetailScreen() {
                       <WalletIcon size={18} color={colors.emerald} />
                     </IconTile>
                   }
-                  title={(p as any).source === "offset" ? "Mahsup" : PAYMENT_METHODS.find((m) => m.value === p.method)?.label || p.method || "Ödeme"}
+                  title={(p as any).source === "cheque" ? "Çek" : (p as any).source === "offset" ? "Mahsup" : PAYMENT_METHODS.find((m) => m.value === p.method)?.label || p.method || "Ödeme"}
                   subtitle={formatDate(p.date)}
-                  meta={(p as any).source === "offset" ? ((p as any).offset_status === "releasing" ? "Geri alınıyor…" : "Alış belgesiyle karşılıklı kapatıldı") : acts?.customerPayment ? ((p as any).auto ? "Cari alacaktan mahsup" : "Cari tahsilatından eşleşme") : p.notes || undefined}
+                  meta={(p as any).source === "cheque" ? "Portföyde · Çekler ekranından yönetilir" : (p as any).source === "offset" ? ((p as any).offset_status === "releasing" ? "Geri alınıyor…" : "Alış belgesiyle karşılıklı kapatıldı") : acts?.customerPayment ? ((p as any).auto ? "Cari alacaktan mahsup" : "Cari tahsilatından eşleşme") : p.notes || undefined}
                   trailing={<Text style={amount(colors.success)}>{formatMoney(p.amount, cur)}</Text>}
                 />
                 {ps ? (
