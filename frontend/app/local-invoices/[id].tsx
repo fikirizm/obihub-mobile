@@ -665,6 +665,17 @@ export default function LocalInvoiceDetailScreen() {
               {mayWrite && lc.archive ? (
                 <Button testID="invoice-archive" size="sm" variant="secondary" label={inv.archived ? "Arşivden çıkar" : "Faturayı arşivle"} busy={busy === "archive"} disabled={Boolean(busy)} onPress={onArchive} />
               ) : null}
+              {/* Dalga 5a: faturadan irsaliye (yalnız stok çıkışı faturayla yapılmamışsa; aksi 409 INVOICE_MOVES_STOCK). */}
+              {canManage(user, "inventory") && inv.invoice_type !== "iade" && inv.invoice_type !== "teklif" && !isCancelled && inv.status !== "taslak" && (inv as any).stock_mode !== "with_document" ? (
+                <Button
+                  testID="invoice-dispatch"
+                  size="sm"
+                  variant="secondary"
+                  label="İrsaliye oluştur"
+                  disabled={Boolean(busy)}
+                  onPress={() => router.push({ pathname: "/dispatch/new", params: { invoiceId: inv.id, title: [inv.invoice_number, inv.customer_name].filter(Boolean).join(" · ") } } as any)}
+                />
+              ) : null}
               {canDelete ? <Button testID="invoice-delete" size="sm" variant="destructive" label="Faturayı sil" busy={busy === "delete"} disabled={Boolean(busy)} onPress={onDelete} /> : null}
               <Button
                 testID="invoice-events"

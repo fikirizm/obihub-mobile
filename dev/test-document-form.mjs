@@ -162,4 +162,11 @@ t("teklif doğrulaması: tarih metni ve geçerlilik tarihi teklif tarihinden ön
   assert.equal(m.validateForm({ ...base(), due_date: "2026-11-01" }, { docType: "quote" }).due, undefined);
 });
 
+t("Dalga 5a: fiyat listesi — müşterinin listesinde ürün fiyatı varsa net birim fiyat (Türkçe metin)", () => {
+  const r = { price_list: { id: "pl1", name: "Bayi" }, prices: { p1: { unit_price: "120.5000", gross_unit_price: "144.60", source: "list" } } };
+  assert.deepEqual(m.listPrice(r, "p1"), { price: "120,50", listName: "Bayi" });
+  assert.equal(m.listPrice(r, "p2"), null);
+  assert.equal(m.listPrice({ price_list: null, prices: {} }, "p1"), null);
+  assert.equal(m.listPrice({ price_list: { name: "Bayi" }, reason: "expired", prices: {} }, "p1"), null);
+});
 console.log(`\n${n} test geçti`);

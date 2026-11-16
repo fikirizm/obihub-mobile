@@ -94,6 +94,17 @@ export default function MenuScreen() {
               onPress={() => router.push("/products")}
             />
           ) : null}
+          {canAccess(user, "inventory") ? (
+            <ListRow
+              testID="menu-dispatch"
+              divider
+              leading={<IconTile tint={colors.primarySoft}><PackageIcon size={18} color={colors.primary} /></IconTile>}
+              title="İrsaliyeler"
+              subtitle="Giden ve gelen irsaliyeler, e-İrsaliye"
+              chevron
+              onPress={() => router.push("/dispatch" as any)}
+            />
+          ) : null}
           {hepsijet ? (
             <ListRow
               testID="menu-hepsijet"

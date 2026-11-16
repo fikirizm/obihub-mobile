@@ -6,6 +6,7 @@ import { spacing, tabular, type } from "../theme/tokens";
 import { displayOrderNo, displayOrderStatus, formatTry, providerLabel, relativeDateLabel, statusKindFromOrder } from "../utils";
 import type { Order } from "../types";
 import { rememberOrderRow } from "../api-siparis";
+import { returnBadge } from "../recurring";
 import type { StatusKind } from "../utils";
 import { PressableScale } from "./KPICard";
 import { PlatformLogo } from "./PlatformLogo";
@@ -22,6 +23,8 @@ export function OrderRow({ order, divider }: { order: Order; divider?: boolean }
   const status = displayOrderStatus(order, provider);
   const amount = formatTry(order.total_amount || 0);
   const kind = statusKindFromOrder(order, provider);
+  // Dalga 5a: pazaryeri iade talebi işareti (sipariş durumu ve stok değişmez).
+  const ret = returnBadge(order as any);
   const stripe: Record<StatusKind, string> = {
     warning: colors.warning,
     info: colors.info,
@@ -59,7 +62,8 @@ export function OrderRow({ order, divider }: { order: Order; divider?: boolean }
             <Text style={[type.footnote, tabular, styles.grow, { color: colors.textSecondary }]} numberOfLines={1} ellipsizeMode="middle">
               #{displayOrderNo(order)} · {relativeDateLabel(order)}
             </Text>
-            <View style={styles.fixed}>
+            <View style={[styles.fixed, { flexDirection: "row", gap: 4 }]}>
+              {ret ? <StatusBadge label={ret.label} kind={ret.kind} size="sm" /> : null}
               <StatusBadge label={status} kind={kind} size="sm" />
             </View>
           </View>

@@ -266,3 +266,13 @@ export function totalsRows(t: Record<string, any> | null | undefined, f: { stopa
   if (t.payable !== undefined && t.payable !== t.total) rows.push({ key: "payable", label: "Tahsil edilecek", amount: String(t.payable), strong: true });
   return rows;
 }
+
+// Dalga 5a (P5.4): POST /price-lists/resolve {customer_id, product_ids, date, currency} → müşterinin listesindeki ürün fiyatı
+// (net birim fiyat; form price_basis "net"). Liste yoksa / süresi dolmuşsa / ürün listede değilse null (ürün kartı fiyatı kalır).
+export function listPrice(resp: any, productId: string): { price: string; listName: string } | null {
+  const p = resp?.prices?.[productId];
+  if (!resp?.price_list || !p || p.unit_price == null) return null;
+  const n = Number(p.unit_price);
+  if (!Number.isFinite(n)) return null;
+  return { price: n.toFixed(2).replace(".", ","), listName: String(resp.price_list.name || "Fiyat listesi") };
+}

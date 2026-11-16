@@ -35,8 +35,7 @@ import {
   WITHHOLDING_RATES,
   type DocForm,
   type DocLine,
-  type DocType,
-} from "../document-form";
+  type DocType, listPrice } from "../document-form";
 import { convertText, quoteActions, quoteOutcomeView } from "../quote-status";
 import { lifecycleActions, amountsLockNote } from "../document-lifecycle";
 import { StatusBadge } from "../components/StatusBadge";
@@ -256,6 +255,17 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
     setForm((f) => ({ ...f, lines: [...f.lines, line] }));
     setProductQuery("");
     setProductRows([]);
+    // Dalga 5a: müşterinin fiyat listesi varsa ürün fiyatı listeden gelir (POST /price-lists/resolve; liste yoksa kart fiyatı kalır).
+    if (p && token && form.customer_id) {
+      request<any>("/price-lists/resolve", { method: "POST", body: JSON.stringify({ customer_id: form.customer_id, product_ids: [p.id], date: form.issue_date, currency: "TRY" }) }, token)
+        .then((r) => {
+          const lp = listPrice(r, p.id);
+          if (!lp) return;
+          setForm((f) => ({ ...f, lines: f.lines.map((x) => (x.line_key === line.line_key ? { ...x, price: lp.price } : x)) }));
+          toast(`Fiyat "${lp.listName}" listesinden alındı.`, "info");
+        })
+        .catch(() => undefined);
+    }
   };
   const removeLine = (key: string) => setForm((f) => ({ ...f, lines: f.lines.filter((l) => l.line_key !== key) }));
 

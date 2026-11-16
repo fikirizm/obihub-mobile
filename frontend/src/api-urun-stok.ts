@@ -264,7 +264,9 @@ export async function linkProductChannel(
     // Mobil web'den bir adım ileride: bağlantının mağazası ve (Trendyol) gönderim barkodu da kaydedilir.
     integration_id: input.integrationId,
   };
-  if (input.barcode && input.provider.toLowerCase() === "trendyol") body.barcode = input.barcode;
+  // Dalga 5a: Idefix eşleştirmesinde de seçilen ürünün barkodu gönderilir (web lib/linkChannel.buildLinkChannelBody ile aynı).
+  const bc = String(input.barcode || "").trim();
+  if (bc && ["trendyol", "idefix"].includes(input.provider.toLowerCase())) body.barcode = bc;
   return request<{ success?: boolean; message?: string }>(
     `/products/${encodeURIComponent(productId)}/link-channel`,
     { method: "POST", body: JSON.stringify(body) },

@@ -55,6 +55,8 @@ Object.assign(orders[0], {
   amount_breakdown: { subtotal: "449.70", shipping: "0.00", discount: "30.00", tax: null, total: "419.70" },
 });
 orders[9].status = "ready_to_ship";
+// Dalga 5a: pazaryeri iade talebi işareti.
+orders[1].return_request = { state: "requested", label: "İade talebi", claim_id: "cl1", provider: "trendyol", reason: "Beden uymadı" };
 Object.assign(orders[23], { hepsiburada_status: "Returned" });
 // backend/order_status.py group_filter ile aynı bölünme (her sipariş tam bir grup).
 function orderGroup(o) {
@@ -835,6 +837,44 @@ http
           { kind: "receivable", date: "2026-11-22", amount: 12850.5, currency: "TRY", title: "Can Öztürk", reference: "OBI2026104" },
           { kind: "payable", date: null, undated: true, amount: 1850, currency: "TRY", title: "Kırtasiye Ltd.", reference: "GF-91", source: "obihub" },
         ] });
+    // Dalga 5a: irsaliye, tekrarlayan belgeler, fiyat listesi.
+    state.notes5 = state.notes5 || [{ id: "dn-0001", direction: "out", number: "IRS-2026-000001", party_name: "Elif Kaya", customer_id: "c1", issue_date: "2026-11-15", shipment_date: "2026-11-15",
+      cargo: { carrier: "Aras Kargo", tracking_no: "AR123" }, lines: [{ line_key: "l-000000000001", product_id: "p1", product_name: "Deneme Ürün 1", quantity: "2", unit: "adet" }],
+      invoice_status: "not_invoiced", invoice_link: null, edoc: { status: "none" }, editable: true, deletable: true, can_invoice: true, can_send_edoc: true }];
+    let dnm;
+    if (path === "/dispatch-notes" && req.method === "GET") {
+      const dir = url.searchParams.get("direction") || "out"; const st = url.searchParams.get("status") || "";
+      return send(res, 200, { items: state.notes5.filter((n) => n.direction === dir && (!st || n.invoice_status === st)), next_cursor: null });
+    }
+    if (path === "/dispatch-notes/prefill") {
+      const oid = url.searchParams.get("order_id"); const iid = url.searchParams.get("invoice_id");
+      return send(res, 200, { direction: "out", party_name: "Elif Kaya", customer_id: "c1", issue_date: "2026-11-16", shipment_method: "cargo", cargo: { carrier: oid ? "Trendyol Express" : "", tracking_no: oid ? "TEX987" : "" },
+        order_id: oid || null, source_invoice_id: iid || null, order_no: oid ? "TY-1001" : "", lines: [{ product_id: "p2", product_name: "Deneme Ürün 2", quantity: "1", unit: "adet" }] });
+    }
+    if (path === "/dispatch-notes" && req.method === "POST") return readBody((b) => {
+      const n = { ...b, id: "dn-" + Date.now(), number: "IRS-2026-00000" + (state.notes5.length + 1), invoice_status: "not_invoiced", invoice_link: null, edoc: { status: "none" }, editable: true, deletable: true, can_invoice: true, can_send_edoc: true };
+      state.notes5.unshift(n); console.log("WRITE DISPATCH", req.headers["idempotency-key"], JSON.stringify(b).slice(0, 200)); return send(res, 201, { note: n, created: true, warnings: [] });
+    });
+    if (path === "/dispatch-notes/invoice" && req.method === "POST") return readBody((b) => {
+      (b.note_ids || []).forEach((id) => { const n = state.notes5.find((x) => x.id === id); if (n) { n.invoice_status = "invoiced"; n.invoice_link = { invoice_id: "li5", invoice_number: "", kind: "converted" }; n.can_invoice = false; n.deletable = n.editable = false; } });
+      console.log("WRITE DN INVOICE", JSON.stringify(b)); return send(res, 200, { invoice: { id: "li5", invoice_number: "" }, notes: b.note_ids });
+    });
+    if ((dnm = path.match(/^\/dispatch-notes\/([^/]+)(?:\/(e-dispatch|pdf))?$/))) {
+      const n = state.notes5.find((x) => x.id === dnm[1]);
+      if (!n) return send(res, 404, { code: "DISPATCH_NOT_FOUND", detail: "İrsaliye bulunamadı." });
+      if (dnm[2] === "pdf") { res.writeHead(200, { "Content-Type": "application/pdf", "Access-Control-Allow-Origin": "*" }); return res.end(Buffer.from("%PDF-1.4\n%mock\n")); }
+      if (dnm[2] === "e-dispatch") return readBody((b) => { if (b.confirm !== true) return send(res, 422, { code: "CONFIRMATION_REQUIRED", detail: "Onay gerekli." }); n.edoc = { status: "sent" }; n.can_send_edoc = false; n.editable = n.deletable = false; return send(res, 200, n); });
+      if (req.method === "DELETE") { state.notes5 = state.notes5.filter((x) => x !== n); return send(res, 200, { id: n.id, deleted: true }); }
+      return send(res, 200, n);
+    }
+    state.plans = state.plans || [{ id: "rp1", kind: "sales_invoice", kind_label: "Satış faturası", title: "Aylık bakım · Elif Kaya", frequency: "monthly", every: 1, start_date: "2026-10-05", status: "active", next_run_date: "2026-12-05", run_count: 2, source_invoice_id: "li1", summary: { customer_name: "Elif Kaya", source_number: "OBI2026101" } }];
+    if (path === "/recurring-documents") return send(res, 200, { items: state.plans, summary: {} });
+    if ((dnm = path.match(/^\/recurring-documents\/([^/]+)(?:\/(pause|resume))?$/))) {
+      const pl = state.plans.find((x) => x.id === dnm[1]); if (!pl) return send(res, 404, { code: "NOT_FOUND", detail: "Plan bulunamadı." });
+      if (dnm[2]) { pl.status = dnm[2] === "pause" ? "paused" : "active"; console.log("WRITE PLAN", dnm[2]); return send(res, 200, pl); }
+      return send(res, 200, { ...pl, runs: [{ period: "2026-11-05", status: "done", ref_type: "sales_invoice", issued: false, ref_number: "" }, { period: "2026-10-05", status: "done", ref_type: "sales_invoice", issued: true, ref_number: "OBI2026101" }] });
+    }
+    if (path === "/price-lists/resolve" && req.method === "POST") return readBody((b) => send(res, 200, { price_list: b.customer_id === "c1" ? { id: "pl1", name: "Bayi" } : null, reason: null, prices: b.customer_id === "c1" ? Object.fromEntries((b.product_ids || []).map((id) => [id, { unit_price: "77.5000", gross_unit_price: "93.00", source: "list" }])) : {}, date: b.date, exchange_rate_type: "selling" }));
     // Dalga 4: bakiye sabitleme, hareket geri alma, düşük stok, toplu sayım.
     let bam;
     if ((bam = path.match(/^\/finance\/accounts\/([^/]+)\/balance-at$/))) {

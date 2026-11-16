@@ -41,6 +41,7 @@ import {
 } from "../../src/utils";
 import { EmptyState } from "../../src/components/EmptyState";
 import { StatusBadge } from "../../src/components/StatusBadge";
+import { returnBadge } from "../../src/recurring";
 import { PlatformLogo } from "../../src/components/PlatformLogo";
 import {
   AlertIcon,
@@ -619,6 +620,15 @@ export default function OrderDetail() {
             </View>
           </View>
         </DetailHero>
+        {/* Dalga 5a: pazaryeri iade talebi — yalnız bilgi; stoğu geri alma web'deki öneriyle onaylanır, otomatik stok girişi yok. */}
+        {returnBadge(order as any) ? (
+          <View testID="order-return-request" style={{ marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: spacing.sm, borderRadius: 12, backgroundColor: colors.warningBg }}>
+            <Text style={[type.footnote, { color: colors.textPrimary }]}>
+              {[returnBadge(order as any)!.label, returnBadge(order as any)!.reason].filter(Boolean).join(" · ")}
+            </Text>
+            <Text style={[type.caption, { color: colors.textSecondary }]}>Sipariş durumu ve stok değişmez; iade gerçekleşince kanal durumuyla güncellenir.</Text>
+          </View>
+        ) : null}
 
         {isOffline ? (
           <View
@@ -994,6 +1004,18 @@ export default function OrderDetail() {
                   style={styles.flexBtn}
                 />
               ) : null}
+            </View>
+          ) : null}
+          {/* Dalga 5a: siparişten irsaliye (kargo firması/takip no dolu gelir; sipariş stoğu zaten düştüğü için irsaliye stoğa dokunmaz). */}
+          {canManage(user, "inventory") ? (
+            <View style={styles.actions}>
+              <Button
+                testID="order-dispatch-btn"
+                label="İrsaliye oluştur"
+                variant="ghost"
+                onPress={() => router.push({ pathname: "/dispatch/new", params: { orderId: String(order.id), title: String(order.channel_order_id || "") } } as any)}
+                style={styles.flexBtn}
+              />
             </View>
           ) : null}
         </SafeAnimatedView>

@@ -230,6 +230,17 @@ export default function FinanceScreen() {
               onPress={() => router.push("/cash")}
             />
           ) : null}
+          {billing ? (
+            <ListRow
+              testID="finance-recurring"
+              divider
+              leading={<IconTile tint={colors.infoBg}><ReceiptIcon size={18} color={colors.info} /></IconTile>}
+              title="Tekrarlayan belgeler"
+              subtitle="Abonelik faturaları, kira, banka giderleri"
+              chevron
+              onPress={() => router.push("/recurring" as any)}
+            />
+          ) : null}
           {financeRead ? (
             <ListRow
               testID="finance-cheques"
