@@ -10,7 +10,7 @@ import { PressableScale } from "../src/components/KPICard";
 import { ArrowLeftIcon, CheckIcon } from "../src/components/Icons";
 import { Button } from "../src/ui/Button";
 import { confirmPasswordReset, requestPasswordReset } from "../src/api";
-import { PASSWORD_HINT, passwordProblem, resetErrorText } from "../src/password-rule";
+import { PASSWORD_HINT, passwordProblem, requestCodeErrorText, resetErrorText } from "../src/password-rule";
 
 type Step = "email" | "code";
 
@@ -37,7 +37,7 @@ export default function ForgotPasswordScreen() {
       await requestPasswordReset(email.trim().toLowerCase());
       setStep("code");
     } catch (e: any) {
-      setError(e?.message || "Kod gönderilemedi. Lütfen tekrar deneyin.");
+      setError(requestCodeErrorText(e));
     } finally {
       setLoading(false);
     }

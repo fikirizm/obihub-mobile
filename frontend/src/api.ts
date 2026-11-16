@@ -4,6 +4,7 @@ import Constants from "expo-constants";
 
 import { otherCurrencyRevenue } from "./currency-lines";
 import { isAccountInactive, isAccountWritable } from "./account-pick";
+import { RESET_REQUEST_PATH } from "./password-rule";
 import type {
   CatalogProduct,
   ChannelRef,
@@ -481,7 +482,8 @@ export async function enqueueOrderCloudPrint(token: string, orderId: string, bar
 
 export async function requestPasswordReset(email: string) {
   return request<{ success: boolean; message: string; expires_in?: number }>(
-    "/auth/password-reset/request-code",
+    // 17 Kas 2026: mobil uç (Turnstile belirteci istemez); 200 gövdesi kayıtlı/kayıtsız e-postada aynıdır.
+    RESET_REQUEST_PATH,
     { method: "POST", body: JSON.stringify({ email }) }
   );
 }

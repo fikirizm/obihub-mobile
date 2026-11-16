@@ -42,4 +42,22 @@ t("sunucu PASSWORD_WEAK: sunucunun metni gösterilir, yoksa kural metni", () => 
   assert.match(m.resetErrorText({}), /Kodu kontrol/);
 });
 
+t("17 Kas: mobil şifre sıfırlama kodu yeni uçtan (Turnstile yok)", () => {
+  assert.equal(m.RESET_REQUEST_PATH, "/auth/mobile/password-reset/request-code");
+});
+t("17 Kas: kod isteme hataları — 429 bekleme süresiyle, 422 biçim, MAIL_UNAVAILABLE", () => {
+  assert.equal(m.requestCodeErrorText({ status: 429, code: "RATE_LIMITED", retryAfter: 45, message: "Çok sık." }), "Çok sık istek gönderildi. 45 saniye sonra yeniden deneyin.");
+  assert.equal(m.requestCodeErrorText({ status: 429, retryAfter: 600, message: "" }), "Çok sık istek gönderildi. 10 dakika sonra yeniden deneyin.");
+  assert.equal(m.requestCodeErrorText({ status: 429, message: "Sunucu metni." }), "Sunucu metni.");
+  assert.equal(m.requestCodeErrorText({ status: 422, message: "Sunucu hatası (422)" }), "Geçerli bir e-posta adresi girin.");
+  assert.match(m.requestCodeErrorText({ status: 400, code: "MAIL_UNAVAILABLE", message: "" }), /e-posta gönderimi/i);
+  assert.equal(m.requestCodeErrorText({ status: 500, message: "" }), "Kod gönderilemedi. Lütfen tekrar deneyin.");
+});
+t("17 Kas: onay hata kodları", () => {
+  assert.match(m.resetErrorText({ code: "CODE_INVALID", message: "" }), /hatalı/);
+  assert.match(m.resetErrorText({ code: "CODE_LOCKED", message: "" }), /5 yanlış deneme/);
+  assert.match(m.resetErrorText({ code: "CODE_EXPIRED", message: "" }), /süresi doldu/);
+  assert.match(m.resetErrorText({ code: "CODE_NOT_FOUND", message: "" }), /yeni kod/i);
+  assert.equal(m.resetErrorText({ code: "CODE_INVALID", message: "Kod hatalı, 3 deneme kaldı." }), "Kod hatalı, 3 deneme kaldı.");
+});
 console.log(`\n${n} test geçti`);

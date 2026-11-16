@@ -368,7 +368,13 @@ http
     if (state.expire && req.headers.authorization === "Bearer acc-old") return send(res, 401, { detail: "Oturum süresi doldu." });
     if (path === "/auth/login") return send(res, 200, { access_token: "test-token", token_type: "bearer", user });
     // Şifre sıfırlama (sunucu kuralı: en az 8, harf + rakam, e-postayla aynı değil → 400 PASSWORD_WEAK). /__mode?pwWeak=1 → bir kez zayıf say.
-    if (path === "/auth/password-reset/request-code" && req.method === "POST") return send(res, 200, { success: true, message: "Kod gönderildi", expires_in: 600 });
+    // 17 Kas: web ucu artık Turnstile ister; mobil kendi ucunu kullanır. Aynı adrese 45 sn içinde ikinci istek 429 + Retry-After.
+    if (path === "/auth/password-reset/request-code" && req.method === "POST") return send(res, 400, { code: "TURNSTILE_REQUIRED", detail: "Doğrulama gerekli." });
+    if (path === "/auth/mobile/password-reset/request-code" && req.method === "POST") {
+      const now = Date.now();
+      if (state.resetAt && now - state.resetAt < 45000) { res.writeHead(429, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "Retry-After", "Retry-After": "45" }); return res.end(JSON.stringify({ code: "RATE_LIMITED", detail: "Çok sık istek." })); }
+      state.resetAt = now; return send(res, 200, { success: true, message: "Kod gönderildi", expires_in: 600 });
+    }
     if (path === "/auth/password-reset/confirm" && req.method === "POST") {
       let raw = ""; req.on("data", (c) => (raw += c));
       req.on("end", () => {
