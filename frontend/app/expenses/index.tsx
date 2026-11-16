@@ -214,6 +214,8 @@ export default function ExpensesScreen() {
             x.due_date ? `Vade ${formatDate(x.due_date)}` : null,
             x.remaining !== null && !x.reversed && x.payment_status !== "paid" ? `Kalan ${formatMoney(x.remaining, cur)}` : null,
             x.source_kind ? EXPENSE_SOURCE[x.source_kind] : null,
+            // 16 Kas: ObiHub sınıflandırması yoksa Paraşüt kategorisi (salt okunur).
+            x.category ? (x.category.parasut ? `${x.category.name} (Paraşüt kategorisi)` : x.category.name) : null,
           ].filter(Boolean);
           return (
             <RowCard

@@ -24,3 +24,15 @@ export function mirrorErrorText(e: any): string {
 
 export const COLLECT_IN_PARASUT_TEXT = "Paraşüt'te tahsil edin";
 export const collectBlocked = (r: Rec) => r?.collect_blocked === true;
+
+// 16 Kas: gider faturası kategorisi. ObiHub sınıflandırması (classification / expense.category_id) önce; yoksa Paraşüt aynasının
+// kategori adı (mirror.category_name; salt okunur, yalnız ad — ObiHub kategori kimliği değil).
+export const PARASUT_CATEGORY_HINT = "Paraşüt kategorisi";
+export function expenseCategory(row: any): { name: string; parasut: boolean } | null {
+  const cls = row?.classification;
+  if (cls?.category_id && cls?.category_name) return { name: String(cls.category_name), parasut: false };
+  const ex = row?.expense;
+  if (ex?.category_id && ex?.category_name) return { name: String(ex.category_name), parasut: false };
+  const mc = typeof row?.mirror?.category_name === "string" ? row.mirror.category_name.trim() : "";
+  return mc ? { name: mc, parasut: true } : null;
+}

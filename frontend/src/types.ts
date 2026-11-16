@@ -537,6 +537,8 @@ export type ExpenseLedgerRow = {
   reversed?: boolean;
   source_kind?: string;
   archived?: boolean;
+  // ObiHub sınıflandırması ya da (yoksa) Paraşüt kategorisi (salt okunur).
+  category?: { name: string; parasut: boolean } | null;
 };
 
 export type ExpenseSummaryRow = { currency: string; payable: number; overdue: number };

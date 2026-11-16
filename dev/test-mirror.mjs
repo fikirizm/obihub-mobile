@@ -39,4 +39,13 @@ t("tahsil edilemeyen fatura (collect_blocked): seçilemez, not 'Paraşüt'te tah
   assert.equal(m.collectBlocked({ read_only: true }), false);
   assert.equal(m.COLLECT_IN_PARASUT_TEXT, "Paraşüt'te tahsil edin");
 });
+t("16 Kas: gider kategorisi — ObiHub sınıflandırması önce, yoksa Paraşüt kategorisi (salt okunur)", () => {
+  assert.deepEqual(m.expenseCategory({ classification: { category_id: "c1", category_name: "Kargo" }, mirror: { category_name: "Kira" } }), { name: "Kargo", parasut: false });
+  assert.deepEqual(m.expenseCategory({ classification: null, mirror: { category_name: "Kira" } }), { name: "Kira", parasut: true });
+  assert.deepEqual(m.expenseCategory({ expense: { category_name: "Kira" }, mirror: { category_name: "Kira" } }), { name: "Kira", parasut: true });
+  assert.deepEqual(m.expenseCategory({ expense: { category_id: "c9", category_name: "Ofis" }, mirror: { category_name: "Kira" } }), { name: "Ofis", parasut: false });
+  assert.equal(m.expenseCategory({ mirror: { category_name: null } }), null);
+  assert.equal(m.expenseCategory({}), null);
+  assert.equal(m.PARASUT_CATEGORY_HINT, "Paraşüt kategorisi");
+});
 console.log(`\n${n} test geçti`);

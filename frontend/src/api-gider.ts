@@ -2,6 +2,7 @@
 // Kaynaklar: frontend/src/pages/ExpenseInvoicesPage.js, CustomersPage.js, IncomingEInvoicesPage.js, components/layout/Sidebar.js.
 import { API_BASE_URL, getParties, getPartyLedger, request } from "./api";
 import { bytesToBase64, inboxQuery, inboxRow } from "./inbox-ui";
+import { expenseCategory } from "./mirror";
 import { actionPath, checkPath, verdictOf, type GuardAction, type Verdict } from "./delete-guard";
 import { manualPaymentFields, paymentStates, type ImportForm, type PaymentStateOption } from "./api-iceri-al";
 import type {
@@ -104,6 +105,7 @@ function expenseRowOf(x: any): ExpenseLedgerRow {
     reversed: x?.reversed === true,
     source_kind: typeof x?.source_kind === "string" ? x.source_kind : undefined,
     archived: x?.archived === true,
+    category: expenseCategory(x),
   };
 }
 
@@ -403,6 +405,7 @@ export type ExpenseDetail = {
   canPay: boolean;
   sourceKind: string;
   archived: boolean;
+  categoryFromParasut: boolean;
 };
 
 export async function getExpenseDetail(token: string, ref: string): Promise<ExpenseDetail> {
@@ -431,7 +434,8 @@ export async function getExpenseDetail(token: string, ref: string): Promise<Expe
       withholding: decimalOf(t.withholding),
       other_levies: decimalOf(t.other_levies),
     },
-    categoryName: String(d?.expense?.category_name || ""),
+    categoryName: expenseCategory(d)?.name || String(d?.expense?.category_name || ""),
+    categoryFromParasut: expenseCategory(d)?.parasut === true,
     payable: p && p.ref ? { ref: String(p.ref), paid: decimalOf(p.paid), remaining: decimalOf(p.remaining), payment_status: String(p.payment_status || "unknown") } : null,
     reversed: d?.reversed === true,
     canPay: d?.actions?.can_pay === true,

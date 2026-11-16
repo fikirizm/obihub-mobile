@@ -338,6 +338,7 @@ export default function ExpenseDetailScreen() {
             <ListRow
               divider
               title="Kategori"
+              subtitle={d.categoryFromParasut ? "Paraşüt kategorisi · salt okunur" : undefined}
               trailing={
                 <Text style={[type.callout, { color: colors.textPrimary }]}>
                   {d.categoryName || "—"}
