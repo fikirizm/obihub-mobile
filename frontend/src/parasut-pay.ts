@@ -21,6 +21,9 @@ export function parasutPayState(p: ParasutPayLike): string {
 
 export function parasutPayView(p: ParasutPayLike, o: { linked: boolean; locked: boolean; canSend: boolean }): ParasutPayView | null {
   if (!o.linked) return null;
+  // Dalga 2: mahsup satırı Paraşüt'e gönderilmez (ObiHub'da kalır; Paraşüt'te kullanıcı kendisi yapar).
+  if ((p as any).source === "offset" || (p as any).parasut_sync_state === "local_only")
+    return { state: "local_only", label: "ObiHub'da mahsup · Paraşüt'te yapın", tone: "muted", actions: [] } as any;
   const state = parasutPayState(p);
   if (state === "none") return null;
   const extra = {

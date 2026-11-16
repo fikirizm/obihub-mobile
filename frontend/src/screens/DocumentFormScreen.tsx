@@ -26,7 +26,6 @@ import {
   documentErrorText,
   fromInvoice,
   newCreateKey,
-  parasutBlockedFields,
   previewBody,
   STOPAJ_RATES,
   TAX_LABEL,
@@ -267,7 +266,6 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
   const totals = preview.data?.totals || null;
   const lineTotal = (key: string) => (preview.data?.lines || []).find((x: any) => x.line_key === key)?.line_total;
   const rows = totalsRows(totals, form);
-  const blocked = parasutConnected === true && !quote ? parasutBlockedFields(form) : [];
   const dueDays = form.due_date && form.issue_date ? Math.max(0, dayDiff(form.issue_date, form.due_date)) : 0;
   const shown = (k: string) => (tried ? errors[k] : undefined);
 
@@ -944,11 +942,6 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
             <Text testID="invoice-preview-error" style={[type.caption, styles.note, { color: colors.error }]}>
               {preview.error}
             </Text>
-          ) : null}
-          {blocked.length ? (
-            <View testID="invoice-parasut-blocked" style={[styles.notice, { backgroundColor: colors.infoBg }]}>
-              <Text style={[type.footnote, { color: colors.textPrimary }]}>{`${blocked.join(", ")} Paraşüt'e henüz aktarılamıyor; bu fatura resmileştirilemez, yalnız ObiHub'da kalır.`}</Text>
-            </View>
           ) : null}
 
           <View style={styles.fields}>

@@ -927,10 +927,11 @@ export async function getLocalInvoice(token: string, id: string) {
   return request<LocalInvoice>(`/local-invoices/${encodeURIComponent(id)}`, { method: "GET" }, token);
 }
 
-export async function officializeLocalInvoice(token: string, id: string) {
+// Dalga 2: isteğe bağlı gövde {internet_sale?} (e-Arşiv internet satışı); gövdesiz istek eski davranış.
+export async function officializeLocalInvoice(token: string, id: string, body?: Record<string, unknown>) {
   return request<{ ok?: boolean; message?: string; edoc_state?: string; pending?: boolean; amount_note?: string }>(
     `/local-invoices/${encodeURIComponent(id)}/resmilestir`,
-    { method: "POST" },
+    body ? { method: "POST", body: JSON.stringify(body) } : { method: "POST" },
     token
   );
 }

@@ -76,4 +76,10 @@ t("metinler: kontrol hatası, bitti, işlem hatası", () => {
   assert.equal(m.runErrorText({ status: 422, message: "Özel." }, "archive"), "Özel.");
 });
 
+t("Dalga 2: OFFSET_EXISTS → satış faturasını aç (href'in son parçası mobil fatura kimliği)", () => {
+  const v = m.dialogModel({ allowed: false, reasons: [{ code: "OFFSET_EXISTS", message: "Mahsup var.", action: { label: "Satış faturasını aç", kind: "invoice", href: "/panel/satislar/fatura-olustur/li-42" } }] }, "delete");
+  assert.deepEqual(v.reasons[0].target, { label: "Satış faturasını aç", pathname: "/local-invoices/[id]", params: { id: "li-42" } });
+  const w = m.dialogModel({ allowed: false, reasons: [{ code: "OFFSET_EXISTS", message: "x", action: { label: "Aç", kind: "invoice", href: "/" } }] }, "delete");
+  assert.equal(w.reasons[0].target, null);
+});
 console.log(`\n${n} test geçti`);

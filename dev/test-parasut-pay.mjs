@@ -82,4 +82,8 @@ t("tahsilat yanıtı: Paraşüt'e yazılamadıysa uyarı, yazıldıysa birleşik
   assert.deepEqual(m.collectResultText({}), { kind: "success", text: "Tahsilat kaydedildi" });
 });
 
+t("Dalga 2: mahsup satırı Paraşüt'e gönderilmez — 'ObiHub'da mahsup · Paraşüt'te yapın'", () => {
+  const v = m.parasutPayView({ source: "offset", parasut_sync_state: "local_only" }, { linked: true, locked: false, canSend: true });
+  assert.equal(v.label, "ObiHub'da mahsup · Paraşüt'te yapın"); assert.deepEqual(v.actions, []);
+});
 console.log(`\n${n} test geçti`);

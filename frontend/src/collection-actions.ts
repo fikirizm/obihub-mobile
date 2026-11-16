@@ -77,6 +77,9 @@ type InvoicePaymentLike = {
   void_op?: unknown;
   parasut_sync_state?: string;
   parasut_synced?: boolean;
+  // Dalga 2 (P2.3): mahsup satırı (source "offset", method "mahsup").
+  offset_id?: string;
+  offset_status?: string;
 };
 
 function parasutPayState(p: InvoicePaymentLike): string {
@@ -88,16 +91,31 @@ function parasutPayState(p: InvoicePaymentLike): string {
 
 // Fatura "Tahsilatlar" satırı → düğmeler.  Web SalesInvoiceFormOS.payRowActions ile aynı kural:
 // iptal/taslak/teklif/iade faturada ve e-belge uyuşmazlığında yalnız sil; cari tahsilatından dağıtılan satır cariden silinir.
-export function invoicePaymentActions(inv: InvoiceLike, p: InvoicePaymentLike): (RowActions & { customerPayment: boolean }) | null {
+export function invoicePaymentActions(
+  inv: InvoiceLike,
+  p: InvoicePaymentLike
+): (RowActions & { customerPayment: boolean; offset: boolean; release: boolean }) | null {
   if (!p?.id || p.void_op) return null;
-  if (p.source === "customer_payment") return { edit: false, void: false, customerPayment: true };
+  // Dalga 2: mahsup tahsilat değil (sunucu sil/düzenlemede 409 COLLECTION_IS_OFFSET); yalnız "Geri al" (geri alınırken gizli).
+  if (p.source === "offset")
+    return { edit: false, void: false, customerPayment: false, offset: true, release: Boolean(p.offset_id) && p.offset_status !== "releasing" };
+  if (p.source === "customer_payment") return { edit: false, void: false, customerPayment: true, offset: false, release: false };
   const editable =
     !["iptal", "taslak"].includes(String(inv.status || "")) &&
     inv.invoice_type !== "teklif" &&
     inv.parasut_item_type !== "refund" &&
     inv.money_state !== "refund" &&
     inv.edoc_state !== "blocked_mismatch";
-  return { edit: editable, void: true, customerPayment: false };
+  return { edit: editable, void: true, customerPayment: false, offset: false, release: false };
+}
+
+export const offsetReleasePath = (invoiceId: string, offsetId: string) => `/local-invoices/${enc(invoiceId)}/offsets/${enc(offsetId)}`;
+export const OFFSET_RELEASE_TEXT = "Mahsup geri alınır: fatura kalanı ve alış belgesinin borcu eski hâline döner. Cari bakiyesi değişmez.";
+export function offsetErrorText(e: { code?: string; message?: string } | null | undefined) {
+  if (e?.code === "OPERATION_PENDING") return "Mahsup işlemi sürüyor; birazdan tekrar deneyin.";
+  if (e?.code === "COLLECTION_IS_OFFSET") return "Bu satır bir mahsup; tahsilat gibi silinmez. Mahsubu geri alın.";
+  const m = typeof e?.message === "string" ? e.message.trim() : "";
+  return m && !/^Sunucu hatası/.test(m) ? m : "Mahsup geri alınamadı.";
 }
 
 export function invoicePaymentCollection(inv: InvoiceLike, p: InvoicePaymentLike): Collection {

@@ -41,15 +41,15 @@ t("ekstre tahsilatına cari kimliği eklenir (sunucu göndermezse)", () => {
 
 const inv = { id: "i1", invoice_number: "SF-1", status: "gonderildi", invoice_type: "satis" };
 t("fatura tahsilatı: normal satırda düzenle + sil", () => {
-  assert.deepEqual(m.invoicePaymentActions(inv, { id: "p1", amount: 10 }), { edit: true, void: true, customerPayment: false });
+  assert.deepEqual(m.invoicePaymentActions(inv, { id: "p1", amount: 10 }), { edit: true, void: true, customerPayment: false, offset: false, release: false });
 });
 t("fatura tahsilatı: iptal / taslak / teklif / iade / e-belge uyuşmazlığında yalnız sil", () => {
   for (const x of [{ status: "iptal" }, { status: "taslak" }, { invoice_type: "teklif" }, { parasut_item_type: "refund" }, { money_state: "refund" }, { edoc_state: "blocked_mismatch" }]) {
-    assert.deepEqual(m.invoicePaymentActions({ ...inv, ...x }, { id: "p1" }), { edit: false, void: true, customerPayment: false }, JSON.stringify(x));
+    assert.deepEqual(m.invoicePaymentActions({ ...inv, ...x }, { id: "p1" }), { edit: false, void: true, customerPayment: false, offset: false, release: false }, JSON.stringify(x));
   }
 });
 t("fatura tahsilatı: cari tahsilatından dağıtılan satır burada silinmez (cariden), kimliksiz ve iptal sürecindeki satıra düğme yok", () => {
-  assert.deepEqual(m.invoicePaymentActions(inv, { id: "p1", source: "customer_payment" }), { edit: false, void: false, customerPayment: true });
+  assert.deepEqual(m.invoicePaymentActions(inv, { id: "p1", source: "customer_payment" }), { edit: false, void: false, customerPayment: true, offset: false, release: false });
   assert.equal(m.invoicePaymentActions(inv, { amount: 5 }), null);
   assert.equal(m.invoicePaymentActions(inv, { id: "p1", void_op: "op1" }), null);
 });
@@ -149,5 +149,17 @@ t("silme onay metni: sunucunun confirm_text'i; yoksa türe göre (borç ödemesi
 });
 t("ekstre satırı: borç ödemesinde düzenle yok, sil var (sunucu actions)", () => {
   assert.deepEqual(m.ledgerRowActions({ collection: { type: "payable", id: "p" }, actions: { edit: false, void: true } }), { edit: false, void: true });
+});
+t("Dalga 2: mahsup satırı tahsilat değil — sil/düzenle yok; Geri al yalnız offset_id varken ve geri alınmıyorken", () => {
+  const inv = { id: "li1", status: "gonderildi" };
+  const a = m.invoicePaymentActions(inv, { id: "p1", source: "offset", method: "mahsup", offset_id: "op-12345678" });
+  assert.equal(a.edit, false); assert.equal(a.void, false); assert.equal(a.offset, true); assert.equal(a.release, true);
+  assert.equal(m.invoicePaymentActions(inv, { id: "p1", source: "offset", offset_id: "op-12345678", offset_status: "releasing" }).release, false);
+  assert.equal(m.invoicePaymentActions(inv, { id: "p1", source: "offset" }).release, false);
+  assert.equal(m.invoicePaymentActions(inv, { id: "p2", method: "nakit" }).offset, false);
+  assert.equal(m.offsetReleasePath("li 1", "op/1"), "/local-invoices/li%201/offsets/op%2F1");
+  assert.match(m.OFFSET_RELEASE_TEXT, /borcu/);
+  assert.equal(m.offsetErrorText({ code: "OPERATION_PENDING" }), "Mahsup işlemi sürüyor; birazdan tekrar deneyin.");
+  assert.match(m.offsetErrorText({ code: "COLLECTION_IS_OFFSET" }), /mahsup/i);
 });
 console.log(`\n${n} test geçti`);

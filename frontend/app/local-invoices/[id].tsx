@@ -5,17 +5,18 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { addLocalInvoicePayment, checkLocalInvoiceEdocStatus, getPickableAccounts, getLocalInvoice, newIdempotencyKey, officializeLocalInvoice } from "../../src/api";
+import { request, addLocalInvoicePayment, checkLocalInvoiceEdocStatus, getPickableAccounts, getLocalInvoice, newIdempotencyKey } from "../../src/api";
 import { accountOptionLabel, accountsForCurrency, collectErrorText, unmatchAllocation, deleteLocalInvoice, getParasutAccounts, getParasutPaymentCaps, isInvoiceEditable, isUncertainWrite, postParasutPaymentAction, sendKeyedMoney } from "../../src/api-finans";
 import { canOfferParasutSync, collectResultText, parasutActionFailText, parasutActionRequest, parasutActionResult, parasutCollectFields, parasutPayView, PARASUT_ACTION_LABELS, type ParasutAction } from "../../src/parasut-pay";
 import { isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
-import { amountRows, collectAmount, invoiceStatusView, parasutUnsupportedText, edocCancelled } from "../../src/invoice-status";
-import { invoicePaymentActions, invoicePaymentCollection } from "../../src/collection-actions";
+import { amountRows, collectAmount, invoiceStatusView, edocCancelled } from "../../src/invoice-status";
+import { invoicePaymentActions, invoicePaymentCollection, OFFSET_RELEASE_TEXT, offsetErrorText, offsetReleasePath } from "../../src/collection-actions";
 import { deleteConfirmText, lifecycleActions, lifecycleErrorText } from "../../src/document-lifecycle";
 import { copyInvoice, getInvoicePdf, setInvoiceArchived } from "../../src/api-finans";
 import { Linking, Platform } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import { printOrShare } from "../../src/pdf";
+import { canOfficializeReturn } from "../../src/officialize";
 import { autoSettlementText, canUnmatch, UNMATCH_CONFIRM, unmatchDoneText, unmatchErrorText } from "../../src/cari-ui";
 import { runVoidCollection } from "../../src/collection-flow";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -239,37 +240,18 @@ export default function LocalInvoiceDetailScreen() {
   // Dalga 1: e-belgesi iptal edilmiş fatura yeniden resmileştirilmez; sıradaki adım yerel iptaldir.
   const officializeCandidate = mayWrite && !readOnly && parasutConnected === true && !inv.parasut_invoice_id && inv.status !== "resmilesti" && !isCancelled && !edocCancelled(inv);
   // G2 §6: tevkifat / ÖTV-ÖİV / konaklama / stopaj Paraşüt'e taşınamaz; düğme yerine açıklama (sunucu yine reddeder).
-  const onlyObiHub = officializeCandidate ? parasutUnsupportedText(inv) : null;
-  const canOfficialize = officializeCandidate && !onlyObiHub;
+  // Dalga 2: tevkifat / ÖTV-ÖİV / konaklama / stopajlı fatura da resmileşir (sunucu tutar korumasıyla); iade faturası da (asıl faturaya bağlı).
+  const canOfficialize = (officializeCandidate && inv.invoice_type !== "iade") || (mayWrite && parasutConnected === true && canOfficializeReturn(inv));
   // Aşama 4 P6: e-belge tutarı Paraşüt'le uyuşmadığında (blocked_mismatch) sunucu tahsilatı 409 ile reddeder; düğme gizlenir.
   // İade faturasına tahsilat alınmaz (sunucu 409 INVOICE_IS_REFUND).
   const canCollect = mayWrite && !readOnly && !isCancelled && inv?.money_state !== "refund" && remaining > 0.004 && inv?.edoc_state !== "blocked_mismatch";
 
-  const onOfficialize = async () => {
-    if (!token) return;
-    const ok = await confirm({
-      title: "Fatura resmileştirilsin mi?",
-      message:
-        "Fatura Paraşüt üzerinden e-belge olarak gönderilir. Bu işlem geri alınamaz." +
-        (Number(inv.paid_amount || 0) > 0 ? " Alınan tahsilatlar ObiHub'da kalır, bu adımda Paraşüt'e gönderilmez." : ""),
-      confirmLabel: "Resmileştir",
-    });
-    if (!ok) return;
-    setBusy("official");
-    try {
-      const r = await officializeLocalInvoice(token, inv.id);
-      // M5 (K8): fatura kesilince carinin alacak bakiyesi faturayı kendiliğinden kapatabilir; bildirim tek satırda birleşir.
-      const settled = autoSettlementText((r as any)?.auto_settlement);
-      const main = r?.message || (r?.pending ? "E-belge sıraya alındı" : "Fatura resmileşti");
-      // P6: tutar Paraşüt iskontosu nedeniyle yeniden hesaplandıysa kısa not.
-      toast([main, settled, r?.amount_note ? String(r.amount_note) : null].filter(Boolean).join(" "), "success");
-      await load();
-    } catch (e: any) {
-      toast(e?.message || "Resmileştirilemedi.", "error");
-    } finally {
-      setBusy(null);
-    }
-  };
+  // Dalga 2: resmileştirme ayrı onay sayfasında (internet satışı, iade e-belgesi).
+  const onOfficialize = () =>
+    router.push({
+      pathname: "/local-invoices/officialize",
+      params: { id: inv.id, title: [inv.invoice_number, inv.customer_name].filter(Boolean).join(" · "), paid: String(inv.paid_amount || 0), kind: inv.invoice_type === "iade" ? "iade" : "satis" },
+    } as any);
 
   const onCollect = async () => {
     if (!token || collectingRef.current) return;
@@ -403,6 +385,24 @@ export default function LocalInvoiceDetailScreen() {
     } finally {
       setBusy(null);
       setVoidingId(null);
+    }
+  };
+
+  // Dalga 2 (P2.3): mahsubu geri al — DELETE /local-invoices/{id}/offsets/{offset_id} (409 OPERATION_PENDING → birazdan).
+  const onReleaseOffset = async (p: Pay) => {
+    const offsetId = String((p as any).offset_id || "");
+    if (!token || busy || !offsetId) return;
+    const ok = await confirm({ title: "Mahsup geri alınsın mı?", message: `${formatMoney(p.amount, cur)} · ${formatDate(p.date)}\n\n${OFFSET_RELEASE_TEXT}`, confirmLabel: "Geri al" });
+    if (!ok) return;
+    setVoidingId(String(p.id));
+    try {
+      await request<any>(offsetReleasePath(inv.id, offsetId), { method: "DELETE" }, token);
+      toast("Mahsup geri alındı.", "success");
+    } catch (e: any) {
+      toast(offsetErrorText(e), "error");
+    } finally {
+      setVoidingId(null);
+      load();
     }
   };
 
@@ -556,11 +556,6 @@ export default function LocalInvoiceDetailScreen() {
           </SafeAnimatedView>
         ) : null}
 
-        {onlyObiHub ? (
-          <View testID="invoice-only-obihub" style={[styles.note, { backgroundColor: colors.infoBg }]}>
-            <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{onlyObiHub}</Text>
-          </View>
-        ) : null}
 
         {canEditInvoice ? (
           <SafeAnimatedView entering={FadeInDown.delay(95).duration(380)} style={styles.actions}>
@@ -713,9 +708,9 @@ export default function LocalInvoiceDetailScreen() {
                       <WalletIcon size={18} color={colors.emerald} />
                     </IconTile>
                   }
-                  title={PAYMENT_METHODS.find((m) => m.value === p.method)?.label || p.method || "Ödeme"}
+                  title={(p as any).source === "offset" ? "Mahsup" : PAYMENT_METHODS.find((m) => m.value === p.method)?.label || p.method || "Ödeme"}
                   subtitle={formatDate(p.date)}
-                  meta={acts?.customerPayment ? ((p as any).auto ? "Cari alacaktan mahsup" : "Cari tahsilatından eşleşme") : p.notes || undefined}
+                  meta={(p as any).source === "offset" ? ((p as any).offset_status === "releasing" ? "Geri alınıyor…" : "Alış belgesiyle karşılıklı kapatıldı") : acts?.customerPayment ? ((p as any).auto ? "Cari alacaktan mahsup" : "Cari tahsilatından eşleşme") : p.notes || undefined}
                   trailing={<Text style={amount(colors.success)}>{formatMoney(p.amount, cur)}</Text>}
                 />
                 {ps ? (
@@ -731,6 +726,11 @@ export default function LocalInvoiceDetailScreen() {
                 {mayWrite && canUnmatch(p) ? (
                   <View style={styles.rowActs}>
                     <Button testID={`invoice-pay-unmatch-${p.id}`} size="sm" variant="secondary" label="Eşleşmeyi kaldır" busy={voidingId === p.id} disabled={Boolean(busy)} onPress={() => onUnmatch(p)} />
+                  </View>
+                ) : null}
+                {acts?.release ? (
+                  <View style={styles.rowActs}>
+                    <Button testID={`invoice-offset-release-${p.id}`} size="sm" variant="secondary" label="Mahsubu geri al" busy={voidingId === p.id} disabled={Boolean(busy)} onPress={() => onReleaseOffset(p)} />
                   </View>
                 ) : null}
                 {acts && (acts.edit || acts.void) ? (

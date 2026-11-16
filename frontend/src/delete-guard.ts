@@ -19,7 +19,7 @@ export function verdictOf(v: any): Verdict | null {
   return v && typeof v === "object" && typeof v.allowed === "boolean" ? (v as Verdict) : null;
 }
 
-export type ReasonTarget = { label: string; pathname: "/expenses/pay" | "/incoming"; params: Record<string, string> } | null;
+export type ReasonTarget = { label: string; pathname: "/expenses/pay" | "/incoming" | "/local-invoices/[id]"; params: Record<string, string> } | null;
 
 // Sebep eylemi → mobil rota. payments/pay: borç ödeme ekranı (ref; yoksa faturanın borç ref'i); incoming_inbox: Gelen e-Faturalar.
 // Bilinmeyen eylem ya da web adresi düğmesiz kalır.
@@ -31,6 +31,11 @@ function targetOf(a: Reason["action"], payableRef?: string | null): ReasonTarget
     return ref ? { label, pathname: "/expenses/pay", params: { ref: String(ref) } } : null;
   }
   if (a.kind === "incoming_inbox") return { label, pathname: "/incoming", params: {} };
+  // Dalga 2: OFFSET_EXISTS → mahsubun yapıldığı satış faturası (web href'inin son parçası fatura kimliği).
+  if (a.kind === "invoice") {
+    const id = String(a.ref || a.href || "").split("/").filter(Boolean).pop() || "";
+    return id && id !== "fatura-olustur" ? { label, pathname: "/local-invoices/[id]", params: { id: decodeURIComponent(id) } } : null;
+  }
   return null;
 }
 

@@ -165,6 +165,12 @@ const localInvoices = [
   { id: "li3", invoice_number: "OBI2026102", status: "gecikti", display_status: "gonderildi", money_state: "pending", customer_name: "Acme GmbH", issue_date: "2026-11-08", due_date: "2026-12-08", currency: "USD", subtotal: 1000, discount_amount: 0, vat_amount: 200, total: 1200, paid_amount: 0, remaining_amount: 1200, payments: [], items: [{ name: "İhracat", quantity: 1, unit_price: 1000, vat_rate: 20, total: 1200 }] },
 ];
 // Toplu sürüm 1 (G2 §5 örneği): P1 belgesi — ara toplam indirimi, ÖTV/konaklama, tevkifat, stopaj; fatura ismi; Paraşüt'e resmileşmemiş.
+// Dalga 2: kesilmiş iade faturası (iade e-belgesi) ve mahsup satırlı fatura.
+localInvoices.push({ id: "li8", doc_schema: 1, invoice_number: "IADE2026001", invoice_type: "iade", return_kind: "iade_faturasi", status: "gonderildi", display_status: "gonderildi", money_state: "refund",
+  customer_id: "c1", customer_name: "Elif Kaya", issue_date: "2026-11-16", due_date: "2026-11-16", currency: "TRY", subtotal: 100, discount_amount: 0, vat_amount: 20, total: 120, paid_amount: 0, remaining_amount: 0, payments: [], items: [] });
+localInvoices.push({ id: "li9", doc_schema: 1, invoice_number: "OBI2026150", invoice_type: "satis", status: "gonderildi", display_status: "gonderildi", money_state: "partial",
+  customer_id: "c1", customer_name: "Elif Kaya", issue_date: "2026-11-10", due_date: "2026-11-30", currency: "TRY", subtotal: 1000, discount_amount: 0, vat_amount: 200, total: 1200, paid_amount: 400, remaining_amount: 800,
+  payments: [{ id: "pof1", amount: 400, date: "2026-11-15", method: "mahsup", source: "offset", offset_id: "op-offset-0001", parasut_sync_state: "local_only" }], items: [] });
 // Dalga 1: resmileşmiş e-Arşiv fatura (e-belge iptali, resmi PDF).
 localInvoices.push({ id: "li7", doc_schema: 1, invoice_number: "OBI2026140", invoice_type: "satis", status: "resmilesti", display_status: "resmilesti", money_state: "pending", edoc_state: "done", edoc_type: "e_archive", parasut_invoice_id: "prs-inv-7",
   customer_id: "c1", customer_name: "Elif Kaya", issue_date: "2026-11-15", due_date: "2026-11-30", currency: "TRY", subtotal: 1000, discount_amount: 0, vat_amount: 200, total: 1200, paid_amount: 0, remaining_amount: 1200,
@@ -1349,6 +1355,14 @@ http
         inv.archived = op === "archive"; ev(op === "archive" ? "archived" : "unarchived", op === "archive" ? "Arşivlendi" : "Arşivden çıkarıldı");
         return send(res, 200, { ok: true, archived: inv.archived });
       });
+    }
+    let offm; // Dalga 2: mahsubu geri al
+    if (req.method === "DELETE" && (offm = path.match(/^\/local-invoices\/([^/]+)\/offsets\/([^/]+)$/))) {
+      const inv = localInvoices.find((x) => x.id === offm[1]);
+      const p = inv && inv.payments.find((x) => x.offset_id === decodeURIComponent(offm[2]));
+      if (!p) return send(res, 404, { code: "NOT_FOUND", detail: "Mahsup bulunamadı" });
+      inv.payments = inv.payments.filter((x) => x !== p); inv.paid_amount -= p.amount; inv.remaining_amount += p.amount;
+      console.log("WRITE OFFSET RELEASE", path); return send(res, 200, { ok: true, released: true });
     }
     const invMatch = path.match(/^\/local-invoices\/([^/]+)(?:\/(payment|resmilestir|convert|quote-outcome))?$/);
     if (invMatch) {
