@@ -74,4 +74,8 @@ t("rozet: kesin sözleşme — /orders/stats badge_count esastır (push badge il
   assert.equal(m.badgeFromStats({ badge_count: 0, groups: { pending: 4 } }), 0);
 });
 
+t("ilk kullanım dalgası: integration_auth_failed bildirimi entegrasyon detayına (yoksa listeye)", () => {
+  assert.deepEqual(m.notificationRoute({ type: "integration_auth_failed", integration_id: "i9" }), { pathname: "/integrations/[id]", params: { id: "i9" } });
+  assert.deepEqual(m.notificationRoute({ type: "integration_auth_failed" }), { pathname: "/(tabs)/integrations" });
+});
 console.log(`\n${n} test geçti`);

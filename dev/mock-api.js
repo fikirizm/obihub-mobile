@@ -483,7 +483,22 @@ http
     }
     if (req.method === "POST" && path.startsWith("/print-jobs/enqueue/"))
       return send(res, 200, state.autoprint === "0" ? { success: false, message: "Auto print kapalı veya kullanıcı yetkili değil." } : { success: true, job_id: "j1", status: "pending" });
-    if (req.method === "POST" && /\/sync-orders$/.test(path)) return send(res, 200, { success: true, message: "Senkronizasyon tamamlandı", count: 0, total_fetched: 0 });
+    // İlk kullanım dalgası: 15 günü aşan çekim arka plan işi (202 + job_id); sürerken 409 + X-Job-Id.
+    if (path.startsWith("/integration-jobs/")) {
+      const j = state.job; if (!j) return send(res, 404, { detail: "İşlem bulunamadı ya da süresi doldu." });
+      j.done = Math.min(j.total, j.done + 40);
+      if (j.done >= j.total) j.state = "done";
+      return send(res, 200, { job_id: j.id, state: j.state, progress: { done: j.done, total: j.total, label: `Sayfa ${Math.ceil(j.done / 40)}/${j.total / 40}` }, partial: false, error_tr: null, message: j.state === "done" ? "120 sipariş çekildi" : "" });
+    }
+    if (req.method === "POST" && /\/sync-orders$/.test(path)) {
+      const days = Number(url.searchParams.get("days") || 0);
+      if (days > 15) {
+        if (state.job && state.job.state === "running") { res.writeHead(409, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "X-Job-Id", "X-Job-Id": state.job.id }); return res.end(JSON.stringify({ detail: "Bu entegrasyon için eşitleme sürüyor." })); }
+        state.job = { id: "job-" + Date.now(), state: "running", done: 0, total: 120 };
+        return send(res, 202, { success: true, accepted: true, job_id: state.job.id, state: "running", message: "Çekim arka planda başladı. İlerleme bu sayfada görünür." });
+      }
+      return send(res, 200, { success: true, message: "Senkronizasyon tamamlandı", count: 0, total_fetched: 0 });
+    }
     if (req.method === "POST" && path === "/orders/resync-dates") return send(res, 200, { success: true, updated: 0, total: 0 });
     // E2: etiketler (orijinal HepsiJet PDF / ürünlü etiket). Küçük geçerli PDF base64 döner.
     const PDF64 = Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF").toString("base64");
@@ -516,9 +531,9 @@ http
         { type: "stale_orders", severity: "warning", title: "2 sipariş 3 gündür bekliyor", desc: "Beklemede olan siparişleri kontrol edin.", action_path: "/siparisler" },
       ]);
     if (path === "/integrations") return send(res, 200, [
-      { id: "i1", name: "Deneme Mağaza", provider: "woocommerce", kind: "store", status: "success" },
-      { id: "i2", name: "Trendyol", provider: "trendyol", kind: "marketplace", status: "success" },
-      { id: "i3", name: "Hepsiburada", provider: "hepsiburada", kind: "marketplace", status: "failed" },
+      { id: "i1", name: "Deneme Mağaza", provider: "woocommerce", kind: "store", status: "success", last_sync_error: "WooCommerce geçici olarak yanıt vermedi", last_sync_error_kind: "transient" },
+      { id: "i2", name: "Trendyol", provider: "trendyol", kind: "marketplace", status: "success", sync_running: Boolean(state.job && state.job.state === "running") },
+      { id: "i3", name: "Hepsiburada", provider: "hepsiburada", kind: "marketplace", status: "success", auto_sync_status: "auth_failed", last_sync_error_kind: "auth" },
     ]);
     if (path === "/parasut/invoices")
       return send(res, 200, { invoices: Array.from({ length: 6 }, (_, i) => ({

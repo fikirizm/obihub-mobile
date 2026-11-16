@@ -23,6 +23,10 @@ function navigateToOrder(
   const provider = data?.provider || "";
   if (route && route.pathname === "/(tabs)/orders") {
     router.push("/(tabs)/orders");
+  } else if (route && route.pathname === "/(tabs)/integrations") {
+    router.push("/(tabs)/integrations");
+  } else if (route && route.pathname === "/integrations/[id]") {
+    router.push({ pathname: "/integrations/[id]", params: { id: route.params.id } });
   } else if (route) {
     router.push({
       pathname: "/orders/[id]",

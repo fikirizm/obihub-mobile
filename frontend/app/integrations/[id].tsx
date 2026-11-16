@@ -40,6 +40,8 @@ import { IconTile, SectionTitle } from "../../src/ui/ListRow";
 import { SearchField } from "../../src/ui/SearchField";
 import { saveCache, loadCache } from "../../src/offlineCache";
 import type { Integration, Order } from "../../src/types";
+import { integrationStatus, jobIdOf, jobIdOfError, jobView } from "../../src/integration-sync";
+import { request } from "../../src/api";
 
 type IntegDetailCache = { orders: Order[]; integration: Integration | null; stats?: OrderStats | null };
 
@@ -113,6 +115,32 @@ export default function IntegrationOrders() {
   const [remoteQuery, setRemoteQuery] = useState("");
   const searchSeq = useRef(0);
   const [syncBusy, setSyncBusy] = useState(false);
+  // İlk kullanım dalgası: geniş aralıklı çekim arka plan işi (202 + job_id) — GET /integration-jobs/{id} ile izlenir.
+  const [job, setJob] = useState<{ id: string; view: ReturnType<typeof jobView> } | null>(null);
+  const jobTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (jobTimer.current) clearTimeout(jobTimer.current);
+  }, []);
+  const watchJob = (id: string) => {
+    if (jobTimer.current) clearTimeout(jobTimer.current);
+    setJob({ id, view: jobView({ state: "running" }) });
+    const tick = async () => {
+      if (!token) return;
+      try {
+        const j = await request<any>(`/integration-jobs/${encodeURIComponent(id)}`, { method: "GET" }, token);
+        const v = jobView(j);
+        setJob({ id, view: v });
+        if (v.phase === "running") jobTimer.current = setTimeout(tick, 2500);
+        else {
+          toast(v.text, v.tone === "error" ? "error" : v.tone === "success" ? "success" : "info");
+          load(true);
+        }
+      } catch (e: any) {
+        setJob({ id, view: { phase: "failed", percent: null, text: e?.message || "Çekim durumu okunamadı; entegrasyon listesinden kontrol edin.", tone: "error" } });
+      }
+    };
+    jobTimer.current = setTimeout(tick, 1500);
+  };
   const [cooldownEnd, setCooldownEnd] = useState(0);
   // Web "Sipariş no ile getir" (Hepsiburada'da ayrı uç). Bekleme süresine tabi değildir; tek siparişi çeker.
   const [lookupOpen, setLookupOpen] = useState(false);
@@ -215,10 +243,23 @@ export default function IntegrationOrders() {
       // Web ile aynı uçlar (Idefix, Pazarama, Amazon dahil); success:false hata sayılır, Woo'da tarihler yeniden çekilir.
       const r = await syncStoreOrders(token, integration);
       setCooldownEnd(Date.now() + SYNC_COOLDOWN_MS);
+      const jid = jobIdOf(r);
+      if (jid) {
+        toast(r?.message || "Çekim arka planda başladı.", "info");
+        watchJob(jid);
+        return;
+      }
       await load(true);
       toast(storeSyncMessage(r), "success");
     } catch (e: any) {
       // Dalga 4: 429 / 5xx geçici — entegrasyon bozulmaz; sunucu metni ve bekleme süresi.
+      // Aynı entegrasyonda çekim sürüyorsa (409 + X-Job-Id) o iş izlenir, yeniden başlatılmaz.
+      const running = jobIdOfError(e);
+      if (running) {
+        toast("Bu mağazada çekim zaten sürüyor; ilerleme gösteriliyor.", "info");
+        watchJob(running);
+        return;
+      }
       const v = syncErrorView(e);
       if (v.cooldownMs) setCooldownEnd(Date.now() + v.cooldownMs);
       toast(v.text, v.tone);
@@ -335,6 +376,23 @@ export default function IntegrationOrders() {
           icon={<RefreshIcon size={18} color="#FFFFFF" />}
           style={remainingMs > 0 ? styles.syncDisabled : undefined}
         />
+        {job ? (
+          <View testID="sync-job" style={[styles.jobBox, { backgroundColor: job.view.tone === "error" ? colors.errorBg : job.view.tone === "success" ? colors.successBg : colors.infoBg }]}>
+            <Text style={[type.footnote, { color: colors.textPrimary }]}>{job.view.text}</Text>
+            {job.view.phase === "running" ? (
+              <View style={[styles.jobTrack, { backgroundColor: colors.border }]}>
+                <View style={{ width: `${job.view.percent ?? 10}%`, height: "100%", backgroundColor: colors.primary, borderRadius: 3 }} />
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+        {integration && integrationStatus(integration).reconnect ? (
+          <Text testID="integration-reconnect" style={[type.footnote, { color: colors.error }]}>
+            {integrationStatus(integration).label}: mağaza API bilgilerini web panelinde Entegrasyonlar'dan yenileyin.
+          </Text>
+        ) : integration && integrationStatus(integration).note ? (
+          <Text style={[type.caption, { color: colors.textTertiary }]}>{integrationStatus(integration).note}</Text>
+        ) : null}
         <Text style={[type.caption, tabular, styles.syncNote, { color: colors.textTertiary }]} accessibilityLiveRegion="none">
           {cooldownText ? `Yeniden senkronizasyon: ${cooldownText}` : `Son ${storeSyncDays(integration?.provider || provider)} günün siparişleri çekilir.`}
         </Text>
@@ -477,6 +535,8 @@ export default function IntegrationOrders() {
 }
 
 const styles = StyleSheet.create({
+  jobBox: { padding: 10, borderRadius: 10, gap: 6, marginTop: 8 },
+  jobTrack: { height: 6, borderRadius: 3, overflow: "hidden" },
   wrap: { flex: 1 },
   // Logolar açık zemin için çizildiğinden koyu kartta beyaz kutu içinde gösterilir.
   logoTile: {

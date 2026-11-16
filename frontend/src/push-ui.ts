@@ -31,9 +31,16 @@ export function orderNotificationText(orders: OrderNote[], opts: { showAmount?: 
 }
 
 // Bildirime dokununca: sipariş detayı. Yalnız uygulama içi yol ya da uygulama şemasıyla gelen bağlantı kabul edilir.
-export type NotificationRoute = { pathname: "/orders/[id]"; params: { id: string } } | { pathname: "/(tabs)/orders" };
+export type NotificationRoute =
+  | { pathname: "/orders/[id]"; params: { id: string } }
+  | { pathname: "/(tabs)/orders" }
+  | { pathname: "/integrations/[id]"; params: { id: string } }
+  | { pathname: "/(tabs)/integrations" };
 export function notificationRoute(data: any): NotificationRoute | null {
   if (data?.type === "test") return null;
+  // İlk kullanım dalgası: mağaza yetkisi düştü (auth_failed) → entegrasyon; yeniden bağlama web panelinde.
+  if (data?.type === "integration_auth_failed")
+    return data?.integration_id ? { pathname: "/integrations/[id]", params: { id: String(data.integration_id) } } : { pathname: "/(tabs)/integrations" };
   if (data?.order_id) return { pathname: "/orders/[id]", params: { id: String(data.order_id) } };
   // Özet bildirim (5'ten fazla sipariş): sipariş listesi.
   if (data?.type === "new_orders_summary" || data?.path === "/orders") return { pathname: "/(tabs)/orders" };

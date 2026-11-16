@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { integrationStatus } from "../../src/integration-sync";
 import { FlatList, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
@@ -26,11 +27,10 @@ type Counts = { all: number; pending: number; shipped: number };
 type IntegCache = { list: Integration[]; orderCounts: Record<string, Counts> };
 
 // Sunucudaki entegrasyon durumları: success/connected, failed, pending. Web gibi "connected" da bağlı sayılır.
-function statusOf(status: string | undefined, colors: { success: string; error: string; warning: string }) {
-  const k = String(status || "").trim().toLowerCase();
-  if (k === "success" || k === "connected") return { label: "Bağlı", color: colors.success };
-  if (k === "failed") return { label: "Bağlantı sorunu", color: colors.error };
-  return { label: "Kurulum bekliyor", color: colors.warning };
+// İlk kullanım dalgası: auth_failed → "Yetki gerekli – Yeniden bağlan"; geçici hata durumu bozmaz, son hata ikincil satırda.
+function statusOf(item: Integration, colors: { success: string; error: string; warning: string }) {
+  const v = integrationStatus(item);
+  return { label: v.label, color: colors[v.tone], note: v.note };
 }
 
 export default function IntegrationsScreen() {
@@ -192,7 +192,7 @@ export default function IntegrationsScreen() {
             const pendingText = known ? String(known.pending) : "—";
             const shippedText = known ? String(known.shipped) : "—";
             const name = item.name || providerLabel(provider);
-            const st = statusOf(item.status, colors);
+            const st = statusOf(item, colors);
             return (
               <SafeAnimatedView entering={FadeInDown.delay(70 + Math.min(index, 8) * 60).duration(380)}>
                 <PressableScale
@@ -217,6 +217,11 @@ export default function IntegrationsScreen() {
                             {st.label}
                           </Text>
                         </View>
+                        {st.note ? (
+                          <Text style={[type.caption, { color: colors.textTertiary, marginTop: 2 }]} numberOfLines={1}>
+                            {st.note}
+                          </Text>
+                        ) : null}
                       </View>
                       <ArrowRightIcon size={16} color={colors.textTertiary} />
                     </View>
