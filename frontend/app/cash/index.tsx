@@ -217,7 +217,7 @@ export default function CashScreen() {
                   divider={i > 0}
                   leading={<AccountTile accountType={a.account_type} />}
                   title={a.name}
-                  subtitle={[ACCOUNT_TYPES[String(a.account_type)] || a.account_type, a.bank_name, mirrorBadge(a) ? "Paraşüt" : null, a.archived ? "Arşivde" : null].filter(Boolean).join(" · ")}
+                  subtitle={[ACCOUNT_TYPES[String(a.account_type)] || a.account_type, a.bank_name, a.iban ? `IBAN …${String(a.iban).replace(/\s/g, "").slice(-4)}` : null, mirrorBadge(a) ? "Paraşüt" : null, a.archived ? "Arşivde" : null].filter(Boolean).join(" · ")}
                   trailing={
                     <Text
                       style={[type.bodyStrong, tabular, styles.amount, { color: Number(a.balance) < 0 ? colors.error : colors.textPrimary }]}

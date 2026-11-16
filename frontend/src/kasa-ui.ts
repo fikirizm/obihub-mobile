@@ -168,3 +168,44 @@ export function pickable(a: Acc) {
   if (a.actions && a.actions.add_movement === false) return false;
   return true;
 }
+
+// Dalga 4 (P4.4): bakiye sabitleme — POST /finance/accounts/{id}/balance-adjustments {target_balance, entry_date, description} +
+// Idempotency-Key. Hedef bakiye mantığı (Paraşüt balance_adjustment): fark tek satır, geri alınabilir, sonradan yeniden hesaplanabilir.
+const signedMoney = (v: string) => {
+  let t = String(v ?? "").trim().replace(/\s/g, "");
+  const neg = t.startsWith("-");
+  t = t.replace(/^[-+]/, "");
+  if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
+  if (!/^\d+(\.\d{1,2})?$/.test(t)) return null;
+  return `${neg ? "-" : ""}${Number(t).toFixed(2)}`;
+};
+const dayIso = (v: string) => {
+  const t = String(v || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  const m = /^(\d{1,2})[./](\d{1,2})[./](\d{4})$/.exec(t);
+  return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : "";
+};
+export function adjustBody(target: string, date: string, description: string) {
+  const tb = signedMoney(target);
+  if (tb === null) return { body: null, error: "Hedef bakiyeyi girin." };
+  const day = dayIso(date);
+  if (!day) return { body: null, error: "Tarihi girin (GG.AA.YYYY)." };
+  return { body: { target_balance: tb, entry_date: day, description: String(description || "").trim() }, error: null };
+}
+export function adjustDiffText(current: number, target: string, currency: string, fmt: (v: number, c: string) => string) {
+  const tb = signedMoney(target);
+  if (tb === null) return "";
+  const diff = Math.round((Number(tb) - current) * 100) / 100;
+  return `Fark: ${fmt(diff, currency)} (bakiye ${fmt(current, currency)} → ${fmt(Number(tb), currency)})`;
+}
+export function adjustErrorText(e: { code?: string; message?: string } | null | undefined) {
+  if (e?.code === "BALANCE_ADJUSTMENT_BUSY") return "Bu hesapta başka bir bakiye işlemi sürüyor; birkaç saniye sonra yeniden deneyin.";
+  if (e?.code === "BALANCE_ALREADY_AT_TARGET") return "Bakiye o gün zaten bu tutarda; düzeltme gerekmiyor.";
+  return archiveError(e || {}).text;
+}
+
+// D-05 Geri al (DELETE /finance/entries/{id}): yalnız elle hareket, virman ve bakiye düzeltme; tahsilat/belge kaynaklı satır kaynağından.
+const kindOf = (r: { source_type?: string; source?: { type?: string } | null }) => String(r?.source?.type || r?.source_type || "");
+export const canUndo = (r: { source_type?: string; source?: { type?: string } | null }) => ["manual", "transfer", "balance_adjustment"].includes(kindOf(r));
+export const movementLabel = (r: { source_type?: string; source?: { type?: string; label?: string } | null }) =>
+  kindOf(r) === "balance_adjustment" ? "Bakiye düzeltme" : String(r?.source?.label || "");

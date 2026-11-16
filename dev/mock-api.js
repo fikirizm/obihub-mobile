@@ -835,6 +835,41 @@ http
           { kind: "receivable", date: "2026-11-22", amount: 12850.5, currency: "TRY", title: "Can Öztürk", reference: "OBI2026104" },
           { kind: "payable", date: null, undated: true, amount: 1850, currency: "TRY", title: "Kırtasiye Ltd.", reference: "GF-91", source: "obihub" },
         ] });
+    // Dalga 4: bakiye sabitleme, hareket geri alma, düşük stok, toplu sayım.
+    let bam;
+    if ((bam = path.match(/^\/finance\/accounts\/([^/]+)\/balance-at$/))) {
+      const acc = accounts.find((x) => x.id === bam[1]); return send(res, 200, { account_id: bam[1], date: url.searchParams.get("date"), balance: Number(acc ? acc.balance : 0).toFixed(2), currency: "TRY" });
+    }
+    if ((bam = path.match(/^\/finance\/accounts\/([^/]+)\/balance-adjustments$/)) && req.method === "POST") return readBody((b) => {
+      const acc = accounts.find((x) => x.id === bam[1]);
+      if (!req.headers["idempotency-key"]) return send(res, 422, { code: "IDEMPOTENCY_KEY_REQUIRED", detail: "Anahtar gerekli." });
+      const diff = Number(b.target_balance) - acc.balance;
+      if (Math.abs(diff) < 0.005) return send(res, 422, { code: "BALANCE_ALREADY_AT_TARGET", detail: "Bakiye o gün zaten bu tutarda." });
+      acc.balance = Number(b.target_balance); entries.unshift({ id: "adj" + Date.now(), account_id: acc.id, entry_type: diff > 0 ? "income" : "expense", amount: Math.abs(diff), entry_date: b.entry_date, description: b.description || "Bakiye düzeltme", source_type: "balance_adjustment" });
+      console.log("WRITE BALANCE ADJ", JSON.stringify(b)); return send(res, 200, { entry: entries[0], replayed: false, before_balance: (acc.balance - diff).toFixed(2), target_balance: Number(b.target_balance).toFixed(2), difference: diff.toFixed(2) });
+    });
+    if ((bam = path.match(/^\/finance\/entries\/([^/]+)$/)) && req.method === "DELETE") {
+      const e = entries.find((x) => x.id === decodeURIComponent(bam[1]));
+      if (!e) return send(res, 404, { detail: "Hareket bulunamadı" });
+      if (e.source_type && !["manual", "transfer", "balance_adjustment"].includes(e.source_type)) return send(res, 400, { code: "ENTRY_LOCKED", detail: "Kaynağından geri alın." });
+      entries.splice(entries.indexOf(e), 1); console.log("WRITE UNDO", path); return send(res, 200, { ok: true, replayed: false });
+    }
+    if (path === "/dashboard/low-stock") return send(res, 200, { count: 2, items: products.slice(0, 2).map((c) => ({ id: c.id, name: c.name, sku: c.sku, stock: 3, low_warehouses: [] })) });
+    if (path === "/stock/count-bulk/preview" && req.method === "POST") return readBody((b) => {
+      const rows = (b.lines || []).map((ln, i) => {
+        const c = products.find((x) => x.barcode === ln.code || x.sku === ln.code);
+        if (!c) return { index: i, code_input: ln.code, counted: ln.counted_quantity, status: "error", code: "PRODUCT_NOT_FOUND", detail: "Ürün bulunamadı.", product_id: null };
+        const expected = 5; const diff = ln.counted_quantity - expected;
+        return { index: i, code_input: ln.code, counted: ln.counted_quantity, product_id: c.id, name: c.name, expected, diff, status: diff ? "change" : "same" };
+      });
+      const sm = { lines: rows.length, changes: rows.filter((r) => r.status === "change").length, same: rows.filter((r) => r.status === "same").length, errors: rows.filter((r) => r.status === "error").length,
+        increase: rows.reduce((a, r) => a + (r.diff > 0 ? r.diff : 0), 0), decrease: rows.reduce((a, r) => a + (r.diff < 0 ? -r.diff : 0), 0) };
+      return send(res, 200, { warehouse: { id: b.warehouse_id, name: "Ana depo" }, lines: rows, summary: sm });
+    });
+    if (path === "/stock/count-bulk/apply" && req.method === "POST") return readBody((b) => {
+      if (!req.headers["idempotency-key"]) return send(res, 422, { code: "IDEMPOTENCY_KEY_REQUIRED", detail: "Anahtar gerekli." });
+      console.log("WRITE COUNT APPLY", JSON.stringify(b)); return send(res, 200, { status: "done", applied: b.lines.length, unchanged: 0, replayed: 0, failed: [], movement_ids: [] });
+    });
     // Yeni hesap ve virman (gerçek uçlar: backend/routers/finance.py create_account, create_transfer)
     if (path === "/finance/accounts" && req.method === "POST")
       return readBody((b) => {

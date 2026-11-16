@@ -12,7 +12,7 @@ import { Image as ExpoImage } from "expo-image";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { getCatalog } from "../../src/api";
+import { getCatalog, request } from "../../src/api";
 import { consumeCatalogDirty, recallProduct, rememberCatalog } from "../../src/catalogCache";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
@@ -37,12 +37,13 @@ import type { CatalogProduct } from "../../src/types";
 const PER_PAGE = 30;
 // Düşük stok görünümü: sunucuda stok süzgeci olmadığı için ürünler 100'erli sayfalarla taranır ve burada süzülür.
 // Eşik panel uyarısıyla aynıdır (0-5 adet).
-const LOW_STOCK_MAX = 5;
+// Sunucunun düşük stok listesi okunamazsa yedek: eşiği girilmemiş eski ürün kuralı (0 < stok < 10).
+const LEGACY_LOW_STOCK = 10;
 const SCAN_PER_PAGE = 100;
 const SCAN_MAX_PAGES = 30;
 const SCAN_PARALLEL = 3;
 const isLowStock = (p: CatalogProduct) =>
-  p.stock >= 0 && p.stock <= LOW_STOCK_MAX;
+  p.stock > 0 && p.stock < LEGACY_LOW_STOCK;
 
 // Barkod okutma simgesi: köşe çerçevesi içinde çizgiler.
 function BarcodeIcon({ size = 18, color }: { size?: number; color: string }) {
@@ -110,6 +111,8 @@ export default function ProductsScreen() {
   const [error, setError] = useState<string | null>(null);
   // Panel uyarısından gelindiğinde yalnızca düşük stoklu ürünler gösterilir.
   const [lowOnly, setLowOnly] = useState(params.filter === "low");
+  const lowIdsRef = useRef<Set<string> | null>(null);
+  const [lowTotal, setLowTotal] = useState<number | null>(null);
   // Tarama sınırı aşıldıysa taranan ürün sayısı; liste eksik olabilir.
   const [scanLimit, setScanLimit] = useState<number | null>(null);
   const requestId = useRef(0);
@@ -127,6 +130,16 @@ export default function ProductsScreen() {
       if (mode === "more") setLoadingMore(true);
       try {
         if (lowOnly) {
+          // Dalga 4: düşük stok tek kural sunucuda (catalog_item.is_low: kritik stok eşiği, depo eşiği, eşiksiz eski üründe < 10).
+          // GET /dashboard/low-stock (en çok 20 ürün + toplam); okunamazsa yerel yedek kural.
+          let serverLow: { ids: Set<string>; count: number } | null = null;
+          try {
+            const r = await request<any>("/dashboard/low-stock", { method: "GET" }, token);
+            serverLow = { ids: new Set((Array.isArray(r?.items) ? r.items : []).map((x: any) => String(x.id))), count: Number(r?.count) || 0 };
+          } catch {
+            serverLow = null;
+          }
+          lowIdsRef.current = serverLow?.ids || null;
           const search = debounced || undefined;
           const first = await getCatalog(token, {
             page: 1,
@@ -154,11 +167,12 @@ export default function ProductsScreen() {
           const low = all
             .filter(
               (p) =>
-                isLowStock(p) && !seen.has(p.id) && Boolean(seen.add(p.id)),
+                (serverLow ? serverLow.ids.has(p.id) : isLowStock(p)) && !seen.has(p.id) && Boolean(seen.add(p.id)),
             )
             .sort((a, b) => a.stock - b.stock);
           setProducts(low);
           setTotal(low.length);
+          setLowTotal(serverLow && !search ? serverLow.count : null);
           setPage(1);
           setScanLimit(
             first.total > pages * SCAN_PER_PAGE ? pages * SCAN_PER_PAGE : null,
@@ -231,7 +245,8 @@ export default function ProductsScreen() {
         return p;
       });
       if (!changed) return;
-      const next = lowOnlyRef.current ? merged.filter(isLowStock) : merged;
+      const ids = lowIdsRef.current;
+      const next = lowOnlyRef.current ? merged.filter((p) => (ids ? ids.has(p.id) : isLowStock(p))) : merged;
       setProducts(next);
       if (lowOnlyRef.current) setTotal(next.length);
     }, []),
@@ -300,6 +315,12 @@ export default function ProductsScreen() {
           ) : null}
         </SafeAnimatedView>
       ) : null}
+      {/* Dalga 4: barkodla toplu sayım (stok yönetimi yetkisi). */}
+      {canManage(user, "inventory") ? (
+        <View style={{ marginHorizontal: spacing.lg, marginBottom: spacing.xs }}>
+          <Button testID="products-count" size="sm" variant="ghost" label="Toplu sayım" onPress={() => router.push("/products/count" as any)} />
+        </View>
+      ) : null}
       <ChipRow>
         <Chip
           label="Tümü"
@@ -366,7 +387,7 @@ export default function ProductsScreen() {
                     ]}
                     numberOfLines={2}
                   >
-                    {`Stoğu ${LOW_STOCK_MAX} adet ve altında olan ürünler`}
+                    {lowTotal != null && lowTotal > products.length ? `Kritik stok seviyesine inen ${lowTotal} ürünün en düşük ${products.length} tanesi` : "Kritik stok seviyesine inen ürünler"}
                     {scanLimit
                       ? ` · yalnızca ilk ${scanLimit} ürün tarandı`
                       : ""}
@@ -551,7 +572,7 @@ export default function ProductsScreen() {
               description={
                 error ||
                 (lowOnly
-                  ? `Stoğu ${LOW_STOCK_MAX} adet ve altında olan ürün bulunmuyor.${scanLimit ? ` Yalnızca ilk ${scanLimit} ürün tarandı.` : ""}`
+                  ? `Kritik stok seviyesine inen ürün yok.${scanLimit ? ` Yalnızca ilk ${scanLimit} ürün tarandı.` : ""}`
                   : debounced
                     ? "Farklı bir ad, SKU veya barkod deneyin."
                     : "Ürünler web panelinden eklenir.")

@@ -116,4 +116,23 @@ t("seçicide arşivli ve Paraşüt aynalı hesap gösterilmez", () => {
   assert.equal(m.pickable({ id: "a" }), true);
 });
 
+t("Dalga 4: bakiye sabitleme gövdesi — hedef (eksi olabilir), tarih, açıklama", () => {
+  assert.deepEqual(m.adjustBody("-1.250,50", "16.11.2026", " Banka ekstresi "), { body: { target_balance: "-1250.50", entry_date: "2026-11-16", description: "Banka ekstresi" }, error: null });
+  assert.equal(m.adjustBody("", "2026-11-16", "").error, "Hedef bakiyeyi girin.");
+  assert.equal(m.adjustBody("abc", "2026-11-16", "").error, "Hedef bakiyeyi girin.");
+  assert.equal(m.adjustBody("100", "", "").error, "Tarihi girin (GG.AA.YYYY).");
+  assert.equal(m.adjustDiffText(130, "100", "TRY", (v, c) => `${v} ${c}`), "Fark: -30 TRY (bakiye 130 TRY → 100 TRY)");
+  assert.match(m.adjustErrorText({ code: "BALANCE_ADJUSTMENT_BUSY" }), /birkaç saniye/);
+  assert.match(m.adjustErrorText({ code: "BALANCE_ALREADY_AT_TARGET" }), /zaten/);
+});
+t("Dalga 4 / D-05: geri alınabilen hareket — elle, virman, bakiye düzeltme; diğerleri kaynağından", () => {
+  assert.equal(m.canUndo({ source_type: "manual" }), true);
+  assert.equal(m.canUndo({ source: { type: "transfer" } }), true);
+  assert.equal(m.canUndo({ source_type: "balance_adjustment" }), true);
+  assert.equal(m.canUndo({ source_type: "invoice_payment" }), false);
+  assert.equal(m.canUndo({ source_type: "parasut_trx" }), false);
+  assert.equal(m.canUndo({ source_type: "manual", before_opening: true }), true);
+  assert.equal(m.movementLabel({ source_type: "balance_adjustment" }), "Bakiye düzeltme");
+  assert.equal(m.movementLabel({ source: { label: "Elle girilen hareket" } }), "Elle girilen hareket");
+});
 console.log(`\n${n} test geçti`);

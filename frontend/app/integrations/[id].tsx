@@ -7,6 +7,7 @@ import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { getIntegrations, getOrders, getOrdersPage, getOrderStats } from "../../src/api";
 import { groupCount, ORDER_GROUPS, orderQuery, type OrderGroupKey } from "../../src/order-filters";
 import { Chip, ChipRow } from "../../src/ui/Chip";
+import { syncErrorView } from "../../src/sync-error";
 import { rememberOrderRow, storeSyncDays, storeSyncMessage, syncOrderByNumber, syncStoreOrders } from "../../src/api-siparis";
 import { FormField } from "../../src/ui/FormField";
 import type { OrderStats } from "../../src/api";
@@ -217,7 +218,10 @@ export default function IntegrationOrders() {
       await load(true);
       toast(storeSyncMessage(r), "success");
     } catch (e: any) {
-      toast(e?.message || "Senkronizasyon başarısız oldu.", "error");
+      // Dalga 4: 429 / 5xx geçici — entegrasyon bozulmaz; sunucu metni ve bekleme süresi.
+      const v = syncErrorView(e);
+      if (v.cooldownMs) setCooldownEnd(Date.now() + v.cooldownMs);
+      toast(v.text, v.tone);
     } finally {
       setSyncBusy(false);
     }

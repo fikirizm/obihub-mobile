@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { isReadOnly, mirrorBadge } from "../../src/mirror";
 import { InlineEmpty } from "../../src/components/InlineEmpty";
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { RefreshControl, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { createCashEntry, getCashAccount, newIdempotencyKey } from "../../src/api";
+import { createCashEntry, getCashAccount, newIdempotencyKey, request } from "../../src/api";
 import { archiveAccount, deleteAccount, getAccountMovements, moneyRetryable, unarchiveAccount, type MovementsPage } from "../../src/api-finans";
+import { canUndo, movementLabel } from "../../src/kasa-ui";
 import { accountActions, archiveError, DELETE_CONFIRM_TEXT, ARCHIVE_CONFIRM_TEXT, movementRow, movementTotals } from "../../src/kasa-ui";
 import { todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -124,6 +125,26 @@ export default function CashAccountScreen() {
       toast(e?.message || "Hareketler yüklenemedi.", "error");
     } finally {
       setMore(false);
+    }
+  };
+
+  // D-05 Geri al: elle hareket, virman (iki bacak) ve bakiye düzeltme — DELETE /finance/entries/{id}; diğerleri kaynağından.
+  const undoMove = async (e: CashEntry) => {
+    if (!token || busy) return;
+    const ok = await confirm({
+      title: "Hareket geri alınsın mı?",
+      message: `${e.description || movementLabel(e as any) || "Hareket"} · ${formatMoney(e.amount, account?.currency)}\nTers kayıt yazılır; satır "Geri alınanlar"a geçer.${(e as any).entry_type?.startsWith("transfer") ? " Virmanın iki bacağı birlikte geri alınır." : ""}`,
+      confirmLabel: "Geri al",
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await request<any>(`/finance/entries/${encodeURIComponent(String(e.id))}`, { method: "DELETE" }, token);
+      toast("Hareket geri alındı.", "success");
+    } catch (err: any) {
+      toast(err?.code === "ENTRY_LOCKED" ? "Bu hareket bir tahsilat ya da belgeden geliyor; kaynağından geri alın." : err?.message || "Geri alınamadı.", "error");
+    } finally {
+      load();
     }
   };
 
@@ -265,6 +286,12 @@ export default function CashAccountScreen() {
               <Text style={[type.footnote, { color: colors.textSecondary }]}>Bu hesap Paraşüt'ten geliyor; hareketleri Paraşüt'te girin.</Text>
             </View>
           ) : null}
+          {account.iban ? (
+            <View style={[styles.block, styles.ibanRow]}>
+              <Text testID="cash-iban" selectable style={[type.callout, { color: colors.textPrimary, flex: 1 }]}>{String(account.iban).replace(/(.{4})/g, "$1 ").trim()}</Text>
+              <Button testID="cash-iban-share" size="sm" variant="secondary" label="IBAN'ı paylaş" onPress={() => Share.share({ message: String(account.iban) }).catch(() => {})} />
+            </View>
+          ) : null}
           {account.archived ? (
             <View testID="cash-archived-notice" style={[styles.mirrorNote, { backgroundColor: colors.warningBg }]}>
               <Text style={[type.footnote, { color: colors.textSecondary }]}>Bu hesap arşivde; yeni hareket yazılamaz. Hareketler ve bakiye korunur.</Text>
@@ -275,6 +302,17 @@ export default function CashAccountScreen() {
               <Button testID="cash-add-income" label="Gelir ekle" busy={busy === "income"} disabled={Boolean(busy)} onPress={() => add("income")} style={{ flex: 1 }} />
               <Button testID="cash-add-expense" label="Gider ekle" variant="secondary" busy={busy === "expense"} disabled={Boolean(busy)} onPress={() => add("expense")} style={{ flex: 1 }} />
             </SafeAnimatedView>
+          ) : null}
+          {canManage(user, "billing") && !isReadOnly(account) && acts?.addMovement ? (
+            <View style={[styles.block, { marginTop: spacing.xs }]}>
+              <Button
+                testID="cash-adjust"
+                size="sm"
+                variant="ghost"
+                label="Bakiyeyi sabitle"
+                onPress={() => router.push({ pathname: "/cash/adjust", params: { id: account.id, name: account.name, currency: account.currency || "TRY" } } as any)}
+              />
+            </View>
           ) : null}
 
           <SafeAnimatedView entering={FadeInDown.delay(140).duration(380)}>
@@ -319,13 +357,14 @@ export default function CashAccountScreen() {
                       key={e.id}
                       testID={`cash-move-${i}`}
                       divider={i > 0}
+                      onPress={canManage(user, "billing") && !isReadOnly(account) && canUndo(e as any) ? () => undoMove(e) : undefined}
                       leading={
                         <IconTile tint={incoming ? colors.successBg : colors.errorBg}>
                           {incoming ? <TrendUpIcon size={18} color={colors.success} /> : <TrendDownIcon size={18} color={colors.error} />}
                         </IconTile>
                       }
                       title={e.description || e.counterparty_name || e.category_name || e.source?.label || ENTRY_LABELS[e.entry_type] || "Hareket"}
-                      subtitle={[row.typeLabel, e.related_account_name, e.counterparty_name && e.description ? e.counterparty_name : null, formatDate(e.entry_date)].filter(Boolean).join(" · ")}
+                      subtitle={[movementLabel(e as any) === "Bakiye düzeltme" ? "Bakiye düzeltme" : row.typeLabel, e.related_account_name, e.counterparty_name && e.description ? e.counterparty_name : null, formatDate(e.entry_date)].filter(Boolean).join(" · ")}
                       meta={row.tag ? `${row.tag} · bakiyeyi etkilemez` : undefined}
                       trailing={
                         <View style={styles.amountCol}>
@@ -392,6 +431,7 @@ const styles = StyleSheet.create({
   empty: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   amount: { maxWidth: 150, textAlign: "right" },
   amountCol: { alignItems: "flex-end", gap: 2 },
+  ibanRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.sm },
   note: { marginHorizontal: spacing.lg, marginTop: spacing.xs },
   totals: { flexDirection: "row", padding: spacing.md, gap: spacing.sm, marginBottom: spacing.sm },
   totalCol: { flex: 1, gap: 2 },
