@@ -173,7 +173,7 @@ export function validateForm(f: DocForm, opts: { stockMode?: string | null; docT
 
 const CODE_TEXT: Record<string, string> = {
   PARASUT_FIELD_UNSUPPORTED: "Bu faturadaki bazı vergiler Paraşüt'e henüz aktarılamıyor; fatura Paraşüt'e gönderilmedi.",
-  FX_SALES_NOT_YET: "Döviz cinsinden satış faturası henüz kesilemez; taslak olarak kaydedebilirsiniz.",
+  FX_RATE_REQUIRED: "Dövizli fatura için kur gerekli; belge tarihinin TCMB kuru alınamadı. Biraz sonra yeniden deneyin.",
   IDEMPOTENCY_CONFLICT: "Bu işlem daha önce farklı bilgilerle gönderilmiş. Formu yenileyip tekrar deneyin.",
   LINE_EXEMPTION_INVALID: "%0 KDV'li satırda istisna kodu gerekli.",
 };

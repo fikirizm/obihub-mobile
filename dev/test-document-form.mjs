@@ -86,7 +86,7 @@ t("doğrulama: müşteri, satır açıklaması, miktar, fiyat, tevkifat kodu, st
 
 t("hata metni: sunucu detail'i; satır numarası öne eklenir; yoksa koda göre Türkçe", () => {
   assert.equal(m.documentErrorText({ message: "Tevkifat oranı geçersiz.", line: 2 }), "2. satır: Tevkifat oranı geçersiz.");
-  assert.equal(m.documentErrorText({ code: "FX_SALES_NOT_YET", message: "" }), "Döviz cinsinden satış faturası henüz kesilemez; taslak olarak kaydedebilirsiniz.");
+  assert.match(m.documentErrorText({ code: "FX_RATE_REQUIRED", message: "" }), /TCMB kuru/);
   assert.equal(m.documentErrorText({}), "Kaydedilemedi. Lütfen tekrar deneyin.");
 });
 

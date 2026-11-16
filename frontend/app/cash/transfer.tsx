@@ -4,7 +4,8 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { getPickableAccounts, newIdempotencyKey } from "../../src/api";
-import { createTransfer, moneyRetryable } from "../../src/api-finans";
+import { createTransfer, getFxRates, moneyRetryable } from "../../src/api-finans";
+import { defaultTransferRate, fxErrorText, parseTr, transferRateLabel, transferTargetAmount, type Rates } from "../../src/fx";
 import { todayIso } from "../../src/finance";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing, tabular, type } from "../../src/theme/tokens";
@@ -35,6 +36,10 @@ export default function TransferScreen() {
   const [amountText, setAmountText] = useState("");
   const [description, setDescription] = useState("");
   const [tried, setTried] = useState(false);
+  // Dalga 3: farklı para birimli virman — kur (TCMB'den önerilir) ve karşı hesaba geçen tutar (to_amount).
+  const [rates, setRates] = useState<Rates>(null);
+  const [rateText, setRateText] = useState("");
+  const [toAmountText, setToAmountText] = useState("");
   const [busy, setBusy] = useState(false);
   const sending = useRef(false);
   // Önceki gönderimin sonucu belirsiz kaldıysa (yanıt alınamadı) doğrudur; yeniden gönderim ayrıca onaylatılır.
@@ -60,12 +65,27 @@ export default function TransferScreen() {
 
   useEffect(() => {
     load();
-  }, [load]);
+    if (token) getFxRates(token).then((r) => setRates(r?.rates || null)).catch(() => setRates(null));
+  }, [load, token]);
 
   const source = accounts.find((a) => a.id === fromId) || null;
-  // Sunucu farklı para birimleri arasında virmanı kabul etmez; hedef listesi kaynağın para birimine göre süzülür (web ile aynı).
-  const targets = useMemo(() => accounts.filter((a) => a.id !== fromId && cur(a) === cur(source)), [accounts, fromId, source]);
+  // Dalga 3: farklı para birimli hesaba da virman yapılır (karşı tutar zorunlu); aynı birimdekiler önce.
+  const targets = useMemo(
+    () => accounts.filter((a) => a.id !== fromId).sort((x, y) => Number(cur(y) === cur(source)) - Number(cur(x) === cur(source))),
+    [accounts, fromId, source]
+  );
   const target = targets.find((a) => a.id === toId) || null;
+  const cross = Boolean(source && target && cur(source) !== cur(target));
+  // Kaynak/hedef değişince kur önerisi ve karşı tutar yenilenir.
+  useEffect(() => {
+    if (!cross || !source || !target) return;
+    setRateText(defaultTransferRate(cur(source), cur(target), rates));
+  }, [cross, source?.id, target?.id, rates]);
+  useEffect(() => {
+    if (!cross || !source || !target) return;
+    setToAmountText(transferTargetAmount(amountText, rateText, cur(source), cur(target)));
+  }, [cross, amountText, rateText, source?.id, target?.id]);
+  const toAmount = cross ? parseTr(toAmountText) : null;
 
   // Kaynak değişince hedef geçersiz kaldıysa ilk uygun hesap seçilir.
   useEffect(() => {
@@ -78,12 +98,15 @@ export default function TransferScreen() {
   const submit = async () => {
     setTried(true);
     if (!token || !source || !target || !amount || amount <= 0 || sending.current) return;
+    if (cross && !(toAmount && toAmount > 0)) return;
     const after = Number(source.balance || 0) - amount;
     const ok = await confirm({
       title: uncertain ? "Aynı virman yeniden gönderilsin mi?" : "Virman kaydedilsin mi?",
       message:
         (uncertain ? "Önceki gönderimin sonucu alınamadı. Aynı virman aynı anahtarla gönderilir; kaydedildiyse ikinci kez aktarılmaz.\n" : "") +
-        `${source.name} hesabından ${target.name} hesabına ${formatMoney(amount, source.currency)} aktarılacak.\nTarih: ${formatDate(todayIso())}` +
+        `${source.name} hesabından ${target.name} hesabına ${formatMoney(amount, source.currency)} aktarılacak.` +
+        (cross && toAmount ? `\n${target.name} hesabına geçen: ${formatMoney(toAmount, target.currency)}` : "") +
+        `\nTarih: ${formatDate(todayIso())}` +
         (after < 0 ? `\nDikkat: ${source.name} bakiyesi ${formatMoney(after, source.currency)} olacak.` : ""),
       confirmLabel: uncertain ? "Yeniden gönder" : "Virmanı kaydet",
     });
@@ -99,6 +122,7 @@ export default function TransferScreen() {
         entry_date: todayIso(),
         description: description.trim(),
         reference: "",
+        ...(cross && toAmount ? { to_amount: toAmount.toFixed(2) } : {}),
       }, keyRef.current);
       toast(r?.replayed ? "Virman zaten kaydedilmişti." : "Virman kaydedildi", "success");
       router.back();
@@ -113,7 +137,7 @@ export default function TransferScreen() {
         load();
       } else {
         keyRef.current = null;
-        toast(e?.message || "Virman kaydedilemedi.", "error");
+        toast(fxErrorText(e) || "Virman kaydedilemedi.", "error");
       }
     } finally {
       sending.current = false;
@@ -166,7 +190,7 @@ export default function TransferScreen() {
           <SectionTitle title="Hedef hesap" />
           {targets.length === 0 ? (
             <Card padded style={styles.block}>
-              <Text style={[type.body, { color: colors.amber }]}>Aynı para biriminde başka hesap yok. Farklı para birimleri arasında virman yapılamaz.</Text>
+              <Text style={[type.body, { color: colors.amber }]}>Aktarılabilecek başka hesap yok.</Text>
             </Card>
           ) : (
             <Card style={styles.block}>
@@ -190,6 +214,29 @@ export default function TransferScreen() {
               suffix={cur(source)}
               error={amountError}
             />
+            {cross && source && target ? (
+              <>
+                <FormField
+                  testID="transfer-rate"
+                  label={transferRateLabel(cur(source), cur(target))}
+                  value={rateText}
+                  onChangeText={setRateText}
+                  editable={!uncertain}
+                  keyboardType="decimal-pad"
+                  hint="TCMB döviz alış kuruyla önerilir; bankanızın kuruyla değiştirebilirsiniz."
+                />
+                <FormField
+                  testID="transfer-to-amount"
+                  label={`${target.name} hesabına geçen tutar (${cur(target)})`}
+                  value={toAmountText}
+                  onChangeText={setToAmountText}
+                  editable={!uncertain}
+                  keyboardType="decimal-pad"
+                  suffix={cur(target)}
+                  error={tried && !(toAmount && toAmount > 0) ? "Karşı hesaba geçen tutarı girin." : undefined}
+                />
+              </>
+            ) : null}
             <FormField
               testID="transfer-description"
               label="Açıklama (isteğe bağlı)"

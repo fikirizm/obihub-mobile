@@ -849,9 +849,9 @@ http
         const src = accounts.find((a) => a.id === b.from_account_id);
         const dst = accounts.find((a) => a.id === b.to_account_id);
         if (!src || !dst) return send(res, 404, { detail: "Transfer hesaplarından biri bulunamadı" });
-        if ((src.currency || "TRY") !== (dst.currency || "TRY")) return send(res, 400, { detail: "Farklı para birimleri arasında transfer için kur bilgisi gerekir" });
+        if ((src.currency || "TRY") !== (dst.currency || "TRY") && !b.to_amount) return send(res, 400, { code: "TRANSFER_TARGET_AMOUNT_REQUIRED", detail: "Karşı hesaba geçen tutarı girin." });
         const tid = "tr" + Date.now();
-        src.balance -= b.amount; dst.balance += b.amount;
+        src.balance -= b.amount; dst.balance += b.to_amount ? Number(b.to_amount) : b.amount; console.log("WRITE TRANSFER", JSON.stringify(b));
         const outgoing = { id: tid + "o", account_id: src.id, entry_type: "transfer_out", amount: b.amount, entry_date: b.entry_date, description: b.description || "Hesaplar arası transfer", related_account_name: dst.name };
         const incoming = { id: tid + "i", account_id: dst.id, entry_type: "transfer_in", amount: b.amount, entry_date: b.entry_date, description: b.description || "Hesaplar arası transfer", related_account_name: src.name };
         entries.unshift(outgoing, incoming);
@@ -1356,6 +1356,7 @@ http
         return send(res, 200, { ok: true, archived: inv.archived });
       });
     }
+    if (path === "/finance/fx-rates") return send(res, 200, { date: "2026-11-16", rate_date: "2026-11-14", available: true, source: "tcmb", rates: { USD: { buying: "34.3796", selling: "34.4416" }, EUR: { buying: "36.5", selling: "36.6" } } });
     // Dalga 3: çekler (portföy; kasaya girmez).
     state.cheques = state.cheques || [{ id: "chq1", direction: "received", status: "portfoy", status_label: "Portföyde", amount: "2500.00", currency: "TRY", cheque_no: "A-1001", bank_name: "Garanti", due_date: "2026-11-20", days_to_due: 4, due_state: "soon", customer_name: "Elif Kaya", invoices: [{ invoice_id: "li1", invoice_number: "OBI2026101", amount: "2500.00" }], detached: false, actions: { collect: true, endorse: true, return: true, pay: false, delete: true, receipt: true } }];
     let chm;

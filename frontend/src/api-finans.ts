@@ -23,6 +23,8 @@ export type TransferBody = {
   from_account_id: string;
   to_account_id: string;
   amount: number;
+  // Dalga 3: farklı para birimli hedefe geçen tutar (hedefin para biriminde); aynı birimde gönderilmez.
+  to_amount?: string;
   entry_date: string; // YYYY-AA-GG
   description: string;
   reference: string;
@@ -496,4 +498,13 @@ export async function getAccountMovements(token: string, accountId: string, f: M
     items: Array.isArray(d?.items) ? d.items : [],
     undone_items: Array.isArray(d?.undone_items) ? d.undone_items : [],
   };
+}
+
+// Dalga 3 (P3.2): TCMB kurları — GET /finance/fx-rates?date= → {date, rate_date, available, rates: {USD: {buying, selling}}}.
+export async function getFxRates(token: string, date?: string) {
+  return request<{ date?: string; rate_date?: string | null; available?: boolean; rates?: Record<string, { buying?: string; selling?: string }> }>(
+    `/finance/fx-rates${date ? `?date=${encodeURIComponent(date)}` : ""}`,
+    { method: "GET" },
+    token
+  );
 }

@@ -4,7 +4,8 @@ import { router, useFocusEffect } from "expo-router";
 import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { getAccountsList, type AccountsList } from "../../src/api-finans";
+import { getAccountsList, getFxRates, type AccountsList } from "../../src/api-finans";
+import { approxTryTotal, type Rates } from "../../src/fx";
 import { accountSections, archivedNote, currencyTotals, tabCounts, type AccountStatus } from "../../src/kasa-ui";
 import { mirrorBadge } from "../../src/mirror";
 import { Chip, ChipRow } from "../../src/ui/Chip";
@@ -77,6 +78,7 @@ export default function CashScreen() {
   const { colors } = useTheme();
   const mayWrite = canManage(user, "billing");
   const [status, setStatus] = useState<AccountStatus>("active");
+  const [rates, setRates] = useState<Rates>(null);
   const [list, setList] = useState<AccountsList>({ items: [] });
   const accounts: CashAccount[] = list.items;
   const [loading, setLoading] = useState(true);
@@ -87,6 +89,7 @@ export default function CashScreen() {
     if (!token) return;
     try {
       setList(await getAccountsList(token, status));
+      getFxRates(token).then((r) => setRates(r?.rates || null)).catch(() => setRates(null));
       setError(null);
     } catch (e: any) {
       setError(e?.message || "Hesaplar yüklenemedi.");
@@ -107,6 +110,8 @@ export default function CashScreen() {
   const totals = currencyTotals(list);
   const tryTotal = totals.find((x) => x.currency === "TRY")?.amount ?? 0;
   const foreign = totals.filter((x) => x.currency !== "TRY");
+  // Dalga 3: güncel TCMB alış kuruyla YAKLAŞIK TL toplamı (bir dövizin kuru yoksa gösterilmez).
+  const approx = approxTryTotal(totals, rates);
   const counts = tabCounts(list);
   const archNote = status === "active" ? archivedNote(list, formatMoney) : null;
   const sections = accountSections(list);
@@ -171,6 +176,11 @@ export default function CashScreen() {
             </SafeAnimatedView>
           ) : null}
 
+          {status === "active" && approx ? (
+            <Text testID="cash-approx-try" style={[type.caption, { color: colors.textTertiary, marginHorizontal: spacing.lg, marginTop: spacing.sm }]}>
+              {`Tümü yaklaşık ${formatMoney(approx.amount, "TRY")} (${approx.currencies.join(", ")} güncel kurla)`}
+            </Text>
+          ) : null}
           {archNote ? (
             <Text testID="cash-archived-note" style={[type.caption, { color: colors.textTertiary, marginHorizontal: spacing.lg, marginTop: spacing.sm }]}>{archNote}</Text>
           ) : null}

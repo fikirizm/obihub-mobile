@@ -12,12 +12,13 @@ import { isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { amountRows, collectAmount, invoiceStatusView, edocCancelled } from "../../src/invoice-status";
 import { invoicePaymentActions, invoicePaymentCollection, OFFSET_RELEASE_TEXT, offsetErrorText, offsetReleasePath } from "../../src/collection-actions";
 import { deleteConfirmText, lifecycleActions, lifecycleErrorText } from "../../src/document-lifecycle";
-import { copyInvoice, getInvoicePdf, setInvoiceArchived } from "../../src/api-finans";
+import { copyInvoice, getFxRates, getInvoicePdf, setInvoiceArchived } from "../../src/api-finans";
 import { Linking, Platform } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import { printOrShare } from "../../src/pdf";
 import { canOfficializeReturn } from "../../src/officialize";
 import { cashMethods } from "../../src/cheques";
+import { parseTr, suggestedTry } from "../../src/fx";
 import { CollectionFollowupCard } from "../../src/components/CollectionFollowupCard";
 import { autoSettlementText, canUnmatch, UNMATCH_CONFIRM, unmatchDoneText, unmatchErrorText } from "../../src/cari-ui";
 import { runVoidCollection } from "../../src/collection-flow";
@@ -90,7 +91,7 @@ export default function LocalInvoiceDetailScreen() {
   const id = String(params.id || "");
   const { token, user, parasutConnected } = useAuth();
   const { colors } = useTheme();
-  const { toast, confirm, promptEntry, choose } = useFeedback();
+  const { toast, confirm, promptEntry, promptNumber, choose } = useFeedback();
   const [inv, setInv] = useState<LocalInvoice | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -277,8 +278,10 @@ export default function LocalInvoiceDetailScreen() {
     }
     const invCur = String(cur || "TRY").toUpperCase();
     const usable = accountsForCurrency(accounts, invCur);
+    // Dalga 3 (P3.2): dövizli fatura TL hesaba da tahsil edilir ("Alınan TL" = cash_amount; kur farkı ayrı satır, Paraşüt'e işlenmez).
+    const tryAccounts = invCur !== "TRY" ? accountsForCurrency(accounts, "TRY") : [];
     // Aşama 4 P2: o para biriminde hesap yoksa sunucu ACCOUNT_NONE_FOR_CURRENCY döner (firmanın hiç hesabı yoksa TRY'de Nakit Kasa açılır).
-    if (accounts.length > 0 && usable.length === 0) {
+    if (accounts.length > 0 && usable.length === 0 && tryAccounts.length === 0) {
       toast(`${invCur} para biriminde kasa/banka hesabı yok. Önce Kasa ve Bankalar'dan hesap ekleyin.`, "error");
       return;
     }
@@ -290,17 +293,41 @@ export default function LocalInvoiceDetailScreen() {
       noteLabel: "Not (isteğe bağlı)",
       // Dalga 3: çek kasa tahsilatı değil (422 CHEQUE_USE_CHEQUES) — "Çekle tahsil et" ayrı akış.
       methods: cashMethods(PAYMENT_METHODS),
-      accounts: usable.map((a) => ({ value: a.id, label: accountOptionLabel(a, usable.length > 1) })),
-      accountsLabel: usable.length > 0 ? "Hesap" : undefined,
+      accounts: [
+        ...usable.map((a) => ({ value: a.id, label: accountOptionLabel(a, usable.length > 1) })),
+        ...tryAccounts.map((a) => ({ value: a.id, label: `${a.name} (TL)` })),
+      ],
+      accountsLabel: usable.length + tryAccounts.length > 0 ? "Hesap" : undefined,
     });
     if (!entry || entry.amount <= 0) return;
     if (entry.amount > remaining + 0.004) {
       toast("Tutar kalan borçtan büyük olamaz.", "error");
       return;
     }
+    // Dövizli faturayı TL hesaba tahsil: alınan TL tutarı sorulur (TCMB alış kuruyla önerilir).
+    let cashAmount: string | null = null;
+    if (tryAccounts.some((a) => a.id === entry.account)) {
+      let rates: any = null;
+      try {
+        rates = (await getFxRates(token))?.rates || null;
+      } catch {
+        rates = null;
+      }
+      const suggestion = parseTr(suggestedTry(entry.amount, invCur, rates)) || 0;
+      const tl = await promptNumber({
+        title: "Alınan TL",
+        message: `${formatMoney(entry.amount, invCur)} karşılığı hesaba giren TL tutarı. Kur farkı ayrı satır olarak yazılır; bu tahsilat Paraşüt'e işlenmez.`,
+        initial: suggestion,
+        decimal: true,
+        suffix: "TRY",
+        confirmLabel: "Devam",
+      });
+      if (!tl || tl <= 0) return;
+      cashAmount = tl.toFixed(2);
+    }
     // Web "Paraşüt'e de işle": Paraşüt'teki faturada tahsilat isteğe bağlı olarak Paraşüt hesabına da yazılır.
     let psAccount: string | null = null;
-    if (canOfferParasutSync(inv, caps)) {
+    if (!cashAmount && canOfferParasutSync(inv, caps)) {
       let psAccounts: { id: string; name: string }[] = [];
       try {
         psAccounts = await getParasutAccounts(token);
@@ -318,7 +345,7 @@ export default function LocalInvoiceDetailScreen() {
     setBusy("payment");
     // İşlem başına bir anahtar; belirsiz sonuçta aynı anahtar ve gövdeyle yeniden gönderilir (ikinci tahsilat açılmaz).
     const key = newIdempotencyKey("inv-pay");
-    const body = { amount: entry.amount, date: todayIso(), method: entry.method || "nakit", notes: entry.note || undefined, account_id: entry.account || null, ...parasutCollectFields(psAccount) };
+    const body = { amount: entry.amount, date: todayIso(), method: entry.method || "nakit", notes: entry.note || undefined, account_id: entry.account || null, ...(cashAmount ? { cash_amount: cashAmount } : {}), ...parasutCollectFields(psAccount) };
     try {
       const out = await sendKeyedMoney(
         () => addLocalInvoicePayment(token, inv.id, body, key),
