@@ -3,6 +3,7 @@
 // "Ödeme ekle" yalnız modül açık + ui-capabilities.payable_payment + actions.can_pay + geri alınmamış borçta.
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -40,7 +41,9 @@ import { Button } from "../../src/ui/Button";
 import { useFeedback } from "../../src/ui/Feedback";
 import { DeleteGuardSheet } from "../../src/components/DeleteGuardSheet";
 import { doneText, type GuardAction } from "../../src/delete-guard";
-import { runExpenseLifecycle } from "../../src/api-gider";
+import { getExpensePdf, runExpenseLifecycle } from "../../src/api-gider";
+import * as FileSystem from "expo-file-system/legacy";
+import { printOrShare } from "../../src/pdf";
 import { DetailHero, type HeroStat } from "../../src/ui/DetailHero";
 import { StackHeader } from "../../src/ui/Header";
 import { ON_HERO } from "../../src/ui/HeroCard";
@@ -109,6 +112,7 @@ export default function ExpenseDetailScreen() {
   const { toast } = useFeedback();
   const [life, setLife] = useState<GuardAction | null>(null);
   const [unarchiving, setUnarchiving] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
@@ -470,6 +474,45 @@ export default function ExpenseDetailScreen() {
             })}
           </Card>
         </SafeAnimatedView>
+        {/* Dalga 1 P1.3: özet PDF (resmi e-Fatura görüntüsü değil), kopya ve geçmiş. */}
+        <View style={styles.extraRow}>
+          <Button
+            testID="expense-pdf-btn"
+            size="sm"
+            variant="secondary"
+            label="PDF"
+            busy={pdfBusy}
+            onPress={async () => {
+              if (!token || pdfBusy) return;
+              setPdfBusy(true);
+              try {
+                const b64 = await getExpensePdf(token, d.id);
+                if (Platform.OS === "web") toast("PDF hazır (web önizlemesinde açılmaz).", "info");
+                else {
+                  const path = `${FileSystem.cacheDirectory}${String(d.document_number || "gider").replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`;
+                  await FileSystem.writeAsStringAsync(path, b64, { encoding: FileSystem.EncodingType.Base64 });
+                  await printOrShare(path);
+                }
+              } catch (e: any) {
+                toast(e?.message || "PDF alınamadı.", "error");
+              } finally {
+                setPdfBusy(false);
+              }
+            }}
+            style={{ flex: 1 }}
+          />
+          {canManage(user, "billing") ? (
+            <Button testID="expense-copy-btn" size="sm" variant="secondary" label="Kopyasını oluştur" onPress={() => router.push({ pathname: "/expenses/new", params: { copy: d.id } })} style={{ flex: 1 }} />
+          ) : null}
+          <Button
+            testID="expense-history-btn"
+            size="sm"
+            variant="ghost"
+            label="Geçmiş"
+            onPress={() => router.push({ pathname: "/expenses/history", params: { ref: d.id, title: [d.supplier.name, d.document_number].filter(Boolean).join(" · ") } } as any)}
+            style={{ flex: 1 }}
+          />
+        </View>
         {canManage(user, "billing") ? (
           <View style={styles.lifeWrap}>
             {d.archived ? (
@@ -549,7 +592,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
   },
   payWrap: { marginHorizontal: spacing.lg, marginTop: spacing.md },
-  lifeWrap: { marginHorizontal: spacing.lg, marginTop: spacing.xl, gap: spacing.xs },
+  extraRow: { flexDirection: "row", gap: spacing.xs, marginHorizontal: spacing.lg, marginTop: spacing.xl },
+  lifeWrap: { marginHorizontal: spacing.lg, marginTop: spacing.md, gap: spacing.xs },
   emptyRow: {
     flexDirection: "row",
     alignItems: "center",

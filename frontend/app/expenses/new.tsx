@@ -6,7 +6,9 @@
 import { FormSkeleton } from "../../src/components/Skeleton";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
+import { copyNotice, copyToForm } from "../../src/expense-extras";
+import { getExpenseCopy } from "../../src/api-gider";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { newIdempotencyKey } from "../../src/api";
@@ -47,7 +49,8 @@ import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
 import { Card, SectionTitle } from "../../src/ui/ListRow";
 import type { UiCapabilities } from "../../src/types";
 
-const VAT = ["0", "1", "10", "20"].map((v) => ({ value: v, label: `%${v}` }));
+// Dalga 1: eski tarihli belgeler için %8 ve %18 de seçilebilir.
+const VAT = ["0", "1", "8", "10", "18", "20"].map((v) => ({ value: v, label: `%${v}` }));
 const KINDS = [
   { value: "service" as const, label: "Hizmet / gider" },
   { value: "product" as const, label: "Ürün (stoğa girer)" },
@@ -165,6 +168,9 @@ export default function ManualExpenseScreen() {
   const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string }[] | null>(null);
   const [supplierQuery, setSupplierQuery] = useState("");
+  // Dalga 1: "Kopyasını oluştur" — kaynak faturadan tedarikçi, kategori ve kalemler (belge no, tarih, vade, ödeme yok).
+  const copyRef = String(useLocalSearchParams<{ copy?: string }>().copy || "");
+  const [copyNote, setCopyNote] = useState<string | null>(null);
 
   const [f, setF] = useState<ManualForm>({
     supplierMode: "new",
@@ -185,6 +191,22 @@ export default function ManualExpenseScreen() {
   const [issueText, setIssueText] = useState(trDate(today));
   const [dueText, setDueText] = useState("");
   const set = (patch: Partial<ManualForm>) => setF((p) => ({ ...p, ...patch }));
+  useEffect(() => {
+    if (!token || !copyRef) return;
+    let live = true;
+    getExpenseCopy(token, copyRef)
+      .then((c) => {
+        if (!live) return;
+        const x = copyToForm(c);
+        setF((p) => ({ ...p, supplierMode: x.supplierMode, partyId: x.partyId, name: x.name, taxId: x.taxId, categoryId: x.categoryId, lines: x.lines }));
+        if (x.supplierMode === "existing") setSupplierQuery(x.name);
+        setCopyNote(["Fatura kopyalandı; belge no, tarih ve ödeme bilgisi boş başlar.", copyNotice(c)].filter(Boolean).join(" "));
+      })
+      .catch((e: any) => live && toast(e?.message || "Kopya bilgisi alınamadı.", "error"));
+    return () => {
+      live = false;
+    };
+  }, [token, copyRef]);
   const setLine = (i: number, patch: Partial<ManualLineInput>) => setF((p) => ({ ...p, lines: p.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
 
   const [tried, setTried] = useState(false);
@@ -362,6 +384,13 @@ export default function ManualExpenseScreen() {
             <View style={[styles.notice, { backgroundColor: colors.warningBg }]} testID="parasut-warning">
               <AlertIcon size={16} color={colors.amber} />
               <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{PARASUT_WARNING}</Text>
+            </View>
+          ) : null}
+
+          {copyNote ? (
+            <View style={[styles.notice, { backgroundColor: colors.infoBg }]} testID="copy-notice">
+              <AlertIcon size={16} color={colors.info} />
+              <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{copyNote}</Text>
             </View>
           ) : null}
 

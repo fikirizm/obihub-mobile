@@ -731,3 +731,20 @@ export async function checkExpenseLifecycle(token: string, id: string, action: G
 export async function runExpenseLifecycle(token: string, id: string, action: GuardAction | "unarchive") {
   return request<any>(actionPath(id, action), { method: action === "delete" ? "DELETE" : "POST", ...(action === "delete" ? {} : { body: "{}" }) }, token);
 }
+
+// Dalga 1 P1.3: gider faturası geçmişi, kopyası (elle alış formu ön doldurması) ve özet PDF'i.
+export async function getExpenseHistory(token: string, ref: string) {
+  return request<any>(`/accounting/expense-invoices/${encodeURIComponent(ref)}/history`, { method: "GET" }, token);
+}
+export async function getExpenseCopy(token: string, ref: string) {
+  return request<any>(`/accounting/expense-invoices/${encodeURIComponent(ref)}/copy`, { method: "GET" }, token);
+}
+export async function getExpensePdf(token: string, ref: string): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}/accounting/expense-invoices/${encodeURIComponent(ref)}/pdf`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const j: any = await res.json().catch(() => null);
+    const msg = typeof j?.detail === "string" ? j.detail : typeof j?.detail?.message === "string" ? j.detail.message : "";
+    throw Object.assign(new Error(msg || "PDF alınamadı."), { status: res.status, code: j?.code || j?.detail?.code });
+  }
+  return bytesToBase64(new Uint8Array(await res.arrayBuffer()));
+}

@@ -6,9 +6,9 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { getLegacyPartyCurrency, getPartyLedgerCompat, legacyIdOf } from "../../src/api-gider";
-import { deleteCustomerTransfer, deleteParty, deletePartyErrorText, getAllocationState, getParty, getPartyOrders, sendKeyedMoney, type AllocationState, type PartyOrder } from "../../src/api-finans";
+import { deleteCustomerTransfer, deleteParty, setPartyArchived, getAllocationState, getParty, getPartyOrders, sendKeyedMoney, type AllocationState, type PartyOrder } from "../../src/api-finans";
 import { newIdempotencyKey } from "../../src/api";
-import { balanceHint, matchLinkView, transferErrorText, transferRowActions } from "../../src/cari-ui";
+import { balanceHint, matchLinkView, partyDeleteOutcome, transferErrorText, transferRowActions } from "../../src/cari-ui";
 import { ledgerCollection, ledgerRowActions } from "../../src/collection-actions";
 import { runVoidCollection } from "../../src/collection-flow";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -137,7 +137,22 @@ export default function CustomerDetailScreen() {
       if (router.canGoBack()) router.back();
       else router.replace("/customers");
     } catch (e: any) {
-      toast(deletePartyErrorText(e), "error");
+      const out = partyDeleteOutcome(e);
+      if (!out.offerArchive) {
+        toast(out.text, "error");
+        return;
+      }
+      // Hareketli cari silinmez; Paraşüt gibi arşiv önerilir.
+      const arch = await confirm({ title: "Cari silinemez", message: out.text, confirmLabel: "Arşivle" });
+      if (!arch) return;
+      try {
+        await setPartyArchived(token, legacyIdOf(id), true);
+        toast("Cari arşivlendi; hareketleri korunur.", "success");
+        if (router.canGoBack()) router.back();
+        else router.replace("/customers");
+      } catch (e2: any) {
+        toast(e2?.message || "Cari arşivlenemedi.", "error");
+      }
     } finally {
       setDeleting(false);
     }

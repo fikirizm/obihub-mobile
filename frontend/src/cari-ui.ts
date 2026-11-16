@@ -175,3 +175,13 @@ export function partyRouteParams(p: PartyRow): { id: string } & Record<string, s
     currency: p.origin === "read_model" && p.source === "legacy" ? "" : String(p.currency || "TRY"),
   };
 }
+
+// Dalga 1 (P1.2): cari silme sonucu. Hareketli cari (kesilmiş fatura, tahsilat, POS, defter) 409 CUSTOMER_HAS_ACTIVITY → arşiv önerilir;
+// bakiyeli cari 409 CUSTOMER_HAS_BALANCE (değişmedi).
+export function partyDeleteOutcome(e: { code?: string; message?: string } | null | undefined) {
+  const msg = typeof e?.message === "string" && !/^Sunucu hatası/.test(e.message) && e.message !== e?.code ? e.message.trim() : "";
+  if (e?.code === "CUSTOMER_HAS_ACTIVITY")
+    return { offerArchive: true, text: msg || "Hesap hareketi olan cari silinemez; faturaları ve tahsilatları bu kartta durur. Kartı silmek yerine arşivleyin." };
+  if (e?.code === "CUSTOMER_HAS_BALANCE") return { offerArchive: false, text: msg || "Bu carinin bakiyesi var; bakiye kapanmadan silinemez." };
+  return { offerArchive: false, text: msg || "Cari silinemedi." };
+}

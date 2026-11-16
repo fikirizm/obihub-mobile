@@ -88,4 +88,15 @@ t("Sürüm 3: Paraşüt kaynaklı belge (source parasut / parasut_mirror ya da s
   assert.equal(m.invoiceStatusView({ status: "gonderildi", source_kind: "parasut" }, { parasutConnected: true }).notOfficial, null);
 });
 
+t("Dalga 1: e-belgesi iptal edilmiş fatura resmi değil — 'Kesildi · e-Belge iptal edildi'", () => {
+  const inv = { status: "resmilesti", edoc_state: "cancelled", edoc_cancelled_at: "2026-11-16T10:00:00Z", total: 100, paid_amount: 0 };
+  assert.equal(m.documentAxis(inv), "issued");
+  const v = m.invoiceStatusView(inv, { parasutConnected: true });
+  assert.equal(v.notOfficial.label, "e-Belge iptal edildi");
+  assert.equal(v.notOfficial.kind, "error");
+  assert.equal(m.invoiceStatusText(inv, { parasutConnected: false }).startsWith("Kesildi · e-Belge iptal edildi"), true);
+  assert.equal(m.edocCancelled(inv), true);
+  assert.equal(m.edocCancelled({ edoc_state: "cancelled" }), true);
+  assert.equal(m.edocCancelled({ edoc_state: "done" }), false);
+});
 console.log(`\n${n} test geçti`);

@@ -9,7 +9,7 @@ import { addLocalInvoicePayment, checkLocalInvoiceEdocStatus, getPickableAccount
 import { accountOptionLabel, accountsForCurrency, collectErrorText, unmatchAllocation, deleteLocalInvoice, getParasutAccounts, getParasutPaymentCaps, isInvoiceEditable, isUncertainWrite, postParasutPaymentAction, sendKeyedMoney } from "../../src/api-finans";
 import { canOfferParasutSync, collectResultText, parasutActionFailText, parasutActionRequest, parasutActionResult, parasutCollectFields, parasutPayView, PARASUT_ACTION_LABELS, type ParasutAction } from "../../src/parasut-pay";
 import { isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
-import { amountRows, collectAmount, invoiceStatusView, parasutUnsupportedText } from "../../src/invoice-status";
+import { amountRows, collectAmount, invoiceStatusView, parasutUnsupportedText, edocCancelled } from "../../src/invoice-status";
 import { invoicePaymentActions, invoicePaymentCollection } from "../../src/collection-actions";
 import { deleteConfirmText, lifecycleActions, lifecycleErrorText } from "../../src/document-lifecycle";
 import { copyInvoice, getInvoicePdf, setInvoiceArchived } from "../../src/api-finans";
@@ -236,7 +236,8 @@ export default function LocalInvoiceDetailScreen() {
       setBusy(null);
     }
   };
-  const officializeCandidate = mayWrite && !readOnly && parasutConnected === true && !inv.parasut_invoice_id && inv.status !== "resmilesti" && !isCancelled;
+  // Dalga 1: e-belgesi iptal edilmiş fatura yeniden resmileştirilmez; sıradaki adım yerel iptaldir.
+  const officializeCandidate = mayWrite && !readOnly && parasutConnected === true && !inv.parasut_invoice_id && inv.status !== "resmilesti" && !isCancelled && !edocCancelled(inv);
   // G2 §6: tevkifat / ÖTV-ÖİV / konaklama / stopaj Paraşüt'e taşınamaz; düğme yerine açıklama (sunucu yine reddeder).
   const onlyObiHub = officializeCandidate ? parasutUnsupportedText(inv) : null;
   const canOfficialize = officializeCandidate && !onlyObiHub;
@@ -361,8 +362,9 @@ export default function LocalInvoiceDetailScreen() {
       const r = await checkLocalInvoiceEdocStatus(token, inv.id);
       const state = r?.edoc_state;
       const settled = autoSettlementText((r as any)?.auto_settlement);
-      const main = r?.message || (state === "done" ? "Fatura resmileşti" : state === "failed" ? "E-belge oluşturulamadı" : "E-belge sonucu henüz gelmedi");
-      toast(settled ? `${main} ${settled}` : main, state === "failed" ? "error" : "success");
+      // Dalga 1: e-belgesi iptal edilmiş faturada sorgu {ok:false, edoc_state:"cancelled"} döner; başarı tonu yok.
+      const main = state === "cancelled" ? "e-Belge iptal edilmiş; fatura resmi değil." : r?.message || (state === "done" ? "Fatura resmileşti" : state === "failed" ? "E-belge oluşturulamadı" : "E-belge sonucu henüz gelmedi");
+      toast(settled ? `${main} ${settled}` : main, state === "failed" ? "error" : state === "cancelled" || r?.ok === false ? "info" : "success");
       await load();
     } catch (e: any) {
       toast(e?.message || "Durum sorgulanamadı.", "error");
@@ -578,7 +580,7 @@ export default function LocalInvoiceDetailScreen() {
           <SafeAnimatedView entering={FadeInDown.delay(100).duration(380)}>
             <SectionTitle title="Belge işlemleri" action={inv.archived ? <StatusBadge label="Arşivde" kind="neutral" size="sm" /> : undefined} />
             <View style={styles.lcGrid}>
-              {lc.preview ? <Button testID="invoice-pdf" size="sm" variant="secondary" label="PDF / Yazdır" busy={busy === "pdf"} disabled={Boolean(busy)} onPress={onPdf} /> : null}
+              {lc.preview ? <Button testID="invoice-pdf" size="sm" variant="secondary" label={lc.official_pdf ? "Resmi PDF" : "PDF / Yazdır"} busy={busy === "pdf"} disabled={Boolean(busy)} onPress={onPdf} /> : null}
               {mayWrite && lc.edit_meta && !canEditInvoice ? (
                 <Button
                   testID="invoice-meta"
@@ -587,6 +589,16 @@ export default function LocalInvoiceDetailScreen() {
                   label="Fatura ismi ve bilgiler"
                   disabled={Boolean(busy)}
                   onPress={() => router.push({ pathname: "/local-invoices/meta", params: { id: inv.id, title: inv.invoice_number || "" } })}
+                />
+              ) : null}
+              {mayWrite && lc.share ? (
+                <Button
+                  testID="invoice-share"
+                  size="sm"
+                  variant="secondary"
+                  label="E-posta ile paylaş"
+                  disabled={Boolean(busy)}
+                  onPress={() => router.push({ pathname: "/quotes/share", params: { id: inv.id, kind: "invoice", title: [inv.invoice_number, inv.customer_name].filter(Boolean).join(" · ") } })}
                 />
               ) : null}
               {mayWrite && lc.copy ? <Button testID="invoice-copy" size="sm" variant="secondary" label="Kopyasını oluştur" busy={busy === "copy"} disabled={Boolean(busy)} onPress={onCopy} /> : null}
@@ -610,7 +622,7 @@ export default function LocalInvoiceDetailScreen() {
                   onPress={() =>
                     router.push({
                       pathname: "/local-invoices/cancel",
-                      params: { id: inv.id, title: [inv.invoice_number, inv.customer_name, formatMoney(inv.total, cur)].filter(Boolean).join(" · ") },
+                      params: { id: inv.id, title: [inv.invoice_number, inv.customer_name, formatMoney(inv.total, cur)].filter(Boolean).join(" · "), ...(lc.cancel_edoc ? { edoc: "1" } : {}) },
                     })
                   }
                 />

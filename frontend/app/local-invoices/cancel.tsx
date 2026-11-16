@@ -7,7 +7,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { newIdempotencyKey } from "../../src/api";
 import { cancelInvoice, cancelInvoiceEdoc, sendKeyedMoney } from "../../src/api-finans";
-import { cancelReasonProblem, lifecycleErrorText } from "../../src/document-lifecycle";
+import { cancelReasonProblem, edocCancelUncertain, lifecycleErrorText } from "../../src/document-lifecycle";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, type } from "../../src/theme/tokens";
 import { Button } from "../../src/ui/Button";
@@ -16,7 +16,8 @@ import { FormField } from "../../src/ui/FormField";
 import { StackHeader } from "../../src/ui/Header";
 
 export default function CancelInvoiceScreen() {
-  const params = useLocalSearchParams<{ id: string; title?: string }>();
+  // Dalga 1: detay actions.cancel_edoc verirse (edoc=1) e-belge iptali adımıyla açılır.
+  const params = useLocalSearchParams<{ id: string; title?: string; edoc?: string }>();
   const id = String(params.id || "");
   const { token } = useAuth();
   const { colors } = useTheme();
@@ -24,7 +25,8 @@ export default function CancelInvoiceScreen() {
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"" | "cancel" | "edoc">("");
-  const [needEdoc, setNeedEdoc] = useState(false);
+  const [needEdoc, setNeedEdoc] = useState(params.edoc === "1");
+  const [suggestReturn, setSuggestReturn] = useState(false);
   const [edocDone, setEdocDone] = useState(false);
   const key = useRef(newIdempotencyKey("cancel"));
   const edocKey = useRef(newIdempotencyKey("canceledoc"));
@@ -76,7 +78,9 @@ export default function CancelInvoiceScreen() {
       toast("e-Belge iptal edildi. Şimdi faturayı iptal edebilirsiniz.", "success");
       return;
     }
-    if (!out.uncertain) edocKey.current = newIdempotencyKey("canceledoc");
+    // EDOC_CANCEL_FAILED: aynı anahtarla yeniden denenir (çift iptal gitmez); e-Fatura/süre dolmuş → iade önerilir.
+    if (!out.uncertain && !edocCancelUncertain(out.error)) edocKey.current = newIdempotencyKey("canceledoc");
+    setSuggestReturn(["EDOC_CANCEL_NOT_SUPPORTED", "EDOC_CANCEL_WINDOW_CLOSED"].includes(String(out.error?.code || "")));
     setError(lifecycleErrorText(out.error, "e-Belge iptal edilemedi."));
   };
 
@@ -116,6 +120,14 @@ export default function CancelInvoiceScreen() {
             <Text testID="cancel-error" style={[type.footnote, { color: colors.error }]}>
               {error}
             </Text>
+          ) : null}
+          {suggestReturn ? (
+            <Button
+              testID="cancel-suggest-return"
+              variant="secondary"
+              label="İade faturası oluştur"
+              onPress={() => router.replace({ pathname: "/local-invoices/returns", params: { id, title: params.title ? String(params.title) : "" } })}
+            />
           ) : null}
           {needEdoc ? <Button testID="cancel-edoc" variant="secondary" label={busy === "edoc" ? "İptal ediliyor…" : "e-Belgeyi iptal et"} busy={busy === "edoc"} onPress={cancelEdoc} /> : null}
           <Button testID="cancel-confirm" variant="destructive" label={busy === "cancel" ? "İptal ediliyor…" : "Faturayı iptal et"} busy={busy === "cancel"} disabled={needEdoc || Boolean(busy)} onPress={submit} />

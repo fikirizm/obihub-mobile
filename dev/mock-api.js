@@ -144,6 +144,7 @@ const entries = [
   { id: "e2", account_id: "a1", entry_type: "expense", amount: 380.5, entry_date: "2026-11-09", description: "Kargo malzemesi" },
 ];
 const parties = [
+  { id: "c9", name: "Hareketli Cari Ltd.", source: "registered", balance: 0, has_activity: true, payments: [] },
   { id: "c1", name: "Elif Kaya", phone: "0555 111 22 33", source: "registered", balance: 4725, advance: 250, payments: [],
     // P11: cari tahsilatı (faturaya dağıtılmış) — ekstrede düzenle / sil
     collections: [{ id: "cp1", type: "customer", amount: "1500.00", currency: "TRY", date: "2026-11-05", method: "havale", note: "Kasım ödemesi", account_id: "a2", invoices: [{ invoice_id: "li1", invoice_number: "OBI2026101", amount: "1500.00" }], parasut: false }] },
@@ -164,6 +165,10 @@ const localInvoices = [
   { id: "li3", invoice_number: "OBI2026102", status: "gecikti", display_status: "gonderildi", money_state: "pending", customer_name: "Acme GmbH", issue_date: "2026-11-08", due_date: "2026-12-08", currency: "USD", subtotal: 1000, discount_amount: 0, vat_amount: 200, total: 1200, paid_amount: 0, remaining_amount: 1200, payments: [], items: [{ name: "İhracat", quantity: 1, unit_price: 1000, vat_rate: 20, total: 1200 }] },
 ];
 // Toplu sürüm 1 (G2 §5 örneği): P1 belgesi — ara toplam indirimi, ÖTV/konaklama, tevkifat, stopaj; fatura ismi; Paraşüt'e resmileşmemiş.
+// Dalga 1: resmileşmiş e-Arşiv fatura (e-belge iptali, resmi PDF).
+localInvoices.push({ id: "li7", doc_schema: 1, invoice_number: "OBI2026140", invoice_type: "satis", status: "resmilesti", display_status: "resmilesti", money_state: "pending", edoc_state: "done", edoc_type: "e_archive", parasut_invoice_id: "prs-inv-7",
+  customer_id: "c1", customer_name: "Elif Kaya", issue_date: "2026-11-15", due_date: "2026-11-30", currency: "TRY", subtotal: 1000, discount_amount: 0, vat_amount: 200, total: 1200, paid_amount: 0, remaining_amount: 1200,
+  payments: [], items: [{ line_key: "l-7", product_name: "Danışmanlık", quantity: 1, unit_price: 1000, vat_rate: 20, total: 1200 }], actions: { cancel_edoc: true, official_pdf: true, cancel: true } });
 localInvoices.push({ id: "li6", doc_schema: 1, invoice_number: "OBI2026120", document_name: "Kasım danışmanlık", status: "gonderildi", display_status: "gonderildi", money_state: "pending", lifecycle: "issued",
   customer_id: "c2", customer_name: "Can Öztürk", issue_date: "2026-11-14", due_date: "2026-12-14", currency: "TRY", subtotal: 1150, discount_amount: 150, vat_amount: 201.25, other_taxes_total: 2.88,
   withholding_total: 100.63, accommodation_tax_rate: "1", accommodation_tax_total: 11.5, stopaj_rate: "10", stopaj_total: 115, total: 1365.63, payable_amount: 1150, paid_amount: 0, remaining_amount: 1150,
@@ -928,12 +933,19 @@ http
     if (path === "/customers")
       return send(res, 200, { items: parties.filter((p) => { const q = (url.searchParams.get("search") || "").toLowerCase(); const bs = url.searchParams.get("balance_status"); const rl = url.searchParams.get("role"); return (!q || p.name.toLowerCase().includes(q)) && (!bs || (bs === "receivable" ? p.balance > 0 : p.balance < 0)) && (!rl || (rl === "supplier" ? p.balance < 0 : p.balance >= 0)); }), total: parties.length, page: 1, per_page: 30, total_pages: 1, summary: { total_receivable: 19050.5, total_payable: 9400, by_currency: { TRY: { total_receivable: 19050.5, total_payable: 9400 }, USD: { total_receivable: 1200, total_payable: 0 } } } });
     // C5: cari oku / düzenle / sil / siparişleri
+    let ca; // Dalga 1: cari arşivle
+    if ((ca = path.match(/^\/customers\/([^/]+)\/(archive|unarchive)$/)) && req.method === "POST") {
+      const party = parties.find((p) => p.id === decodeURIComponent(ca[1]));
+      if (!party) return send(res, 404, { detail: "Müşteri bulunamadı" });
+      party.archived = ca[2] === "archive"; console.log("WRITE ARCHIVE", path); return send(res, 200, { ok: true, archived: party.archived });
+    }
     let cm; // c5
     if ((cm = path.match(/^\/customers\/([^/]+)$/))) {
       const party = parties.find((p) => p.id === decodeURIComponent(cm[1]));
       if (!party) return send(res, 404, { detail: "Müşteri bulunamadı" });
       if (req.method === "GET") return send(res, 200, { contact_role: "customer", customer_type: "individual", ...party });
       if (req.method === "DELETE" && Math.abs(party.balance) > 0.004) return send(res, 409, { detail: { code: "CUSTOMER_HAS_BALANCE", message: "Bu carinin açık bakiyesi var; bakiye kapanmadan silinemez." } });
+      if (req.method === "DELETE" && party.has_activity) return send(res, 409, { code: "CUSTOMER_HAS_ACTIVITY", detail: "Hesap hareketi olan cari silinemez; bakiyesi sıfır olsa da faturaları ve tahsilatları bu kartta durur. Kartı silmek yerine arşivleyin." });
       if (req.method === "DELETE") { parties.splice(parties.indexOf(party), 1); console.log("WRITE DELETE", path); return send(res, 200, { ok: true }); }
       if (req.method === "PUT") return readBody((b) => { if ("opening_balance" in b) console.log("UYARI: opening_balance gönderildi"); Object.assign(party, b); send(res, 200, party); });
     }
@@ -1295,12 +1307,13 @@ http
     }
     // D-12 yaşam döngüsü: iptal (gerekçe, e-belge adımı), iade, kopya, arşiv, geçmiş, PDF.
     let lcm;
-    if ((lcm = path.match(/^\/local-invoices\/([^/]+)\/(cancel|cancel\/edoc|returns|copy|archive|unarchive|events|pdf|share)$/))) {
+    if ((lcm = path.match(/^\/local-invoices\/([^/]+)\/(cancel|cancel\/edoc|returns|copy|archive|unarchive|events|pdf|share|share-preview)$/))) {
       const inv = localInvoices.find((i) => i.id === lcm[1]);
       if (!inv) return send(res, 404, { code: "NOT_FOUND", detail: "Fatura bulunamadı." });
       const ev = (type, summary, data = {}) => (inv.events = [{ id: "ev" + Date.now() + Math.random(), type, at: new Date().toISOString(), actor: { name: "Demo Kullanıcı" }, summary, data }, ...(inv.events || [])]);
       const op = lcm[2];
       if (op === "events") return send(res, 200, { items: inv.events || [{ id: "ev0", type: "created", at: "2026-11-14T09:00:00+03:00", actor: { name: "Demo Kullanıcı" }, summary: "Fatura oluşturuldu" }], next_before: null });
+      if (op === "share-preview") return send(res, 200, { kind: inv.invoice_type === "teklif" ? "quote" : "invoice", to: ["elif@example.test"], subject: `Deneme A.Ş. · Fatura ${inv.invoice_number}`, message: "", attachment: { type: "link", official: inv.status === "resmilesti" }, can_send: true });
       if (op === "pdf") { res.writeHead(200, { "Content-Type": "application/pdf", "Access-Control-Allow-Origin": "*" }); return res.end(Buffer.from("%PDF-1.4\n%mock\n")); }
       if (op === "returns" && req.method === "GET") return send(res, 200, { items: [], returned_totals: inv.returned_totals || {} });
       return readBody((b) => {
@@ -1312,7 +1325,11 @@ http
           Object.assign(inv, { status: "iptal", display_status: "iptal", lifecycle: "cancelled", cancel_reason: b.reason, money_state: "not_issued" }); ev("cancelled", "Fatura iptal edildi", { reason: b.reason });
           return send(res, 200, { ok: true, id: inv.id, status: "iptal", lifecycle: "cancelled", replayed: false });
         }
-        if (op === "cancel/edoc") { inv.edoc_cancelled = true; return send(res, 200, { ok: true }); }
+        if (op === "cancel/edoc") {
+          if (inv.edoc_type === "e_invoice") return send(res, 409, { code: "EDOC_CANCEL_NOT_SUPPORTED", detail: "e-Fatura iptal edilemez." });
+          Object.assign(inv, { edoc_cancelled: true, edoc_cancelled_at: new Date().toISOString(), edoc_state: "cancelled", status: "gonderildi", display_status: "gonderildi", actions: { ...(inv.actions || {}), cancel_edoc: false, official_pdf: false } });
+          ev("edoc_cancelled", "e-Belge iptal edildi"); return send(res, 200, { ok: true, edoc_state: "cancelled", next: "cancel" });
+        }
         if (op === "share") {
           if (b.confirm !== true) return send(res, 409, { code: "CONFIRM_REQUIRED", detail: "Onay gerekli." });
           ev("shared", "Paylaşıldı"); return send(res, 200, { ok: true, sent_to: (b.to || []).map((a) => a.replace(/^(.).*@/, "$1***@")), replayed: false });
@@ -1413,6 +1430,17 @@ http
     if (path === "/accounting/expense-invoices/summary") return send(res, 200, { currencies: [{ currency: "TRY", payable: "9400.00", overdue: "1250.50" }] });
     // --- Dalga 3 / C2: gider detayı ve borç ödeme. e1 ödenebilir, e2'de ikinci ödeme 409 PAYMENT_EXCEEDS_OUTSTANDING denenir.
     let gm; // c2
+    // Dalga 1 P1.3: gider geçmişi / kopya / PDF.
+    if (req.method === "GET" && (gm = path.match(/^\/accounting\/expense-invoices\/(.+)\/(history|copy|pdf)$/))) {
+      const ref = decodeURIComponent(gm[1]); const ex = expenseState[ref];
+      if (!ex || ex.deleted) return send(res, 404, { code: "NOT_FOUND", detail: "Bulunamadı" });
+      if (gm[2] === "pdf") { res.writeHead(200, { "Content-Type": "application/pdf", "Access-Control-Allow-Origin": "*" }); return res.end(Buffer.from("%PDF-1.4\n%mock\n")); }
+      if (gm[2] === "history") return send(res, 200, { items: [
+        { at: "2026-11-16T09:30:00Z", kind: "category", title: "Kategori değişti", detail: "Kargo giderleri" },
+        { at: "2026-11-09T08:00:00Z", kind: "created", title: "", detail: "İçeri Al ile oluşturuldu" } ] });
+      return send(res, 200, { source_id: ref, supplier: { party_id: "s1", name: ex.supplier, tax_id: "1234567890" }, expense_category_id: "c1", tag_ids: [], currency: "TRY",
+        lines: [{ description: "Kargo hizmet bedeli", quantity: "10", unit_price: "120.00", vat_rate: "18" }, { description: "Ambalaj malzemesi", quantity: "2", unit_price: "150.50", vat_rate: "20" }], other_taxes: [], warnings: ["TAGS_NOT_COPIED"] });
+    }
     // 16 Kas: gider faturası silme / arşivleme. e2 silinemez (eşleştirme + Paraşüt kaydı); arşivde açık bakiye engeli.
     if (req.method === "GET" && (gm = path.match(/^\/accounting\/expense-invoices\/(.+)\/delete-check$/))) {
       const ref = decodeURIComponent(gm[1]); const ex = expenseState[ref];

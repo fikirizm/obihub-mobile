@@ -8,6 +8,7 @@ const docAxis = (inv: Inv) => {
   const st = inv?.status;
   if (st === "taslak") return "draft";
   if (st === "iptal") return "cancelled";
+  if (inv?.edoc_cancelled_at) return "issued";
   if (st === "resmilesti" || inv?.edoc_state === "done" || ["parasut_import", "parasut", "parasut_mirror"].includes(String(inv?.source || "")) || inv?.source_kind === "parasut")
     return "official";
   return "issued";
@@ -25,6 +26,8 @@ export type LifecycleActions = {
   preview: boolean;
   share: boolean;
   open_in_parasut: boolean;
+  cancel_edoc: boolean;
+  official_pdf: boolean;
 };
 
 export function lifecycleActions(inv: Inv): LifecycleActions {
@@ -48,8 +51,11 @@ export function lifecycleActions(inv: Inv): LifecycleActions {
     copy: !mirror,
     archive: !mirror,
     preview: true,
-    share: !mirror && !cancelled && inv?.invoice_type === "teklif",
+    share: !mirror && !cancelled && (inv?.invoice_type === "teklif" || ((inv?.invoice_type || "satis") === "satis" && !draft)),
     open_in_parasut: mirror,
+    // Dalga 1: yalnız sunucu verirse (e-belge iptali; resmi GİB PDF'i).
+    cancel_edoc: false,
+    official_pdf: false,
   };
   const server = inv?.actions && typeof inv.actions === "object" ? inv.actions : {};
   const out: any = { ...derived };
@@ -77,6 +83,18 @@ const TEXTS: Record<string, string> = {
   INVOICE_OFFICIALIZE_UNCERTAIN: "Resmileştirme sonucu belirsiz; Paraşüt'te doğrulanana kadar fatura silinemez.",
   QUOTE_CONVERTED_LOCKED: "Faturaya çevrilmiş teklif değiştirilemez.",
   INVOICE_NOT_EDITABLE: "Bu fatura artık düzenlenemez.",
+  NOT_SHAREABLE: "Bu belge türü e-posta ile paylaşılmaz; yalnız satış faturası ve teklif paylaşılır.",
+  NOT_ISSUED_FOR_SHARE: "Yalnız kesilmiş fatura paylaşılır. Taslak ve iptal edilmiş faturalar gönderilmez.",
+  RATE_LIMITED: "Saatte en fazla 30 paylaşım yapılabilir. Daha sonra tekrar deneyin.",
+  EMAIL_NOT_CONFIGURED: "E-posta gönderimi bu ortamda etkin değil; belgeyi PDF olarak indirip kendiniz paylaşabilirsiniz.",
+  EMAIL_SEND_FAILED: "E-posta gönderilemedi; biraz sonra yeniden deneyin.",
+  EDOC_CANCEL_NOT_SUPPORTED: "e-Fatura (kurumsal alıcıya giden belge) iptal edilemez; alıcının reddi ya da iade faturası gerekir. Bu fatura için iade faturası oluşturabilirsiniz.",
+  EDOC_CANCEL_FAILED: "e-Belge Paraşüt'te iptal edilemedi; hiçbir değişiklik yapılmadı. Biraz sonra yeniden deneyin ya da Paraşüt'ten iptal edin.",
+  EDOC_CANCEL_WINDOW_CLOSED: "Bu e-Arşiv belgenin iptal süresi dolmuş. Düzeltme için iade faturası ya da gider pusulası oluşturun.",
+  EDOC_REMOTE_MISSING: "Paraşüt'te bu fatura için aktif bir e-belge bulunamadı. Durumu Paraşüt'te kontrol edin.",
+  EDOC_NOT_FINAL: "e-Belge henüz kesinleşmedi; sonuç bekleniyor ya da hata verdi. Önce e-belge durumunu sorgulayın.",
+  PARASUT_NOT_CONNECTED: "Paraşüt bağlantısı kurulu değil ya da kopmuş; e-belge iptali için bağlantıyı yenileyin.",
+  OFFICIAL_PDF_UNAVAILABLE: "Resmi fatura PDF'i Paraşüt'ten şu an alınamadı. Biraz sonra yeniden deneyin.",
   CONFIRM_REQUIRED: "Bu işlem onay gerektirir.",
   RECIPIENT_REQUIRED: "En az bir alıcı e-posta adresi girin.",
   NOT_A_QUOTE: "Paylaşım yalnız teklif ve proforma belgelerinde kullanılır.",
@@ -90,6 +108,7 @@ export function lifecycleErrorText(err: any, fallback = "İşlem tamamlanamadı.
     return err.reason ? "Resmileşmiş fatura değiştirilemez; iptal ya da iade oluşturun." : "Kesilmiş belgede tutar alanları değiştirilemez; iptal ya da iade oluşturun.";
   }
   if (err?.code && TEXTS[err.code]) return TEXTS[err.code];
+  if (Number(err?.status) === 429) return TEXTS.RATE_LIMITED;
   return msg && !/^Sunucu hatası \(\d+\)$/.test(msg) ? msg : fallback;
 }
 
@@ -109,6 +128,20 @@ export function amountsLockNote(inv: Inv) {
   return "Kesilmiş faturada tutar alanları kilitli; iptal ya da iade oluşturun." + tail;
 }
 
+// EDOC_CANCEL_FAILED: Paraşüt sonucu alınamadı → aynı işlem anahtarıyla yeniden denenir (sunucu çift iptal göndermez).
+export const edocCancelUncertain = (err: any) => err?.code === "EDOC_CANCEL_FAILED" || err?.code === "INVOICE_BUSY";
+
+// Dalga 1: GET /local-invoices/{id}/share-preview → formun ön bilgisi (alıcı = cari e-postası, konu, gönderilebilirlik).
+export function sharePrefill(p: any) {
+  return {
+    to: Array.isArray(p?.to) ? p.to.filter(Boolean).join(", ") : "",
+    subject: typeof p?.subject === "string" ? p.subject : "",
+    canSend: p?.can_send !== false,
+    official: p?.attachment?.official === true,
+    kind: p?.kind === "quote" ? "quote" : "invoice",
+  };
+}
+
 export const cancelReasonProblem = (reason: string) => (String(reason || "").trim().length < 3 ? "İptal gerekçesi zorunlu (en az 3 karakter)." : null);
 
 export const EVENT_LABEL: Record<string, string> = {
@@ -126,6 +159,7 @@ export const EVENT_LABEL: Record<string, string> = {
   archived: "Arşivlendi",
   unarchived: "Arşivden çıkarıldı",
   shared: "Paylaşıldı",
+  edoc_cancelled: "e-Belge iptal edildi",
 };
 export const eventLabel = (e: { type?: string; summary?: string }) => EVENT_LABEL[String(e?.type)] || String(e?.summary || "İşlem");
 

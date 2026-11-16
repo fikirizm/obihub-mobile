@@ -260,13 +260,9 @@ export async function deleteParty(token: string, id: string) {
   return request<{ ok?: boolean }>(`/customers/${encodeURIComponent(id)}`, { method: "DELETE" }, token);
 }
 
-// Silme hatasının metni (Aşama 4 P3: bakiyesi olan cari 409 CUSTOMER_HAS_BALANCE). Sunucu metni varsa o gösterilir.
-export function deletePartyErrorText(e: any) {
-  if (e?.code === "CUSTOMER_HAS_BALANCE") {
-    const m = typeof e?.message === "string" && !/^Sunucu hatası/.test(e.message) && e.message !== "CUSTOMER_HAS_BALANCE" ? e.message : "";
-    return m || "Bu carinin bakiyesi var; bakiye kapanmadan silinemez.";
-  }
-  return e?.message || "Cari silinemedi.";
+// Dalga 1: cari arşivle / arşivden çıkar (POST /customers/{id}/archive|unarchive).
+export async function setPartyArchived(token: string, id: string, archived: boolean) {
+  return request<any>(`/customers/${encodeURIComponent(id)}/${archived ? "archive" : "unarchive"}`, { method: "POST", body: "{}" }, token);
 }
 
 export type PartyOrder = { id: string; channel_order_id: string; channel: string; status: string; total_amount: number; currency: string; order_date: string; invoice_label: string | null };

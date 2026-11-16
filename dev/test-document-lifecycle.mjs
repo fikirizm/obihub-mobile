@@ -108,4 +108,30 @@ t("teklif paylaşımı alıcıları: virgül/boşlukla ayrılır; geçersiz adre
   assert.equal(m.shareRecipients("a@x.com yanlis").error, "Geçersiz e-posta adresi: yanlis");
 });
 
+t("Dalga 1: e-belge iptali, paylaşım ve resmi PDF metinleri; satış faturası paylaşılır", () => {
+  assert.match(m.lifecycleErrorText({ code: "EDOC_CANCEL_NOT_SUPPORTED" }), /iade faturası/);
+  assert.match(m.lifecycleErrorText({ code: "EDOC_CANCEL_WINDOW_CLOSED" }), /süresi dolmuş/);
+  assert.match(m.lifecycleErrorText({ code: "EDOC_CANCEL_FAILED" }), /hiçbir değişiklik yapılmadı/);
+  assert.match(m.lifecycleErrorText({ code: "EDOC_REMOTE_MISSING" }), /bulunamadı/);
+  assert.match(m.lifecycleErrorText({ code: "EDOC_NOT_FINAL" }), /kesinleşmedi/);
+  assert.match(m.lifecycleErrorText({ code: "PARASUT_NOT_CONNECTED" }), /bağlantı/);
+  assert.match(m.lifecycleErrorText({ code: "OFFICIAL_PDF_UNAVAILABLE" }), /Resmi fatura PDF/);
+  assert.match(m.lifecycleErrorText({ code: "NOT_ISSUED_FOR_SHARE" }), /Yalnız kesilmiş fatura/);
+  assert.match(m.lifecycleErrorText({ code: "EMAIL_NOT_CONFIGURED" }), /PDF olarak/);
+  assert.match(m.lifecycleErrorText({ code: "RATE_LIMITED" }), /Saatte en fazla/);
+  assert.match(m.lifecycleErrorText({ status: 429, code: "" }), /Saatte en fazla/);
+  assert.equal(m.lifecycleActions({ status: "gonderildi", invoice_type: "satis" }).share, true);
+  assert.equal(m.lifecycleActions({ status: "taslak", invoice_type: "satis" }).share, false);
+  assert.equal(m.lifecycleActions({ status: "iptal", invoice_type: "satis" }).share, false);
+  assert.equal(m.lifecycleActions({ status: "gonderildi", actions: { cancel_edoc: true } }).cancel_edoc, true);
+  assert.equal(m.lifecycleActions({ status: "gonderildi" }).cancel_edoc, false);
+  assert.equal(m.eventLabel({ type: "edoc_cancelled" }), "e-Belge iptal edildi");
+  assert.equal(m.edocCancelUncertain({ code: "EDOC_CANCEL_FAILED" }), true);
+});
+t("Dalga 1: paylaşım önizlemesi formu doldurur; gönderilemiyorsa söylenir", () => {
+  assert.deepEqual(m.sharePrefill({ kind: "invoice", to: ["a@example.test"], subject: "Firma · Fatura OBI1", can_send: true, attachment: { official: true } }),
+    { to: "a@example.test", subject: "Firma · Fatura OBI1", canSend: true, official: true, kind: "invoice" });
+  assert.deepEqual(m.sharePrefill({ kind: "quote", to: [], subject: "", can_send: false }), { to: "", subject: "", canSend: false, official: false, kind: "quote" });
+  assert.equal(m.sharePrefill(null).canSend, true);
+});
 console.log(`\n${n} test geçti`);

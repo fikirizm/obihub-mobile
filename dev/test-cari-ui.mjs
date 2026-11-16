@@ -125,4 +125,13 @@ t("G4-30 ayna: read_only caride düzenle/sil kapalı, ro=1 (tahsilat ve virman e
   const q = m.partyRouteParams({ id: "c2", origin: "read_model", source: "legacy", actions: { edit: true } });
   assert.equal(q.ro, "0");
 });
+t("Dalga 1: hareketli cari silinmez → arşiv önerilir; bakiyeli cari değişmedi", () => {
+  const a = m.partyDeleteOutcome({ status: 409, code: "CUSTOMER_HAS_ACTIVITY", message: "Hesap hareketi olan cari silinemez; … Kartı silmek yerine arşivleyin." });
+  assert.equal(a.offerArchive, true); assert.match(a.text, /arşivleyin/);
+  const b = m.partyDeleteOutcome({ status: 409, code: "CUSTOMER_HAS_ACTIVITY", message: "Sunucu hatası (409)" });
+  assert.equal(b.text, "Hesap hareketi olan cari silinemez; faturaları ve tahsilatları bu kartta durur. Kartı silmek yerine arşivleyin.");
+  const c = m.partyDeleteOutcome({ status: 409, code: "CUSTOMER_HAS_BALANCE", message: "" });
+  assert.equal(c.offerArchive, false); assert.match(c.text, /bakiyesi var/);
+  assert.equal(m.partyDeleteOutcome({ message: "Olmadı" }).text, "Olmadı");
+});
 console.log(`\n${n} test geçti`);

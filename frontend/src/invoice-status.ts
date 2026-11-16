@@ -19,6 +19,9 @@ export const PAY_AXIS: Record<string, Axis> = {
   overdue: { key: "overdue", label: "Gecikti", kind: "error" },
 };
 export const NOT_OFFICIAL: Axis = { key: "not_official", label: "Resmileşmedi", kind: "warning" };
+// Dalga 1 (P1.1): e-belgesi iptal edilmiş fatura resmi değil; yerel iptale kadar "Kesildi · e-Belge iptal edildi".
+export const EDOC_CANCELLED: Axis = { key: "edoc_cancelled", label: "e-Belge iptal edildi", kind: "error" };
+export const edocCancelled = (inv: Record<string, any> | null | undefined) => Boolean(inv?.edoc_cancelled_at) || inv?.edoc_state === "cancelled";
 
 export const SALES_TABS: [string, string][] = [
   ["", "Tümü"],
@@ -43,6 +46,7 @@ export function documentAxis(inv: Inv): "draft" | "issued" | "official" | "cance
   const st = inv?.status;
   if (st === "taslak") return "draft";
   if (st === "iptal") return "cancelled";
+  if (inv?.edoc_cancelled_at) return "issued";
   // Sürüm 3: Paraşüt'te doğmuş ya da aynalanmış belge de resmidir (sunucu view=resmilesti ile aynı kural).
   if (st === "resmilesti" || inv?.edoc_state === "done" || ["parasut_import", "parasut", "parasut_mirror"].includes(String(inv?.source || "")) || inv?.source_kind === "parasut")
     return "official";
@@ -72,7 +76,8 @@ export function invoiceStatusView(inv: Inv, ctx: { parasutConnected?: boolean } 
   const typeLabel = doc === "official" ? EDOC_TYPE[String(inv?.edocument_type || inv?.edoc_type || "").toLowerCase()] : undefined;
   const document: Axis = typeLabel ? { ...base, label: `${base.label} · ${typeLabel}` } : base;
   const pay = paymentAxis(inv);
-  return { document, notOfficial: ctx.parasutConnected && doc === "issued" ? NOT_OFFICIAL : null, payment: pay ? PAY_AXIS[pay] : null };
+  const second = doc === "issued" ? (inv?.edoc_cancelled_at ? EDOC_CANCELLED : ctx.parasutConnected ? NOT_OFFICIAL : null) : null;
+  return { document, notOfficial: second, payment: pay ? PAY_AXIS[pay] : null };
 }
 
 export function invoiceStatusText(inv: Inv, ctx?: { parasutConnected?: boolean }) {
