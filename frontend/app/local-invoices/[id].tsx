@@ -17,6 +17,7 @@ import { Linking, Platform } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import { printOrShare } from "../../src/pdf";
 import { canOfficializeReturn } from "../../src/officialize";
+import { CollectionFollowupCard } from "../../src/components/CollectionFollowupCard";
 import { autoSettlementText, canUnmatch, UNMATCH_CONFIRM, unmatchDoneText, unmatchErrorText } from "../../src/cari-ui";
 import { runVoidCollection } from "../../src/collection-flow";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -689,6 +690,11 @@ export default function LocalInvoiceDetailScreen() {
               ))}
             </Card>
           </SafeAnimatedView>
+        ) : null}
+
+        {/* Dalga 2: tahsilat takibi (vade, gecikme, hatırlatma); satış faturası, kesilmiş, aynalı değil. */}
+        {token && !readOnly && !isCancelled && inv.invoice_type !== "iade" && inv.invoice_type !== "teklif" && inv.status !== "taslak" ? (
+          <CollectionFollowupCard token={token} invoiceId={inv.id} title={inv.invoice_number || "Fatura"} mayWrite={mayWrite} reloadKey={inv} />
         ) : null}
 
         {payments.length > 0 ? (

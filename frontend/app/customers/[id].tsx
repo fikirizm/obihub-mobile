@@ -8,6 +8,7 @@ import { canManage } from "../../src/auth/permissions";
 import { getLegacyPartyCurrency, getPartyLedgerCompat, legacyIdOf } from "../../src/api-gider";
 import { deleteCustomerTransfer, deleteParty, setPartyArchived, getAllocationState, getParty, getPartyOrders, sendKeyedMoney, type AllocationState, type PartyOrder } from "../../src/api-finans";
 import { newIdempotencyKey } from "../../src/api";
+import { PartyTimeline } from "../../src/components/PartyTimeline";
 import { balanceHint, matchLinkView, partyDeleteOutcome, transferErrorText, transferRowActions } from "../../src/cari-ui";
 import { ledgerCollection, ledgerRowActions } from "../../src/collection-actions";
 import { runVoidCollection } from "../../src/collection-flow";
@@ -532,6 +533,8 @@ export default function CustomerDetailScreen() {
             </View>
           ) : null}
         </SafeAnimatedView>
+        {/* Dalga 2 (C-15): notlar ve mesajlar; yalnız kayıtlı cari kartında. */}
+        {token && registered ? <PartyTimeline token={token} customerId={legacyIdOf(id)} mayWrite={mayManage} /> : null}
       </ScrollView>
     </View>
   );

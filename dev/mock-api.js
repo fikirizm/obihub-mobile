@@ -1356,6 +1356,50 @@ http
         return send(res, 200, { ok: true, archived: inv.archived });
       });
     }
+    // Dalga 2: yaşlandırma, tahsilat takibi, hatırlatma, cari zaman çizelgesi ve notlar.
+    if (path === "/reports/aging") {
+      const z = { current: "0.00", "1-30": "0.00", "31-60": "0.00", "61-90": "0.00", "90+": "0.00" };
+      return send(res, 200, { as_of: "2026-11-16", currencies: [
+        { currency: "TRY", receivable: { totals: { current: "1200.00", "1-30": "4075.00", "31-60": "900.00", "61-90": "0.00", "90+": "500.00", total: "6675.00" }, count: 5,
+          parties: [{ party_name: "Elif Kaya", total: "5275.00", count: 3 }, { party_name: "Can Öztürk", total: "900.00", count: 1 }, { party_name: "Bora Ltd", total: "500.00", count: 1 }] },
+          payable: { totals: { ...z, "1-30": "1840.60", "90+": "1250.50", total: "3091.10" }, count: 2, parties: [{ party_name: "Kargo Lojistik A.Ş.", total: "1840.60", count: 1 }, { party_name: "Ofis Kırtasiye", total: "1250.50", count: 1 }] } },
+        { currency: "USD", receivable: { totals: { ...z, "1-30": "1200.00", total: "1200.00" }, count: 1, parties: [{ party_name: "Acme GmbH", total: "1200.00", count: 1 }] }, payable: { totals: { ...z, total: "0.00" }, count: 0, parties: [] } },
+      ], scope: { source: "obihub_ledger" } });
+    }
+    let fum;
+    if ((fum = path.match(/^\/local-invoices\/([^/]+)\/collection-followup$/))) {
+      const inv = localInvoices.find((x) => x.id === fum[1]);
+      if (!inv) return send(res, 404, { code: "INVOICE_NOT_FOUND", detail: "Fatura bulunamadı." });
+      const overdue = Math.max(0, Math.round((Date.parse("2026-11-16") - Date.parse(inv.due_date || "2026-11-16")) / 864e5));
+      return send(res, 200, { invoice_id: inv.id, invoice_number: inv.invoice_number, currency: inv.currency || "TRY", remaining: inv.remaining_amount, due_date: inv.due_date,
+        overdue_days: overdue, due_in_days: overdue ? 0 : Math.max(0, Math.round((Date.parse(inv.due_date || "2026-11-16") - Date.parse("2026-11-16")) / 864e5)),
+        aging_bucket: overdue ? "1-30" : "current", offset_candidates: [], offsets: [], reminders: inv.reminders || [], offset_notice: null,
+        default_recipient: "elif@example.test", actions: { offset: false, due_change: inv.status !== "iptal", remind: inv.remaining_amount > 0 } });
+    }
+    if ((fum = path.match(/^\/local-invoices\/([^/]+)\/reminder$/)) && req.method === "POST") {
+      const inv = localInvoices.find((x) => x.id === fum[1]);
+      return readBody((b) => {
+        if (!Array.isArray(b.to) || !b.to.length) return send(res, 422, { code: "RECIPIENT_REQUIRED", detail: "Alıcı gerekli." });
+        if (b.confirm !== true) return send(res, 200, { sent: false, needs_confirmation: true, preview: { to: b.to, subject: `Deneme A.Ş.: ${inv.invoice_number} numaralı fatura için ödeme hatırlatması`, message: b.message || "", remaining: "₺" + inv.remaining_amount, overdue_days: 11, invoice_number: inv.invoice_number } });
+        inv.reminders = [{ at: new Date().toISOString(), to: b.to.map((a) => a.replace(/^(.).*@/, "$1***@")) }, ...(inv.reminders || [])];
+        console.log("WRITE REMINDER", path, req.headers["idempotency-key"]); return send(res, 200, { sent: true, replayed: false, sent_to: inv.reminders[0].to });
+      });
+    }
+    if ((fum = path.match(/^\/customers\/([^/]+)\/timeline$/))) {
+      const k = url.searchParams.get("kind") || "all";
+      const notes = (state.notes = state.notes || [{ id: "note_1", kind: "note", type: "note", at: "2026-11-16T09:00:00Z", title: "Not", body: "Arandı, cuma ödeyecek", actor: "Demo Kullanıcı", link: null, can_delete: true }]);
+      const msgs = [{ id: "r1", kind: "message", type: "reminder_sent", at: "2026-11-15T09:00:00Z", title: "Tahsilat hatırlatması · OBI2026101", body: "e***@example.test · Kalan ₺4.075,00", actor: "Demo Kullanıcı", link: { type: "invoice", id: "li1" }, can_delete: false }];
+      return send(res, 200, { kind: k, items: [...(k !== "messages" ? notes : []), ...(k !== "notes" ? msgs : [])] });
+    }
+    if ((fum = path.match(/^\/customers\/([^/]+)\/notes(?:\/([^/]+))?$/))) {
+      state.notes = state.notes || [];
+      if (req.method === "DELETE") { state.notes = state.notes.filter((n) => n.id !== decodeURIComponent(fum[2] || "")); return send(res, 200, { ok: true }); }
+      return readBody((b) => {
+        if (!String(b.text || "").trim()) return send(res, 422, { code: "NOTE_REQUIRED", detail: "Not gerekli." });
+        const n = { id: "note_" + Date.now(), kind: "note", type: "note", at: new Date().toISOString(), title: "Not", body: b.text, actor: "Demo Kullanıcı", link: null, can_delete: true };
+        state.notes = [n, ...state.notes]; console.log("WRITE NOTE", path); return send(res, 200, n);
+      });
+    }
     let offm; // Dalga 2: mahsubu geri al
     if (req.method === "DELETE" && (offm = path.match(/^\/local-invoices\/([^/]+)\/offsets\/([^/]+)$/))) {
       const inv = localInvoices.find((x) => x.id === offm[1]);
