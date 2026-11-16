@@ -8,6 +8,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { copyNotice, copyToForm } from "../../src/expense-extras";
+import { warningOf } from "../../src/expense-kinds";
 import { getExpenseCopy } from "../../src/api-gider";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
@@ -169,7 +170,10 @@ export default function ManualExpenseScreen() {
   const [categories, setCategories] = useState<{ id: string; name: string }[] | null>(null);
   const [supplierQuery, setSupplierQuery] = useState("");
   // Dalga 1: "Kopyasını oluştur" — kaynak faturadan tedarikçi, kategori ve kalemler (belge no, tarih, vade, ödeme yok).
-  const copyRef = String(useLocalSearchParams<{ copy?: string }>().copy || "");
+  const routeParams = useLocalSearchParams<{ copy?: string; doc?: string }>();
+  const copyRef = String(routeParams.copy || "");
+  // Dalga 3 (P3.3): gider pusulası elle alış hattından document_kind ile (KDV'siz kalemler).
+  const voucher = routeParams.doc === "expense_voucher";
   const [copyNote, setCopyNote] = useState<string | null>(null);
 
   const [f, setF] = useState<ManualForm>({
@@ -181,7 +185,7 @@ export default function ManualExpenseScreen() {
     issueDate: today,
     dueDate: "",
     categoryId: "",
-    lines: [emptyLine()],
+    lines: [routeParams.doc === "expense_voucher" ? { ...emptyLine(), vatRate: "0" } : emptyLine()],
     warehouseId: "",
     payment: { payment_state: "payable", payment_account_id: null, payment_date: null },
   });
@@ -261,7 +265,7 @@ export default function ManualExpenseScreen() {
     }
     const my = ++seq.current;
     setPv((p) => ({ ...p, status: "loading", key: requestKey }));
-    previewManualPurchase(token, ackOn ? { ...built.body, legacy_duplicate_ack: true } : built.body, draftRef.current)
+    previewManualPurchase(token, { ...(ackOn ? { ...built.body, legacy_duplicate_ack: true } : built.body), ...(voucher ? { document_kind: "expense_voucher" } : {}) }, draftRef.current)
       .then((data) => {
         if (my !== seq.current) return;
         if (data.draftId) draftRef.current = data.draftId;
@@ -306,6 +310,9 @@ export default function ManualExpenseScreen() {
       if (st === "APPLIED") {
         const p = cleanPayment(res?.payment);
         toast(p ? paymentResultText(p) || "Gider faturası kaydedildi." : "Gider faturası kaydedildi.", p?.status === "failed" ? "info" : "success");
+        // Dalga 3: kayıt başarılı; Paraşüt/BizimHesap uyarısı ayrıca ve metni olduğu gibi.
+        const w = warningOf(res);
+        if (w) setTimeout(() => toast(w, "info"), 600);
         const ref = res?.result?.payable_ref || null;
         if (pay && ref) router.replace({ pathname: "/expenses/pay", params: { ref, title: f.documentNumber.trim() } });
         else router.back();
@@ -367,7 +374,7 @@ export default function ManualExpenseScreen() {
   const totals = fresh ? pv.data?.totals : null;
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="manual-expense-screen">
-      <StackHeader title="Yeni gider faturası" subtitle="Alış ya da gider belgesi" />
+      <StackHeader title={voucher ? "Gider pusulası" : "Yeni gider faturası"} subtitle={voucher ? "Vergi mükellefi olmayan kişiden alım" : "Alış ya da gider belgesi"} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
           <HeroCard tone="violet">

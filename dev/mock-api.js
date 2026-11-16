@@ -1595,6 +1595,17 @@ http
     if (path === "/accounting/expense-invoices/summary") return send(res, 200, { currencies: [{ currency: "TRY", payable: "9400.00", overdue: "1250.50" }] });
     // --- Dalga 3 / C2: gider detayı ve borç ödeme. e1 ödenebilir, e2'de ikinci ödeme 409 PAYMENT_EXCEEDS_OUTSTANDING denenir.
     let gm; // c2
+    if (path === "/accounting/read-model/parties" && url.searchParams.get("role") === "supplier") return send(res, 200, { items: [{ id: "obihub:s1", name: "Kargo Lojistik A.Ş.", source: "obihub" }, { id: "obihub:s2", name: "Ofis Kırtasiye", source: "obihub" }] });
+    // Dalga 3 (P3.3): gider türleri kataloğu, banka gideri / vergi-SGK, fiş görseli.
+    if (path === "/accounting/expense-invoices/kinds" && req.method === "GET") return send(res, 200, { kinds: [], tax_menu: [], tax_types: [], spenders: [{ id: "u1", name: "Deneme Kullanıcı" }, { id: "u2", name: "Ece Yılmaz" }] });
+    let ekm;
+    if ((ekm = path.match(/^\/accounting\/expense-invoices\/kinds\/(bank_fee|tax_payment)$/)) && req.method === "POST") return readBody((b) => {
+      if (!req.headers["idempotency-key"]) return send(res, 422, { code: "EXPENSE_KIND_KEY_REQUIRED", detail: "İşlem anahtarı eksik." });
+      if (!b.account_id) return send(res, 422, { code: "EXPENSE_KIND_PAYMENT_REQUIRED", detail: "Ödemenin yapıldığı hesabı seçin." });
+      const acc = accounts.find((x) => x.id === b.account_id); if (acc) acc.balance -= Number(b.amount);
+      console.log("WRITE KIND", ekm[1], JSON.stringify(b)); return send(res, 200, { entry: { id: "k" + Date.now() }, replayed: false, kind: ekm[1], kind_label: ekm[1] === "bank_fee" ? "Banka gideri" : "Vergi/SGK ödemesi" });
+    });
+    if (path === "/accounting/expense-invoices/receipts" && req.method === "POST") { req.resume(); req.on("end", () => send(res, 200, { id: "rf-" + "a".repeat(24), name: "fis.jpg", content_type: "image/jpeg", size: 1234 })); return; }
     // Dalga 1 P1.3: gider geçmişi / kopya / PDF.
     if (req.method === "GET" && (gm = path.match(/^\/accounting\/expense-invoices\/(.+)\/(history|copy|pdf)$/))) {
       const ref = decodeURIComponent(gm[1]); const ex = expenseState[ref];
@@ -1701,6 +1712,8 @@ http
       req.on("end", () => {
         const b = JSON.parse(raw || "{}");
         let taxable = 0, vat = 0;
+        // Dalga 3: hızlı fiş — toplam KDV dahil, oran verilir; sunucu matrahı geri hesaplar.
+        if (b.entry_mode === "quick") { const tot = Number(b.total); taxable = Math.round(tot / (1 + Number(b.vat_rate) / 100) * 100) / 100; vat = Math.round((tot - taxable) * 100) / 100; console.log("QUICK PREVIEW", JSON.stringify(b)); }
         for (const l of b.lines || []) { const net = Number(l.quantity) * Number(l.unit_price) - Number(l.discount || 0); taxable += net; vat += net * Number(l.vat_rate) / 100; }
         const hasProduct = (b.lines || []).some((l) => l.kind === "product");
         const dup = String(b.document_number || "").toUpperCase() === "DUP-1";
@@ -1722,7 +1735,7 @@ http
       req.on("end", () => {
         console.log("WRITE", path, raw);
         expenseState["obihub:m1"] = { supplier: "Elle girilen tedarikçi", doc: "M-1", kind: "manual", total: "120.00", remaining: 120, levies: "0", status: "pending", payments: [], seenKeys: [] };
-        send(res, 200, { status: "APPLIED", result: { invoice_id: "m1", payable_ref: "obihub:m1" } });
+        send(res, 200, { status: "APPLIED", result: { invoice_id: "m1", payable_ref: "obihub:m1" }, parasut_warning: "Bu kayıt Paraşüt'e aktarılmaz; aynı gider Paraşüt'te de varsa çift kayıt olur." });
       });
       return;
     }

@@ -183,7 +183,7 @@ export default function ExpensesScreen() {
       ))}
       {canAdd ? (
         <View style={{ marginBottom: spacing.sm }}>
-          <Button testID="expenses-new" label="Gider / alış faturası ekle" icon={<PlusIcon size={18} color="#FFFFFF" />} onPress={() => router.push("/expenses/new")} />
+          <Button testID="expenses-new" label="Gider ekle" icon={<PlusIcon size={18} color="#FFFFFF" />} onPress={() => router.push("/expenses/kinds" as any)} />
         </View>
       ) : null}
       {note("Satıra dokunarak ayrıntıyı açın ve ödeme ekleyin. Gider kategorilerini web panelinden yönetin.")}
@@ -204,7 +204,7 @@ export default function ExpensesScreen() {
         state={ledger}
         icon={<DownloadIcon size={30} color={colors.error} />}
         emptyTitle={payment ? "Bu görünümde gider faturası yok" : "Henüz gider faturası yok"}
-        emptyAction={payment ? { label: "Süzgeci temizle", onPress: () => setPayment("") } : canAdd ? { label: "Gider / alış ekle", onPress: () => router.push("/expenses/new") } : null}
+        emptyAction={payment ? { label: "Süzgeci temizle", onPress: () => setPayment("") } : canAdd ? { label: "Gider / alış ekle", onPress: () => router.push("/expenses/kinds" as any) } : null}
         emptyDescription={payment ? "Süzgeci değiştirin." : "Gelen e-faturaları içeri aldığınızda ya da web panelinden gider eklediğinizde burada listelenir."}
         header={header}
         renderItem={(x) => {
