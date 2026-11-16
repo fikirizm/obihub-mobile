@@ -3,16 +3,20 @@
 
 type Inv = Record<string, any> | null | undefined;
 
+// invoice-status.documentAxis ile aynı kural (saf modül; göreli içe aktarma yok).
 const docAxis = (inv: Inv) => {
   const st = inv?.status;
   if (st === "taslak") return "draft";
   if (st === "iptal") return "cancelled";
+  if (st === "resmilesti" || inv?.edoc_state === "done" || ["parasut_import", "parasut", "parasut_mirror"].includes(String(inv?.source || "")) || inv?.source_kind === "parasut")
+    return "official";
   return "issued";
 };
 export const isMirror = (inv: Inv) => inv?.read_only === true || inv?.source === "parasut_mirror";
 
 export type LifecycleActions = {
   edit_amounts: boolean;
+  delete: boolean;
   edit_meta: boolean;
   cancel: boolean;
   return: boolean;
@@ -29,8 +33,15 @@ export function lifecycleActions(inv: Inv): LifecycleActions {
   const draft = axis === "draft";
   const cancelled = axis === "cancelled";
   const imported = inv?.source === "parasut_import";
+  const isReturn = inv?.invoice_type === "iade";
+  const quote = inv?.invoice_type === "teklif";
+  // 16 Kas (Paraşüt eşdeğeri): resmileşene kadar fatura düzenlenir ve silinir. Kapı: Paraşüt'e gitmemiş, e-belgesiz,
+  // işlem kilidi yok, resmileşmemiş. Tahsilatlı/iadeli faturayı sunucu reddeder (actions bunu bildirir).
+  const unofficial = !mirror && !imported && !cancelled && axis !== "official" && !inv?.parasut_invoice_id && !inv?.officialize_lock &&
+    !["done", "pending", "sending", "blocked_mismatch", "blocked"].includes(String(inv?.edoc_state || ""));
   const derived: LifecycleActions = {
-    edit_amounts: !mirror && draft,
+    edit_amounts: (!mirror && draft) || (unofficial && !isReturn && !quote && !(Number(inv?.paid_amount) > 0)),
+    delete: unofficial && (draft || (!isReturn && !quote)),
     edit_meta: !mirror && !cancelled,
     cancel: !mirror && !imported && !draft && !cancelled,
     return: !mirror && !imported && !draft && !cancelled && inv?.invoice_type !== "iade" && inv?.invoice_type !== "teklif",
@@ -56,17 +67,46 @@ const TEXTS: Record<string, string> = {
   RETURN_QTY_EXCEEDS_REMAINING: "İade miktarı kalan miktarı aşıyor.",
   RETURN_LINES_REQUIRED: "İade için en az bir kalem seçin.",
   SOURCE_NOT_ISSUED: "İade yalnız kesilmiş faturadan oluşturulur.",
-  HAS_RETURNS: "Bu faturanın iadesi var; önce iade belgesini iptal edin.",
-  ISSUED_AMOUNTS_LOCKED: "Kesilmiş faturada tutar alanları değiştirilemez. Düzeltme için faturayı iptal edip yenisini oluşturun.",
+  HAS_RETURNS: "Bu faturanın iadesi var; iade belgeleri kaldırılmadan fatura değiştirilemez ya da silinemez.",
+  MIRROR_READ_ONLY: "Bu kayıt Paraşüt'ten geliyor; değişikliği Paraşüt'te yapın",
+  COLLECT_IN_PARASUT: "Bu faturanın tahsilatını Paraşüt'te girin; ObiHub'a otomatik eşitlenir",
+  INVOICE_HAS_PAYMENTS: "Faturaya tahsilat bağlı. Önce faturanın tahsilatlarını silin.",
+  INVOICE_OFFICIALIZED: "Resmileşmiş fatura silinemez; iptal ya da iade oluşturun.",
+  INVOICE_SENT_TO_PARASUT: "Fatura Paraşüt'e gönderilmiş; silinemez. İptal ya da iade oluşturun.",
+  INVOICE_OFFICIALIZING: "Fatura şu an resmileştiriliyor; işlem bitince tekrar deneyin.",
+  INVOICE_OFFICIALIZE_UNCERTAIN: "Resmileştirme sonucu belirsiz; Paraşüt'te doğrulanana kadar fatura silinemez.",
+  QUOTE_CONVERTED_LOCKED: "Faturaya çevrilmiş teklif değiştirilemez.",
+  INVOICE_NOT_EDITABLE: "Bu fatura artık düzenlenemez.",
   CONFIRM_REQUIRED: "Bu işlem onay gerektirir.",
   RECIPIENT_REQUIRED: "En az bir alıcı e-posta adresi girin.",
   NOT_A_QUOTE: "Paylaşım yalnız teklif ve proforma belgelerinde kullanılır.",
   IDEMPOTENCY_MISMATCH: "Aynı işlem anahtarı farklı bilgiyle kullanıldı; ekranı kapatıp yeniden deneyin.",
 };
 export function lifecycleErrorText(err: any, fallback = "İşlem tamamlanamadı."): string {
-  if (err?.code && TEXTS[err.code]) return TEXTS[err.code];
   const msg = typeof err?.message === "string" ? err.message.trim() : "";
+  if (err?.code === "ISSUED_AMOUNTS_LOCKED") {
+    // Gerçek neden sunucuda (detail); "Resmileşmiş" metni yalnız reason doluysa.
+    if (msg && !/^Sunucu hatası \(\d+\)$/.test(msg)) return msg;
+    return err.reason ? "Resmileşmiş fatura değiştirilemez; iptal ya da iade oluşturun." : "Kesilmiş belgede tutar alanları değiştirilemez; iptal ya da iade oluşturun.";
+  }
+  if (err?.code && TEXTS[err.code]) return TEXTS[err.code];
   return msg && !/^Sunucu hatası \(\d+\)$/.test(msg) ? msg : fallback;
+}
+
+export const deleteConfirmText = (inv: Inv) =>
+  docAxis(inv) === "draft" ? "Taslak fatura kalıcı olarak silinir. Geri alınamaz." : "Fatura silinecek; stok ve cari bakiyesi geri alınır.";
+
+// Tutar alanları kilitliyken gerçek neden (web SalesInvoiceFormOS lockNote ile aynı sıra).
+export function amountsLockNote(inv: Inv) {
+  const paid = Number(inv?.paid_amount) > 0;
+  const official = inv?.status === "resmilesti" || ["done", "pending", "sending", "blocked_mismatch"].includes(String(inv?.edoc_state || ""));
+  const sent = Boolean(inv?.parasut_invoice_id);
+  const tail = " Not, fatura ismi ve vade değiştirilebilir.";
+  if (paid && !official && !sent) return "Tahsilatı olan faturada tutar alanları kilitli. Tutarı değiştirmek için önce faturanın tahsilatlarını silin;" + tail.replace(" Not", " not");
+  if (official) return "Resmileşmiş faturada tutar alanları kilitli; iptal ya da iade oluşturun." + tail;
+  if (sent) return "Paraşüt'e gönderilmiş faturada tutar alanları kilitli; iptal ya da iade oluşturun." + tail;
+  if (inv?.has_returns) return "İadesi olan faturada tutar alanları kilitli; önce iade belgelerini iptal edin ya da silin." + tail;
+  return "Kesilmiş faturada tutar alanları kilitli; iptal ya da iade oluşturun." + tail;
 }
 
 export const cancelReasonProblem = (reason: string) => (String(reason || "").trim().length < 3 ? "İptal gerekçesi zorunlu (en az 3 karakter)." : null);
@@ -82,6 +122,7 @@ export const EVENT_LABEL: Record<string, string> = {
   cancelled: "İptal edildi",
   returned: "İade oluşturuldu",
   copied: "Kopyalandı",
+  deleted: "Silindi",
   archived: "Arşivlendi",
   unarchived: "Arşivden çıkarıldı",
   shared: "Paylaşıldı",

@@ -11,7 +11,7 @@ import { canOfferParasutSync, collectResultText, parasutActionFailText, parasutA
 import { isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { amountRows, collectAmount, invoiceStatusView, parasutUnsupportedText } from "../../src/invoice-status";
 import { invoicePaymentActions, invoicePaymentCollection } from "../../src/collection-actions";
-import { lifecycleActions, lifecycleErrorText } from "../../src/document-lifecycle";
+import { deleteConfirmText, lifecycleActions, lifecycleErrorText } from "../../src/document-lifecycle";
 import { copyInvoice, getInvoicePdf, setInvoiceArchived } from "../../src/api-finans";
 import { Linking, Platform } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
@@ -167,6 +167,7 @@ export default function LocalInvoiceDetailScreen() {
   const readOnly = isReadOnly(inv);
   const canEditInvoice = mayWrite && !readOnly && isInvoiceEditable(inv as any);
   const lc = lifecycleActions(inv as any);
+  const canDelete = mayWrite && !readOnly && lc.delete;
   const onCopy = async () => {
     if (!token || busy) return;
     const ok = await confirm({ title: "Fatura kopyalansın mı?", message: "Aynı kalemlerle bugün tarihli yeni bir taslak oluşturulur; tahsilat ve e-belge bilgileri taşınmaz.", confirmLabel: "Kopyala" });
@@ -217,7 +218,7 @@ export default function LocalInvoiceDetailScreen() {
     if (!token || !inv || busy) return;
     const ok = await confirm({
       title: `${inv.invoice_number || "Fatura"} silinsin mi?`,
-      message: "Taslak fatura kalıcı olarak silinir. Geri alınamaz.",
+      message: deleteConfirmText(inv as any),
       confirmLabel: "Sil",
       destructive: true,
     });
@@ -229,7 +230,7 @@ export default function LocalInvoiceDetailScreen() {
       if (router.canGoBack()) router.back();
       else router.replace("/local-invoices");
     } catch (e: any) {
-      toast(e?.message || "Fatura silinemedi.", "error");
+      toast(lifecycleErrorText(e, "Fatura silinemedi."), "error");
       load();
     } finally {
       setBusy(null);
@@ -569,7 +570,6 @@ export default function LocalInvoiceDetailScreen() {
               onPress={() => router.push({ pathname: "/local-invoices/new", params: { id: inv.id } })}
               style={{ flex: 1 }}
             />
-            <Button testID="invoice-delete" label="Sil" variant="secondary" busy={busy === "delete"} disabled={Boolean(busy)} onPress={onDelete} style={{ flex: 1 }} />
           </SafeAnimatedView>
         ) : null}
 
@@ -579,7 +579,17 @@ export default function LocalInvoiceDetailScreen() {
             <SectionTitle title="Belge işlemleri" action={inv.archived ? <StatusBadge label="Arşivde" kind="neutral" size="sm" /> : undefined} />
             <View style={styles.lcGrid}>
               {lc.preview ? <Button testID="invoice-pdf" size="sm" variant="secondary" label="PDF / Yazdır" busy={busy === "pdf"} disabled={Boolean(busy)} onPress={onPdf} /> : null}
-              {mayWrite && lc.copy ? <Button testID="invoice-copy" size="sm" variant="secondary" label="Kopyala" busy={busy === "copy"} disabled={Boolean(busy)} onPress={onCopy} /> : null}
+              {mayWrite && lc.edit_meta && !canEditInvoice ? (
+                <Button
+                  testID="invoice-meta"
+                  size="sm"
+                  variant="secondary"
+                  label="Fatura ismi ve bilgiler"
+                  disabled={Boolean(busy)}
+                  onPress={() => router.push({ pathname: "/local-invoices/meta", params: { id: inv.id, title: inv.invoice_number || "" } })}
+                />
+              ) : null}
+              {mayWrite && lc.copy ? <Button testID="invoice-copy" size="sm" variant="secondary" label="Kopyasını oluştur" busy={busy === "copy"} disabled={Boolean(busy)} onPress={onCopy} /> : null}
               {mayWrite && lc.return ? (
                 <Button
                   testID="invoice-return"
@@ -590,26 +600,6 @@ export default function LocalInvoiceDetailScreen() {
                   onPress={() => router.push({ pathname: "/local-invoices/returns", params: { id: inv.id, title: [inv.invoice_number, inv.customer_name].filter(Boolean).join(" · ") } })}
                 />
               ) : null}
-              {mayWrite && lc.archive ? (
-                <Button testID="invoice-archive" size="sm" variant="secondary" label={inv.archived ? "Arşivden çıkar" : "Arşivle"} busy={busy === "archive"} disabled={Boolean(busy)} onPress={onArchive} />
-              ) : null}
-              {mayWrite && lc.edit_meta && !canEditInvoice ? (
-                <Button
-                  testID="invoice-meta"
-                  size="sm"
-                  variant="secondary"
-                  label="Bilgileri düzenle"
-                  disabled={Boolean(busy)}
-                  onPress={() => router.push({ pathname: "/local-invoices/meta", params: { id: inv.id, title: inv.invoice_number || "" } })}
-                />
-              ) : null}
-              <Button
-                testID="invoice-events"
-                size="sm"
-                variant="ghost"
-                label="Geçmiş"
-                onPress={() => router.push({ pathname: "/local-invoices/events", params: { id: inv.id, title: inv.invoice_number || "" } })}
-              />
               {mayWrite && lc.cancel ? (
                 <Button
                   testID="invoice-cancel"
@@ -625,6 +615,17 @@ export default function LocalInvoiceDetailScreen() {
                   }
                 />
               ) : null}
+              {mayWrite && lc.archive ? (
+                <Button testID="invoice-archive" size="sm" variant="secondary" label={inv.archived ? "Arşivden çıkar" : "Faturayı arşivle"} busy={busy === "archive"} disabled={Boolean(busy)} onPress={onArchive} />
+              ) : null}
+              {canDelete ? <Button testID="invoice-delete" size="sm" variant="destructive" label="Faturayı sil" busy={busy === "delete"} disabled={Boolean(busy)} onPress={onDelete} /> : null}
+              <Button
+                testID="invoice-events"
+                size="sm"
+                variant="ghost"
+                label="Geçmiş"
+                onPress={() => router.push({ pathname: "/local-invoices/events", params: { id: inv.id, title: inv.invoice_number || "" } })}
+              />
             </View>
             {inv.cancel_reason ? <Text style={[type.caption, styles.note, { color: colors.textSecondary }]}>{`İptal gerekçesi: ${inv.cancel_reason}`}</Text> : null}
           </SafeAnimatedView>

@@ -2,6 +2,7 @@
 // Kaynaklar: frontend/src/pages/ExpenseInvoicesPage.js, CustomersPage.js, IncomingEInvoicesPage.js, components/layout/Sidebar.js.
 import { API_BASE_URL, getParties, getPartyLedger, request } from "./api";
 import { bytesToBase64, inboxQuery, inboxRow } from "./inbox-ui";
+import { actionPath, checkPath, verdictOf, type GuardAction, type Verdict } from "./delete-guard";
 import { manualPaymentFields, paymentStates, type ImportForm, type PaymentStateOption } from "./api-iceri-al";
 import type {
   ExpenseLedgerRow,
@@ -102,12 +103,13 @@ function expenseRowOf(x: any): ExpenseLedgerRow {
     payment_status: typeof x?.payment_status === "string" ? x.payment_status : undefined,
     reversed: x?.reversed === true,
     source_kind: typeof x?.source_kind === "string" ? x.source_kind : undefined,
+    archived: x?.archived === true,
   };
 }
 
 export async function getExpenseLedger(
   token: string,
-  options: { page?: number; payment?: ExpensePaymentFilter; dateFrom?: string; dateTo?: string } = {}
+  options: { page?: number; payment?: ExpensePaymentFilter; dateFrom?: string; dateTo?: string; archived?: boolean } = {}
 ): Promise<Paged<ExpenseLedgerRow>> {
   const page = options.page ?? 1;
   const perPage = 20;
@@ -115,6 +117,8 @@ export async function getExpenseLedger(
   if (options.payment) qs.set("payment", options.payment);
   if (options.dateFrom) qs.set("date_from", options.dateFrom);
   if (options.dateTo) qs.set("date_to", options.dateTo);
+  // 16 Kas: liste varsayılanı arşivi gizler; arşiv görünümü archived=true.
+  if (options.archived) qs.set("archived", "true");
   const d = await request<any>(`/accounting/expense-invoices?${qs.toString()}`, { method: "GET" }, token);
   const items = (Array.isArray(d?.items) ? d.items : []).map(expenseRowOf).filter((r: ExpenseLedgerRow) => r.id);
   const total = Number.isInteger(d?.total) ? Number(d.total) : items.length;
@@ -398,6 +402,7 @@ export type ExpenseDetail = {
   reversed: boolean;
   canPay: boolean;
   sourceKind: string;
+  archived: boolean;
 };
 
 export async function getExpenseDetail(token: string, ref: string): Promise<ExpenseDetail> {
@@ -431,6 +436,7 @@ export async function getExpenseDetail(token: string, ref: string): Promise<Expe
     reversed: d?.reversed === true,
     canPay: d?.actions?.can_pay === true,
     sourceKind: String(d?.source_kind || ""),
+    archived: d?.archived === true,
   };
 }
 
@@ -710,4 +716,14 @@ export function manualErrorText(e: any, fallback = "İşlem tamamlanamadı. Lüt
   if (Number(e?.status) === 429) return "Çok sık deneme yapıldı; biraz bekleyip yeniden deneyin.";
   const m = typeof e?.message === "string" ? e.message.trim() : "";
   return /[ığüşöçİĞÜŞÖÇ]|[.!?]$/.test(m) && m.length < 240 && !/^Request failed|^Network|status code/i.test(m) ? m : fallback;
+}
+
+// 16 Kas: gider faturası silme / arşivleme (delete-check her zaman 200; engel varsa işlem 409 + aynı gövde).
+export async function checkExpenseLifecycle(token: string, id: string, action: GuardAction): Promise<Verdict> {
+  const v = verdictOf(await request<any>(checkPath(id, action), { method: "GET" }, token));
+  if (!v) throw { status: 0, message: "" };
+  return v;
+}
+export async function runExpenseLifecycle(token: string, id: string, action: GuardAction | "unarchive") {
+  return request<any>(actionPath(id, action), { method: action === "delete" ? "DELETE" : "POST", ...(action === "delete" ? {} : { body: "{}" }) }, token);
 }

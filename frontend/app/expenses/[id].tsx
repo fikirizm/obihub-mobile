@@ -37,6 +37,10 @@ import {
 import { Skeleton } from "../../src/components/Skeleton";
 import { StatusBadge } from "../../src/components/StatusBadge";
 import { Button } from "../../src/ui/Button";
+import { useFeedback } from "../../src/ui/Feedback";
+import { DeleteGuardSheet } from "../../src/components/DeleteGuardSheet";
+import { doneText, type GuardAction } from "../../src/delete-guard";
+import { runExpenseLifecycle } from "../../src/api-gider";
 import { DetailHero, type HeroStat } from "../../src/ui/DetailHero";
 import { StackHeader } from "../../src/ui/Header";
 import { ON_HERO } from "../../src/ui/HeroCard";
@@ -101,6 +105,10 @@ export default function ExpenseDetailScreen() {
   const [refreshing, setRefreshing] = useState(false);
   // Ödeme kapısı (web ExpenseInvoicesPage canPay): modül açık ve sunucu yeteneği payable_payment.
   const [payCap, setPayCap] = useState(false);
+  // 16 Kas: silme / arşivleme (Paraşüt gibi; engelleri sunucu söyler).
+  const { toast } = useFeedback();
+  const [life, setLife] = useState<GuardAction | null>(null);
+  const [unarchiving, setUnarchiving] = useState(false);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
@@ -262,6 +270,13 @@ export default function ExpenseDetailScreen() {
             >
               Bu kayıt geri alındı; borç artık geçerli değil.
             </Text>
+          </View>
+        ) : null}
+
+        {d.archived ? (
+          <View testID="expense-archived-note" style={[styles.notice, { backgroundColor: colors.surfaceMuted }]}>
+            <AlertIcon size={16} color={colors.textSecondary} />
+            <Text style={[type.footnote, { color: colors.textSecondary, flex: 1 }]}>Bu fatura arşivde; listede varsayılan olarak gizlenir.</Text>
           </View>
         ) : null}
 
@@ -454,7 +469,54 @@ export default function ExpenseDetailScreen() {
             })}
           </Card>
         </SafeAnimatedView>
+        {canManage(user, "billing") ? (
+          <View style={styles.lifeWrap}>
+            {d.archived ? (
+              <Button
+                testID="expense-unarchive-btn"
+                variant="secondary"
+                label="Arşivden çıkar"
+                busy={unarchiving}
+                onPress={async () => {
+                  if (!token || unarchiving) return;
+                  setUnarchiving(true);
+                  try {
+                    await runExpenseLifecycle(token, d.id, "unarchive");
+                    toast("Fatura arşivden çıkarıldı.", "success");
+                    load();
+                  } catch (e: any) {
+                    toast(e?.message && !/^Sunucu hatası/.test(e.message) ? e.message : "Fatura arşivden çıkarılamadı.", "error");
+                  } finally {
+                    setUnarchiving(false);
+                  }
+                }}
+              />
+            ) : (
+              <Button testID="expense-archive-btn" variant="secondary" label="Faturayı arşivle" onPress={() => setLife("archive")} />
+            )}
+            <Button testID="expense-delete-btn" variant="destructive" label="Faturayı sil" onPress={() => setLife("delete")} />
+          </View>
+        ) : null}
       </ScrollView>
+      {token ? (
+        <DeleteGuardSheet
+          token={token}
+          id={d.id}
+          action={life}
+          payableRef={d.payable?.ref}
+          onClose={() => setLife(null)}
+          onDone={(a) => {
+            setLife(null);
+            toast(doneText(a), "success");
+            if (router.canGoBack()) router.back();
+            else router.replace("/expenses");
+          }}
+          onReason={(t) => {
+            setLife(null);
+            router.push({ pathname: t.pathname, params: t.pathname === "/expenses/pay" ? { ...t.params, title: [d.supplier.name, d.document_number].filter(Boolean).join(" · ") } : t.params } as any);
+          }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -486,6 +548,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
   },
   payWrap: { marginHorizontal: spacing.lg, marginTop: spacing.md },
+  lifeWrap: { marginHorizontal: spacing.lg, marginTop: spacing.xl, gap: spacing.xs },
   emptyRow: {
     flexDirection: "row",
     alignItems: "center",

@@ -1349,7 +1349,9 @@ http
           return send(res, 200, inv);
         });
       if (!invMatch[2] && (req.method === "PUT" || req.method === "DELETE")) {
-        if (!["taslak", "gecikti"].includes(inv.status) || inv.parasut_invoice_id || inv.paid_amount > 0) return send(res, 400, { detail: "Bu fatura düzenlenemez" });
+        // 16 Kas: resmileşmemiş kesilmiş fatura da düzenlenir/silinir; tahsilatlı 409 INVOICE_HAS_PAYMENTS.
+        if (!["taslak", "gecikti", "gonderildi"].includes(inv.status) || inv.parasut_invoice_id) return send(res, 409, { code: "INVOICE_SENT_TO_PARASUT", detail: "Fatura Paraşüt'e gönderilmiş; silinemez." });
+        if (inv.paid_amount > 0) return send(res, 409, { code: "INVOICE_HAS_PAYMENTS", detail: "Faturaya tahsilat bağlı. Önce faturanın tahsilatlarını silin." });
         if (req.method === "DELETE") { localInvoices.splice(localInvoices.indexOf(inv), 1); console.log("WRITE DELETE", path); return send(res, 200, { message: "Silindi" }); }
         return readBody((b) => {
           console.log("WRITE PUT", path, JSON.stringify(b).slice(0, 500));
@@ -1411,10 +1413,36 @@ http
     if (path === "/accounting/expense-invoices/summary") return send(res, 200, { currencies: [{ currency: "TRY", payable: "9400.00", overdue: "1250.50" }] });
     // --- Dalga 3 / C2: gider detayı ve borç ödeme. e1 ödenebilir, e2'de ikinci ödeme 409 PAYMENT_EXCEEDS_OUTSTANDING denenir.
     let gm; // c2
+    // 16 Kas: gider faturası silme / arşivleme. e2 silinemez (eşleştirme + Paraşüt kaydı); arşivde açık bakiye engeli.
+    if (req.method === "GET" && (gm = path.match(/^\/accounting\/expense-invoices\/(.+)\/delete-check$/))) {
+      const ref = decodeURIComponent(gm[1]); const ex = expenseState[ref];
+      if (!ex || ex.deleted) return send(res, 404, { code: "NOT_FOUND", detail: "Bulunamadı" });
+      const action = url.searchParams.get("action") || "delete";
+      const reasons = [];
+      if (ex.payments.length) reasons.push({ code: "PAYMENTS_EXIST", message: "Faturaya bağlı ödemeler var. Önce ödemeleri silin.", action: { label: "Ödemeleri gör", kind: "payments", ref } });
+      if (ref === "obihub:e2") {
+        reasons.push({ code: "RELATED_DOCUMENTS", message: "Fatura bir gelen e-Fatura ile eşleştirilmiş.", action: { label: "Gelen e-Faturalar", kind: "incoming_inbox", href: "/gelen-efatura" } });
+        reasons.push({ code: "PARASUT_RECORD", message: "Fatura Paraşüt'e kaydedilmiş; önce Paraşüt'te silin.", action: null });
+      }
+      if (action === "archive" && ex.remaining > 0) reasons.push({ code: "OPEN_BALANCE", message: "Faturanın ödenmemiş bakiyesi var.", action: { label: "Ödeme ekle", kind: "pay" } });
+      const allowed = reasons.length === 0;
+      return send(res, 200, { allowed, action, code: allowed ? null : action === "archive" ? "ARCHIVE_BLOCKED" : "DELETE_BLOCKED", title: allowed ? null : "Kayıt silinemiyor ve arşivlenemiyor",
+        detail: allowed ? null : "Bu kaydı silmek ya da arşivlemek için aşağıdakileri giderin.", reasons,
+        warnings: allowed && action === "delete" && ex.kind === "import" ? [{ code: "E_INVOICE_LINKED", message: "Fatura e-Faturadan alınmış; silinince Gelen e-Faturalar'a döner." }, { code: "STOCK_REVERSED", message: "Faturayla giren stok geri alınır." }] : [],
+        confirm: allowed ? { title: action === "archive" ? "Fatura arşivlensin mi?" : "Fatura silinsin mi?", message: action === "archive" ? "Fatura listede gizlenir; kayıtlar etkilenmez." : "Fatura silinir; stok ve tedarikçi bakiyesi geri alınır.", button: action === "archive" ? "Faturayı arşivle" : "Faturayı sil" } : null });
+    }
+    if ((gm = path.match(/^\/accounting\/expense-invoices\/(.+?)(\/archive|\/unarchive)?$/)) && (req.method === "DELETE" || (req.method === "POST" && gm[2]))) {
+      const ref = decodeURIComponent(gm[1]); const ex = expenseState[ref];
+      if (!ex || ex.deleted) return send(res, 404, { code: "NOT_FOUND", detail: "Bulunamadı" });
+      if (gm[2] === "/unarchive") { ex.archived = false; return send(res, 200, { archived: false, id: ref }); }
+      if (ref === "obihub:e2" || ex.payments.length || (gm[2] === "/archive" && ex.remaining > 0)) return send(res, 409, { allowed: false, code: "DELETE_BLOCKED" });
+      if (gm[2] === "/archive") { ex.archived = true; return send(res, 200, { archived: true, id: ref }); }
+      ex.deleted = true; console.log("WRITE EXPENSE DELETE", ref); return send(res, 200, { deleted: true, id: ref, reversal: { ok: true } });
+    }
     if (req.method === "GET" && (gm = path.match(/^\/accounting\/expense-invoices\/(.+)$/)) && gm[1] !== "summary") {
       const ref = decodeURIComponent(gm[1]);
       const ex = expenseState[ref];
-      if (!ex) return send(res, 404, { code: "NOT_FOUND", detail: "Bulunamadı" });
+      if (!ex || ex.deleted) return send(res, 404, { code: "NOT_FOUND", detail: "Bulunamadı" });
       return send(res, 200, {
         id: ref, source: ref.startsWith("obihub:") ? "obihub" : "legacy", source_kind: ex.kind, supplier: { id: "s1", name: ex.supplier, tax_id: "1234567890" },
         document_number: ex.doc, issue_date: "2026-11-09", due_date: "2026-11-24", currency: "TRY",
@@ -1425,7 +1453,7 @@ http
         totals: { taxable: "1501.00", vat: "300.20", withholding: "0", other_levies: ex.levies, payable: ex.total },
         expense: { category_id: "c1", category_name: "Kargo giderleri", amount: "1501.00" },
         payable: { ref, paid: (Number(ex.total) - ex.remaining).toFixed(2), remaining: ex.remaining.toFixed(2), payment_status: ex.remaining <= 0 ? "paid" : ex.remaining < Number(ex.total) ? "partial" : ex.status },
-        reversed: false, actions: { can_pay: ex.remaining > 0, can_reverse: false },
+        reversed: false, archived: ex.archived === true, actions: { can_pay: ex.remaining > 0, can_reverse: false },
       });
     }
     // 15 Kas 2026 ödeme silme: DELETE /accounting/payables/{ref}/payments/{pid} (ters kayıt; borç tekrar ödenecek).
@@ -1513,7 +1541,11 @@ http
       ];
       const pay = url.searchParams.get("payment");
       const sets = { open: ["pending", "partial", "overdue"], overdue: ["overdue"], paid: ["paid"] };
-      const out = rows.filter((r) => !pay || (sets[pay] || []).includes(r.payment_status));
+      const wantArch = url.searchParams.get("archived") === "true";
+      const out = rows.filter((r) => !pay || (sets[pay] || []).includes(r.payment_status))
+        .filter((r) => !(expenseState[r.id] || {}).deleted)
+        .map((r) => ({ ...r, archived: (expenseState[r.id] || {}).archived === true }))
+        .filter((r) => (wantArch ? r.archived : !r.archived));
       return send(res, 200, { items: out, total: out.length, page: 1, per_page: 20 });
     }
     // D-17 gelen kutusu (/__mode?inbox=1): görünümler, arşiv, kabul/red, toplu indirme.

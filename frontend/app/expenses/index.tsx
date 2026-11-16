@@ -50,6 +50,8 @@ export default function ExpensesScreen() {
   const { colors } = useTheme();
   const [tab, setTab] = useState<Tab>("obihub");
   const [payment, setPayment] = useState<ExpensePaymentFilter>("");
+  // 16 Kas: liste varsayılanı arşivi gizler; "Arşiv" çipi archived=true görünümü.
+  const [archived, setArchived] = useState(false);
   const [caps, setCaps] = useState<UiCapabilities>(NO_CAPS);
   const [moduleOn, setModuleOn] = useState(true);
   const [summary, setSummary] = useState<ExpenseSummaryRow[]>([]);
@@ -59,7 +61,7 @@ export default function ExpensesScreen() {
   // ObiHub defteri: özet her başarılı ilk sayfadan sonra istenir; özet hatası listeyi kapatmaz.
   const fetchLedger = useCallback(
     async (page: number) => {
-      const res = await getExpenseLedger(token as string, { page, payment });
+      const res = await getExpenseLedger(token as string, { page, payment, archived });
       if (page === 1) {
         const my = ++summarySeq.current;
         getExpenseSummary(token as string)
@@ -68,7 +70,7 @@ export default function ExpensesScreen() {
       }
       return res;
     },
-    [token, payment]
+    [token, payment, archived]
   );
   const ledger = usePagedList<ExpenseLedgerRow>(token && tab === "obihub" ? fetchLedger : null);
   // Detay/ödeme ya da yeni kayıt ekranından dönüldüğünde yüklü sayfalar ve özet sessizce tazelenir.
@@ -196,6 +198,7 @@ export default function ExpensesScreen() {
         {FILTERS.map(([id, label]) => (
           <Chip key={id || "all"} testID={`expenses-filter-${id || "all"}`} label={label} selected={payment === id} onPress={() => setPayment(id)} />
         ))}
+        <Chip testID="expenses-filter-archived" label="Arşiv" selected={archived} onPress={() => setArchived(!archived)} />
       </ChipRow>
       <ListBody
         state={ledger}
@@ -226,7 +229,7 @@ export default function ExpensesScreen() {
               subtitle={[x.document_number, x.issue_date ? formatDate(x.issue_date) : null].filter(Boolean).join(" · ") || undefined}
               meta={metaParts.length ? metaParts.join(" · ") : undefined}
               amount={x.total !== null ? formatMoney(x.total, cur) : "—"}
-              badge={<StatusBadge label={st.label} kind={st.kind} size="sm" />}
+              badge={<StatusBadge label={x.archived ? "Arşivde" : st.label} kind={x.archived ? "neutral" : st.kind} size="sm" />}
             />
           );
         }}

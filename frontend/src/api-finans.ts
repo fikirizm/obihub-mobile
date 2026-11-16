@@ -3,6 +3,7 @@
 import { API_BASE_URL, request } from "./api";
 import { bytesToBase64 } from "./inbox-ui";
 import type { CashAccount, CashEntry, LocalInvoice, Party } from "./types";
+import { lifecycleActions } from "./document-lifecycle";
 import { accountsPath, movementsPath, type AccountStatus, type MovementFilter } from "./kasa-ui";
 import { isUncertainWrite, moneyRetryable, sendKeyedMoney, type KeyedMoneyOutcome } from "./money-retry";
 import { collectionPath, orderInvoiceLabel, type Collection } from "./collection-actions";
@@ -221,14 +222,10 @@ export async function deleteLocalInvoice(token: string, id: string) {
   return request<{ message?: string }>(`/local-invoices/${encodeURIComponent(id)}`, { method: "DELETE" }, token);
 }
 
-// Web SalesInvoiceFormOS editable: taslak/gecikti, gönderilmemiş (parasut_invoice_id yok), ödeme yok, resmileştirme kilidi yok.
-export function isInvoiceEditable(
-  inv: { status?: string; parasut_invoice_id?: string | null; paid_amount?: number | null; officialize_lock?: unknown; actions?: { edit_amounts?: unknown } | null } | null
-) {
+// Tutar düzenleme kapısı: sunucunun actions.edit_amounts'ı esas; yoksa durumdan (16 Kas: resmileşmemiş kesilmiş fatura da düzenlenir).
+export function isInvoiceEditable(inv: Record<string, any> | null | undefined) {
   if (!inv) return false;
-  // D-12 (S-4): kesilmiş faturada tutar alanları kilitli; sunucu actions.edit_amounts verirse o esastır.
-  if (inv.actions && typeof inv.actions.edit_amounts === "boolean" && !inv.actions.edit_amounts) return false;
-  return ["taslak", "gecikti"].includes(String(inv.status || "")) && !inv.parasut_invoice_id && Number(inv.paid_amount || 0) <= 0 && !inv.officialize_lock;
+  return lifecycleActions(inv).edit_amounts;
 }
 
 

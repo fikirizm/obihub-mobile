@@ -536,6 +536,7 @@ export type ExpenseLedgerRow = {
   payment_status?: string;
   reversed?: boolean;
   source_kind?: string;
+  archived?: boolean;
 };
 
 export type ExpenseSummaryRow = { currency: string; payable: number; overdue: number };

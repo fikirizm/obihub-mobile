@@ -18,7 +18,7 @@ function t(name, fn) { fn(); n++; console.log("ok -", name); }
 t("eylemler: sunucunun actions'ı esas; yoksa durumdan türetilir", () => {
   assert.deepEqual(m.lifecycleActions({ status: "gonderildi", actions: { cancel: false, copy: true } }).cancel, false);
   const issued = m.lifecycleActions({ status: "gonderildi", invoice_type: "satis" });
-  assert.equal(issued.cancel, true); assert.equal(issued.return, true); assert.equal(issued.edit_amounts, false); assert.equal(issued.edit_meta, true);
+  assert.equal(issued.cancel, true); assert.equal(issued.return, true); assert.equal(issued.edit_amounts, true); assert.equal(issued.edit_meta, true);
   const draft = m.lifecycleActions({ status: "taslak" });
   assert.equal(draft.cancel, false); assert.equal(draft.return, false); assert.equal(draft.edit_amounts, true);
   const cancelled = m.lifecycleActions({ status: "iptal" });
@@ -30,9 +30,49 @@ t("eylemler: sunucunun actions'ı esas; yoksa durumdan türetilir", () => {
 });
 t("hata metinleri: bilinen kod web metni; yoksa sunucu metni; o da yoksa yedek", () => {
   assert.equal(m.lifecycleErrorText({ code: "HAS_PAYMENTS" }), "Bu faturaya tahsilat bağlı. Önce tahsilatı iptal edin ya da faturadan ayırın, sonra faturayı iptal edin.");
-  assert.equal(m.lifecycleErrorText({ code: "ISSUED_AMOUNTS_LOCKED" }), "Kesilmiş faturada tutar alanları değiştirilemez. Düzeltme için faturayı iptal edip yenisini oluşturun.");
+  // 16 Kas: ISSUED_AMOUNTS_LOCKED → sunucunun detail'i; yoksa "Resmileşmiş" metni yalnız reason doluysa.
+  assert.equal(m.lifecycleErrorText({ code: "ISSUED_AMOUNTS_LOCKED", message: "Fatura Paraşüt'e gönderilmiş." }), "Fatura Paraşüt'e gönderilmiş.");
+  assert.equal(m.lifecycleErrorText({ code: "ISSUED_AMOUNTS_LOCKED", message: "Sunucu hatası (409)" }), "Kesilmiş belgede tutar alanları değiştirilemez; iptal ya da iade oluşturun.");
+  assert.equal(m.lifecycleErrorText({ code: "ISSUED_AMOUNTS_LOCKED", reason: "officialized" }), "Resmileşmiş fatura değiştirilemez; iptal ya da iade oluşturun.");
   assert.equal(m.lifecycleErrorText({ code: "X", message: "Sunucu açıklaması." }), "Sunucu açıklaması.");
   assert.equal(m.lifecycleErrorText({}, "Olmadı."), "Olmadı.");
+});
+t("16 Kas: resmileşmemiş kesilmiş fatura Paraşüt gibi düzenlenir ve silinir (sunucu actions esas)", () => {
+  const issued = m.lifecycleActions({ status: "gonderildi", invoice_type: "satis" });
+  assert.equal(issued.edit_amounts, true); assert.equal(issued.delete, true);
+  assert.equal(m.lifecycleActions({ status: "taslak" }).delete, true);
+  const paid = m.lifecycleActions({ status: "gonderildi", paid_amount: 10 });
+  assert.equal(paid.edit_amounts, false); assert.equal(paid.delete, true); // tahsilatlıyı sunucu INVOICE_HAS_PAYMENTS ile reddeder
+  for (const inv of [{ status: "resmilesti" }, { status: "gonderildi", parasut_invoice_id: "9" }, { status: "gonderildi", edoc_state: "done" }, { status: "gonderildi", edoc_state: "pending" },
+    { status: "gonderildi", officialize_lock: { at: "x" } }, { status: "gonderildi", source: "parasut_import" }, { status: "gonderildi", read_only: true }, { status: "iptal" }]) {
+    const a = m.lifecycleActions(inv);
+    assert.equal(a.delete, false, JSON.stringify(inv)); assert.equal(a.edit_amounts, false, JSON.stringify(inv));
+  }
+  assert.equal(m.lifecycleActions({ status: "gonderildi", invoice_type: "iade" }).delete, false);
+  assert.equal(m.lifecycleActions({ status: "taslak", invoice_type: "iade" }).delete, true);
+  const srv = m.lifecycleActions({ status: "gonderildi", actions: { delete: false, edit_amounts: false }, has_returns: true });
+  assert.equal(srv.delete, false); assert.equal(srv.edit_amounts, false);
+});
+t("16 Kas: yeni silme/düzenleme hata kodlarının metinleri", () => {
+  assert.equal(m.lifecycleErrorText({ code: "INVOICE_HAS_PAYMENTS" }), "Faturaya tahsilat bağlı. Önce faturanın tahsilatlarını silin.");
+  assert.match(m.lifecycleErrorText({ code: "INVOICE_OFFICIALIZED" }), /Resmileşmiş fatura silinemez/);
+  assert.match(m.lifecycleErrorText({ code: "INVOICE_SENT_TO_PARASUT" }), /Paraşüt'e gönderilmiş/);
+  assert.match(m.lifecycleErrorText({ code: "INVOICE_OFFICIALIZING" }), /resmileştiriliyor/);
+  assert.match(m.lifecycleErrorText({ code: "INVOICE_OFFICIALIZE_UNCERTAIN" }), /belirsiz/);
+  assert.equal(m.lifecycleErrorText({ code: "QUOTE_CONVERTED_LOCKED" }), "Faturaya çevrilmiş teklif değiştirilemez.");
+  assert.equal(m.lifecycleErrorText({ code: "INVOICE_NOT_EDITABLE" }), "Bu fatura artık düzenlenemez.");
+  assert.match(m.lifecycleErrorText({ code: "HAS_RETURNS" }), /iadesi var/);
+});
+t("16 Kas: silme onayı taslakta ve kesilmiş faturada farklı", () => {
+  assert.match(m.deleteConfirmText({ status: "taslak" }), /Taslak/);
+  assert.equal(m.deleteConfirmText({ status: "gonderildi" }), "Fatura silinecek; stok ve cari bakiyesi geri alınır.");
+});
+t("16 Kas: tutar kilidi notu gerçek nedeni söyler", () => {
+  assert.match(m.amountsLockNote({ status: "gonderildi", paid_amount: 5 }), /önce faturanın tahsilatlarını silin/);
+  assert.match(m.amountsLockNote({ status: "resmilesti" }), /^Resmileşmiş faturada/);
+  assert.match(m.amountsLockNote({ status: "gonderildi", parasut_invoice_id: "1" }), /^Paraşüt'e gönderilmiş/);
+  assert.match(m.amountsLockNote({ status: "gonderildi", has_returns: true }), /^İadesi olan/);
+  assert.match(m.amountsLockNote({ status: "gonderildi" }), /^Kesilmiş faturada/);
 });
 t("iptal gerekçesi en az 3 karakter", () => {
   assert.equal(m.cancelReasonProblem(" ab "), "İptal gerekçesi zorunlu (en az 3 karakter).");

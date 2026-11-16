@@ -39,7 +39,7 @@ import {
   type DocType,
 } from "../document-form";
 import { convertText, quoteActions, quoteOutcomeView } from "../quote-status";
-import { lifecycleActions } from "../document-lifecycle";
+import { lifecycleActions, amountsLockNote } from "../document-lifecycle";
 import { StatusBadge } from "../components/StatusBadge";
 import { todayIso } from "../finance";
 import { useDebounce } from "../hooks/useDebounce";
@@ -434,7 +434,7 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
             title={editState === "locked" ? "Bu fatura düzenlenemez" : quote ? "Teklif açılamadı" : "Fatura açılamadı"}
             description={
               editState === "locked"
-                ? "Yalnız gönderilmemiş, tahsilatı olmayan taslak ya da gecikmiş faturalar düzenlenebilir."
+                ? amountsLockNote(record)
                 : `${quote ? "Teklif" : "Fatura"} şu an okunamadı. Biraz sonra yeniden deneyin.`
             }
           />
@@ -991,8 +991,10 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
             ) : (
               <>
                 {!isIssued ? <Button testID="invoice-issue" variant="secondary" label="Kaydet ve kes" disabled={busy} onPress={() => submit("issue")} /> : null}
-                <Text style={[type.caption, { color: colors.textTertiary }]}>
-                  Kaydedince fatura taslak olarak durur; "Kaydet ve kes" faturayı keser. Resmileştirince fatura Paraşüt'e gider.
+                <Text testID={isIssued ? "issued-edit-note" : undefined} style={[type.caption, { color: colors.textTertiary }]}>
+                  {isIssued
+                    ? "Fatura kesilmiş durumda kalır; kaydedince stok ve cari bakiyesi yeni tutara göre güncellenir. Resmileştirince fatura Paraşüt'e gider."
+                    : "Kaydedince fatura taslak olarak durur; \"Kaydet ve kes\" faturayı keser. Resmileştirince fatura Paraşüt'e gider."}
                 </Text>
               </>
             )}
