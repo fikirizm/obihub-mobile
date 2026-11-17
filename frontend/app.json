@@ -44,6 +44,7 @@
     "plugins": [
       "expo-router",
       "./plugins/withPodsDeploymentTarget",
+      "./plugins/withUIScene",
       [
         "expo-splash-screen",
         {
