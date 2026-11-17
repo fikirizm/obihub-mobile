@@ -6,4 +6,5 @@ function t(name, fn) { fn(); n++; console.log("ok -", name); }
 t("iOS 27 SDK + UIScene yok → HATA (build 72 durumu)", () => { assert.equal(verdict({ sdk: "iphoneos27.2", sceneManifest: false }).ok, false); });
 t("iOS 26 SDK (EAS bulut) + UIScene yok → uygun", () => { assert.equal(verdict({ sdk: "iphoneos26.2", sceneManifest: false }).ok, true); });
 t("iOS 27 SDK + UIScene var → uygun", () => { assert.equal(verdict({ sdk: "iphoneos27.2", sceneManifest: true }).ok, true); });
+t("simülatör SDK'sı da sayılır: iphonesimulator27.2 + UIScene yok → HATA", () => { assert.equal(verdict({ sdk: "iphonesimulator27.2", sceneManifest: false }).ok, false); });
 console.log(`\n${n} test geçti`);

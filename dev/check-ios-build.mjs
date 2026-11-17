@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export function verdict({ sdk, sceneManifest }) {
-  const m = /^iphoneos(\d+)/.exec(String(sdk || ""));
+  const m = /^iphone(?:os|simulator)(\d+)/.exec(String(sdk || ""));
   const major = m ? Number(m[1]) : 0;
   if (major >= 27 && !sceneManifest)
     return { ok: false, text: `iOS ${major} SDK ile derlenmiş ama UIScene yok (UIApplicationSceneManifest eksik): iOS 27'de açılışta çöker. Eski Xcode (≤26) ile derleyin ya da UIScene'e geçin.` };
