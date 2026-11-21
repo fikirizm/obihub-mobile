@@ -33,6 +33,7 @@ import { StatusBadge } from "../../src/components/StatusBadge";
 import { Button } from "../../src/ui/Button";
 import { DetailHero, type HeroStat } from "../../src/ui/DetailHero";
 import { useFeedback } from "../../src/ui/Feedback";
+import { POS_PREPAID_NOTE, posPrepaid } from "../../src/pos-invoice";
 import { StackHeader } from "../../src/ui/Header";
 import { ON_HERO } from "../../src/ui/HeroCard";
 import { Card, IconTile, ListRow, SectionTitle } from "../../src/ui/ListRow";
@@ -247,7 +248,7 @@ export default function LocalInvoiceDetailScreen() {
   const canOfficialize = (officializeCandidate && inv.invoice_type !== "iade") || (mayWrite && parasutConnected === true && canOfficializeReturn(inv));
   // Aşama 4 P6: e-belge tutarı Paraşüt'le uyuşmadığında (blocked_mismatch) sunucu tahsilatı 409 ile reddeder; düğme gizlenir.
   // İade faturasına tahsilat alınmaz (sunucu 409 INVOICE_IS_REFUND).
-  const canCollect = mayWrite && !readOnly && !isCancelled && inv?.money_state !== "refund" && remaining > 0.004 && inv?.edoc_state !== "blocked_mismatch";
+  const canCollect = mayWrite && !readOnly && !isCancelled && inv?.money_state !== "refund" && remaining > 0.004 && inv?.edoc_state !== "blocked_mismatch" && !posPrepaid(inv);
 
   // Dalga 2: resmileştirme ayrı onay sayfasında (internet satışı, iade e-belgesi).
   const onOfficialize = () =>
@@ -577,6 +578,9 @@ export default function LocalInvoiceDetailScreen() {
           </SafeAnimatedView>
         ) : null}
 
+        {posPrepaid(inv) && remaining > 0.004 ? (
+          <Text testID="invoice-pos-prepaid" style={[type.caption, { color: colors.textTertiary, marginHorizontal: spacing.lg }]}>{POS_PREPAID_NOTE}</Text>
+        ) : null}
         {canOfficialize || canCollect ? (
           <SafeAnimatedView entering={FadeInDown.delay(80).duration(380)} style={styles.actions}>
             {canCollect ? <Button testID="invoice-collect" label="Tahsilat ekle" busy={busy === "payment"} disabled={Boolean(busy)} onPress={onCollect} style={{ flex: 1 }} /> : null}

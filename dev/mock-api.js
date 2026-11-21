@@ -302,7 +302,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -619,13 +619,42 @@ http
     if (req.method === "GET" && path === "/pos/receipts") {
       const q = (url.searchParams.get("q") || "").trim().toLowerCase();
       const page = Number(url.searchParams.get("page") || 1), per = Number(url.searchParams.get("per_page") || 25);
-      const all = posSales.map((x) => x.doc).filter(Boolean).reverse().filter((d) => !q || d.sale_number.toLowerCase().includes(q) || String(d.customer_name || "").toLowerCase().includes(q));
+      const all = posSales.map((x) => x.doc).filter((d) => d && !d.deleted).reverse().filter((d) => !q || d.sale_number.toLowerCase().includes(q) || String(d.customer_name || "").toLowerCase().includes(q));
       const items = all.slice((page - 1) * per, page * per).map((d) => ({ id: d.id, sale_number: d.sale_number, created_at: d.created_at, total: d.total, vat_amount: d.vat_amount,
         payment_type: d.payment_type, customer_name: d.customer_name, status: d.status, invoice_id: d.invoice_id || null, invoice_number: d.invoice_number || null,
         receipt_delete_started: false, stock_restore_error: null, ledger_pending: false, item_count: d.items.length }));
       return send(res, 200, { items, total: all.length, page, per_page: per });
     }
     let rcm;
+    // M3a: fiş silme (/__mode?receiptPending=1 → ilk silme yarım kalır, pending:true).
+    if (req.method === "DELETE" && (rcm = path.match(/^\/pos\/receipts\/([^/]+)$/))) {
+      const d = posSales.map((x) => x.doc).find((x) => x && x.id === decodeURIComponent(rcm[1]));
+      if (!d) return send(res, 404, { detail: "Satış fişi bulunamadı." });
+      console.log("WRITE DELETE", path);
+      if (d.invoice_id) return send(res, 409, { detail: "Faturaya bağlı satış fişi silinemez. Önce bağlı faturanın işlemlerini tamamlayın." });
+      d.status = "cancelled"; d.receipt_delete_started = true;
+      if (state.receiptPending === "1") { state.receiptPending = "0"; return send(res, 200, { deleted: false, pending: true, cash_status: "pending", warnings: [], already_cancelled: false }); }
+      d.deleted = true;
+      return send(res, 200, { deleted: true, pending: false, cash_status: "posted", warnings: [], already_cancelled: false });
+    }
+    // M3b: fişten taslak fatura (tekrarında aynı fatura).
+    if (req.method === "POST" && (rcm = path.match(/^\/pos\/receipts\/([^/]+)\/invoice$/))) {
+      const d = posSales.map((x) => x.doc).find((x) => x && x.id === decodeURIComponent(rcm[1]));
+      if (!d) return send(res, 404, { detail: "Satış fişi bulunamadı." });
+      console.log("WRITE", path);
+      if (d.status !== "completed" || d.receipt_delete_started) return send(res, 409, { detail: "Yalnız tamamlanmış ve silme işlemi başlamamış satış fişi faturaya dönüştürülebilir." });
+      if (d.invoice_id) return send(res, 200, { invoice_id: d.invoice_id, replayed: true });
+      const id = "posinv-" + d.id, number = "OBI2026" + String(300 + localInvoices.length);
+      const items = d.items.map((it, i) => ({ line_key: "i" + i, kind: "product", product_id: it.product_id, product_name: it.product_name, quantity: String(it.quantity), unit: "ADET",
+        unit_price: (it.unit_price / (1 + it.vat_rate / 100)).toFixed(4), price_basis: "gross", gross_unit_price: String(it.unit_price), vat_rate: it.vat_rate, discount: null,
+        line_total: Math.round(it.unit_price * it.quantity * 100) / 100 }));
+      localInvoices.unshift({ id, invoice_number: number, invoice_type: "satis", status: "taslak", display_status: "taslak", doc_schema: 1, currency: "TRY", customer_id: null,
+        customer_name: d.customer_name || "Genel Müşteri", customer_tax_no: "", customer_tax_office: "", customer_address: "", issue_date: new Date().toISOString().slice(0, 10), due_date: null,
+        items, subtotal: d.subtotal, vat_amount: d.vat_amount, total: d.total, remaining_amount: d.total, paid_amount: 0, payments: [], stock_mode: "none",
+        pos_sale_id: d.id, pos_sale_number: d.sale_number, pos_payment_type: d.payment_type, source: "pos_receipt", notes: d.sale_number + " numaralı mağaza satışından oluşturuldu.", document_name: d.sale_number });
+      d.invoice_id = id; d.invoice_number = number;
+      return send(res, 200, { invoice_id: id, invoice_number: number });
+    }
     if (req.method === "GET" && (rcm = path.match(/^\/pos\/receipts\/([^/]+)$/))) {
       const d = posSales.map((x) => x.doc).find((x) => x && x.id === decodeURIComponent(rcm[1]));
       return d ? send(res, 200, d) : send(res, 404, { detail: "Satış fişi bulunamadı." });
@@ -1589,6 +1618,16 @@ http
         if (req.method === "DELETE") { localInvoices.splice(localInvoices.indexOf(inv), 1); console.log("WRITE DELETE", path); return send(res, 200, { message: "Silindi" }); }
         return readBody((b) => {
           console.log("WRITE PUT", path, JSON.stringify(b).slice(0, 500));
+          if (b.action && inv.pos_sale_id) {
+            // Faz A: fişe bağlı taslak (orchestration/pos_invoice.ensure_unchanged).
+            const KEYS = ["line_key", "kind", "product_id", "product_name", "description", "quantity", "unit", "unit_price", "price_basis", "gross_unit_price", "vat_rate", "discount", "withholding", "other_taxes"];
+            const sig = (items) => JSON.stringify((items || []).map((it) => KEYS.map((k) => [k, it[k] ?? null])));
+            if (sig(b.items) !== sig(inv.items) || !["none", undefined, null].includes(b.stock_mode)) return send(res, 409, { detail: "Bu fatura satış fişine bağlı. Ürün, miktar, fiyat, vergi ve stok bilgileri fişten korunur." });
+            if (b.collection) return send(res, 409, { detail: "Bu satışın tahsilatı satış fişinde kayıtlı. Fatura üzerinden yeniden tahsilat oluşturulamaz." });
+            Object.assign(inv, { customer_name: b.customer_name, customer_id: b.customer_id, customer_tax_no: b.customer_tax_no, customer_address: b.customer_address, notes: b.notes, due_date: b.due_date, issue_date: b.issue_date });
+            if (b.action === "issue") Object.assign(inv, { status: "gonderildi", display_status: "gonderildi", paid_amount: inv.total, remaining_amount: 0 });
+            return send(res, 200, inv);
+          }
           if (b.action) {
             // P1 gövdesi: tüm formu değiştirir; action=issue keser.
             Object.assign(inv, { items: b.items, document_name: b.document_name || null, notes: b.notes, due_date: b.due_date, stock_mode: b.stock_mode, note_options: b.note_options || null,

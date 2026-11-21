@@ -38,6 +38,7 @@ import {
   type DocType, listPrice } from "../document-form";
 import { convertText, quoteActions, quoteOutcomeView } from "../quote-status";
 import { lifecycleActions, amountsLockNote } from "../document-lifecycle";
+import { canChangeCustomer, isPosLocked, posLockedBody, posLockNote } from "../pos-invoice";
 import { StatusBadge } from "../components/StatusBadge";
 import { todayIso } from "../finance";
 import { useDebounce } from "../hooks/useDebounce";
@@ -98,6 +99,12 @@ const dayDiff = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse
 const money = (v: unknown) => (v == null || v === "" ? "—" : formatTry(Number(v)));
 
 // Önizleme: girişten kısa süre sonra sorulur; yanıt yalnız aynı gövde için geçerlidir (bayat yanıt gösterilmez).
+// Fişe bağlı taslağın önizlemesi kayıttaki kalemler ve belge indirimiyle (form net fiyatla yeniden kurar; fiş brüt fiyat taşır).
+function lockedPreview(record: any) {
+  const b = posLockedBody({}, record);
+  return { lines: b.items, ...(b.invoice_discount_type ? { doc_discount: { type: b.invoice_discount_type, value: b.invoice_discount_value } } : {}) };
+}
+
 function usePreview(token: string | null, body: unknown, enabled: boolean) {
   const key = useMemo(() => (enabled && body ? JSON.stringify(body) : ""), [body, enabled]);
   const [state, setState] = useState<{ key: string; data: any; error: string }>({ key: "", data: null, error: "" });
@@ -172,6 +179,8 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
   const [reloadSeq, setReloadSeq] = useState(0);
   const [actBusy, setActBusy] = useState("");
   const [banks, setBanks] = useState<{ iban: string; name: string }[]>([]);
+  // Faz A M3b: satış fişinden oluşturulan taslak. Kalem, fiyat, vergi, indirim ve stok fişten korunur; yalnız cari/adres, tarih, not düzenlenir.
+  const posLocked = !quote && isPosLocked(record);
 
   useEffect(() => {
     if (token) getDocumentMeta(token).then(setMeta);
@@ -272,7 +281,11 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
   const stockMode = quote ? null : form.stock_mode || meta?.stock.default_mode || null;
   const errors = validateForm(form, { stockMode, docType });
   const linesOk = form.lines.length > 0 && !Object.keys(errors).some((k) => k !== "customer");
-  const preview = usePreview(token, form.lines.length ? previewBody(form, stockMode, docType) : null, linesOk);
+  const preview = usePreview(
+    token,
+    form.lines.length ? (posLocked ? { ...previewBody(form, "none", docType), ...lockedPreview(record) } : previewBody(form, stockMode, docType)) : null,
+    linesOk
+  );
   const totals = preview.data?.totals || null;
   const lineTotal = (key: string) => (preview.data?.lines || []).find((x: any) => x.line_key === key)?.line_total;
   const rows = totalsRows(totals, form);
@@ -319,7 +332,8 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
     sending.current = true;
     setBusy(true);
     try {
-      const body = buildBody(form, { action, stockMode, docType, createKey: editId ? undefined : createKey.current });
+      const built = buildBody(form, { action, stockMode, docType, createKey: editId ? undefined : createKey.current });
+      const body = posLocked ? posLockedBody(built, record) : built;
       const inv = await saveSalesDocument(token, body, editId || undefined);
       if (quote) {
         toast("Teklif kaydedildi", "success");
@@ -586,7 +600,7 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
           </HeroCard>
 
           {/* Müşteri */}
-          <SectionTitle title="Müşteri" action={form.customer_name ? <Button testID="invoice-customer-change" label="Değiştir" variant="ghost" size="sm" onPress={clearCustomer} /> : undefined} />
+          <SectionTitle title="Müşteri" action={form.customer_name && canChangeCustomer(record) ? <Button testID="invoice-customer-change" label="Değiştir" variant="ghost" size="sm" onPress={clearCustomer} /> : undefined} />
           {form.customer_name ? (
             <Card style={styles.block}>
               <ListRow
@@ -657,7 +671,27 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
 
           {/* Kalemler */}
           <SectionTitle title="Kalemler" action={form.lines.length > 0 ? <Text style={[type.caption, tabular, { color: colors.textTertiary }]}>{form.lines.length} kalem</Text> : undefined} />
-          {form.lines.map((l, i) => {
+          {posLocked ? (
+            <>
+              <Text testID="invoice-pos-lock" style={[type.caption, styles.note, { color: colors.textSecondary }]}>{posLockNote(record)}</Text>
+              <Card style={styles.block}>
+                {(Array.isArray(record?.items) ? record.items : []).map((it: any, i: number) => {
+                  const lt = lineTotal(String(it?.line_key || ""));
+                  return (
+                    <ListRow
+                      key={String(it?.line_key || i)}
+                      testID={`invoice-pos-line-${i}`}
+                      divider={i > 0}
+                      title={String(it?.product_name || it?.description || `Kalem ${i + 1}`)}
+                      subtitle={`${String(it?.quantity ?? "").replace(".", ",")} × ${formatTry(it?.price_basis === "gross" ? it?.gross_unit_price : it?.unit_price)}${it?.price_basis === "gross" ? " (KDV dahil)" : ""} · KDV %${it?.vat_rate ?? 0}`}
+                      trailing={<Text style={[type.callout, tabular, { color: colors.textPrimary, fontWeight: "600" }]}>{lt != null ? money(lt) : "—"}</Text>}
+                    />
+                  );
+                })}
+              </Card>
+            </>
+          ) : null}
+          {!posLocked && form.lines.map((l, i) => {
             const lt = lineTotal(l.line_key);
             const name = l.product_id ? l.product_name : l.description;
             return (
@@ -736,6 +770,8 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
             );
           })}
 
+          {posLocked ? null : (
+          <>
           <SearchField testID="invoice-product-search" value={productQuery} onChangeText={setProductQuery} placeholder="Ürün adı, stok kodu veya barkod ara" />
           {tried && form.lines.length === 0 && !freeProduct ? <Text style={[type.caption, styles.note, { color: colors.error }]}>En az bir kalem ekleyin.</Text> : null}
           {!freeProduct && form.lines.length === 0 && !tried ? <Text style={[type.caption, styles.note, { color: colors.textTertiary }]}>Ürün arayarak ya da adını yazarak kalem ekleyin.</Text> : null}
@@ -777,8 +813,11 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
             </Card>
           ) : null}
 
+          </>
+          )}
+
           {/* Stok (teklifte yok) */}
-          {stockMode && !quote ? (
+          {stockMode && !quote && !posLocked ? (
             <>
               <SectionTitle title="Stok takibi" />
               <ChipRow>
@@ -862,7 +901,7 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
           {/* Toplam ve ara toplam seçenekleri */}
           <SectionTitle title="Toplam" />
           <Card padded style={[styles.block, { gap: spacing.xs }]}>
-            {form.doc_discount ? (
+            {form.doc_discount && !posLocked ? (
               <Removable testID="invoice-doc-discount" label="Ara toplam indirimi" onRemove={() => patch({ doc_discount: null })}>
                 <View style={styles.pair}>
                   <OptionChips testIDPrefix="invoice-doc-discount-type" options={DISCOUNT_TYPES} value={form.doc_discount.type} onChange={(v) => patch({ doc_discount: { ...form.doc_discount!, type: v } })} />
@@ -926,7 +965,7 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
                   />
                 ))}
               </ChipRow>
-            ) : docOptions.length ? (
+            ) : docOptions.length && !posLocked ? (
               <Button testID="invoice-doc-plus" variant="ghost" size="sm" label="Ara toplama ekle" icon={<PlusIcon size={14} color={colors.primary} />} onPress={() => setDocMenu("root")} />
             ) : null}
 
