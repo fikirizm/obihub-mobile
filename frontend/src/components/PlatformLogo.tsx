@@ -1,5 +1,6 @@
 import React from "react";
 import { Image, StyleSheet, Text, View, ViewStyle } from "react-native";
+import Svg, { G, Path, Rect } from "react-native-svg";
 import { useTheme } from "../theme/ThemeProvider";
 import { providerKey, PLATFORM_LOGOS } from "../utils";
 
@@ -24,6 +25,21 @@ export function PlatformLogo({
   const { colors } = useTheme();
   const key = providerKey(provider);
   const dim = sizes[size];
+
+  // ObiHub web mağaza: web'deki public/integrations/obihub-storefront.svg ile aynı çizim.
+  if (key === "website") {
+    return (
+      <View style={[styles.wrap, { width: dim.wrap, height: dim.wrap, borderRadius: dim.radius }, style]} accessibilityLabel="Web Mağaza">
+        <Svg width={dim.wrap} height={dim.wrap} viewBox="0 0 40 40">
+          <Rect width={40} height={40} rx={10} fill="#edf4ee" />
+          <G fill="none" stroke="#287d79" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+            <Path d="m9 17 3-7h16l3 7v3H9zM12 21v10h16V21M17 31V21h6v10" />
+            <Path d="M16 10v10m8-10v10" />
+          </G>
+        </Svg>
+      </View>
+    );
+  }
 
   if (key === "other") {
     return (

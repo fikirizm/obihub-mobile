@@ -27,7 +27,9 @@ import {
   updateOrderStatus,
   type OrderFull,
 } from "../../src/api-siparis";
-import { canManage } from "../../src/auth/permissions";
+import { canManage, isOwner } from "../../src/auth/permissions";
+import { request } from "../../src/api";
+import { canConfirmTransfer, CONFIRM_TEXT, confirmPath, invoiceRows, isWebOrder, paymentMethodText, paymentStatusText, shipWarning, transferErrorText } from "../../src/web-order";
 import {
   displayOrderNo,
   orderTimestamp,
@@ -172,6 +174,26 @@ export default function OrderDetail() {
   const scrollRef = useRef<ScrollView>(null);
   const customerY = useRef(0);
   const { toast, confirm } = useFeedback();
+  // Faz A M2c: web havalesini onayla (yalnız firma sahibi). Tekrarında sunucu aynı sonucu döner; çift dokunuş tek istek.
+  const [transferBusy, setTransferBusy] = useState(false);
+  const transferOp = useRef(false);
+  const confirmTransfer = async () => {
+    if (!token || !order || transferOp.current) return;
+    const ok = await confirm({ title: "Havale onaylansın mı?", message: `${CONFIRM_TEXT}\nTutar: ${formatTry((order as any).total_amount || 0)}`, confirmLabel: "Tahsilatı onayla" });
+    if (!ok || transferOp.current) return;
+    transferOp.current = true;
+    setTransferBusy(true);
+    try {
+      await request<any>(confirmPath(String(order.id)), { method: "POST", body: "{}" }, token);
+      toast("Havale onaylandı; sipariş hazırlanmaya alındı.", "success");
+      load(true);
+    } catch (e: any) {
+      toast(transferErrorText(e), "error");
+    } finally {
+      transferOp.current = false;
+      setTransferBusy(false);
+    }
+  };
 
   const load = async (silent = false) => {
     if (!token || !orderId) return;
@@ -674,6 +696,12 @@ export default function OrderDetail() {
           </SafeAnimatedView>
         ) : null}
 
+        {/* Faz A: havalesi onaylanmamış web siparişinde kargo/fatura eylemlerinin hemen üstünde uyarı. */}
+        {shipWarning(order as any) ? (
+          <View testID="web-order-warning" accessibilityRole="alert" style={[styles.block, { flexDirection: "row", gap: spacing.xs, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.warningBg, marginTop: spacing.md, marginBottom: spacing.sm }]}>
+            <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{shipWarning(order as any)}</Text>
+          </View>
+        ) : null}
         {primary && primary !== "take" ? (
           <SafeAnimatedView entering={FadeInDown.delay(60).duration(380)}>
             {primary === "invoice" ? (
@@ -841,6 +869,36 @@ export default function OrderDetail() {
             </View>
           </SafeAnimatedView>
         </View>
+
+        {order && isWebOrder(order as any) ? (
+          <SafeAnimatedView entering={FadeInDown.delay(75).duration(380)}>
+            <SectionTitle title="Web Mağaza ödemesi" />
+            <Card style={styles.block}>
+              {(() => {
+                const o: any = order;
+                const rows: [string, string][] = [];
+                if (o.payment_method) rows.push(["Ödeme yöntemi", paymentMethodText(o.payment_method)]);
+                if (o.payment_status) rows.push(["Ödeme durumu", paymentStatusText(o.payment_status) || String(o.payment_status)]);
+                if (o.shipping_fee != null) rows.push(["Kargo ücreti", formatTry(o.shipping_fee)]);
+                const all = [...rows, ...invoiceRows(o.invoice_details)];
+                return all.map(([k, v], i) => (
+                  <ListRow
+                    key={k}
+                    divider={i > 0}
+                    title={k}
+                    subtitle={k === "Teslimat adresi" ? v : undefined}
+                    trailing={k === "Teslimat adresi" ? undefined : <Text style={[type.callout, { color: k === "Ödeme durumu" && o.payment_status === "awaiting_transfer" ? colors.amber : colors.textPrimary, fontWeight: "600" }]}>{v}</Text>}
+                  />
+                ));
+              })()}
+            </Card>
+            {canConfirmTransfer(order as any, isOwner(user)) ? (
+              <View style={[styles.block, { marginTop: spacing.sm }]}>
+                <Button testID="web-transfer-confirm" label="Havaleyi doğrula" busy={transferBusy} disabled={transferBusy} onPress={confirmTransfer} />
+              </View>
+            ) : null}
+          </SafeAnimatedView>
+        ) : null}
 
         {showLabelCard ? (
           <SafeAnimatedView entering={FadeInDown.delay(80).duration(380)}>

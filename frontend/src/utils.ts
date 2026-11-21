@@ -163,8 +163,10 @@ export function isNewOrderStatus(order: Order, providerHint?: string): boolean {
   return internal === "pending" || internal === "processing";
 }
 
-export function providerKey(s: unknown): "woo" | "trendyol" | "hepsiburada" | "n11" | "other" {
+export function providerKey(s: unknown): "woo" | "trendyol" | "hepsiburada" | "n11" | "website" | "other" {
   const v = String(s || "").toLowerCase();
+  // Faz A: ObiHub web mağaza siparişi (channel "website").
+  if (v === "website" || v.startsWith("website:")) return "website";
   if (v.includes("woo")) return "woo";
   if (v.includes("trendyol")) return "trendyol";
   if (v.includes("hepsiburada")) return "hepsiburada";
@@ -189,6 +191,8 @@ export function providerLabel(p: string): string {
       return "Hepsiburada";
     case "n11":
       return "n11";
+    case "website":
+      return "Web Mağaza";
     default:
       return p || "Diğer";
   }

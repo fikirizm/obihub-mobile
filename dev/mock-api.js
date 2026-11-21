@@ -68,6 +68,12 @@ function orderGroup(o) {
 }
 Object.assign(orders[4], { parasut_invoice_id: "inv1", invoice_number: "OBI2026000123" });
 orders[7].status = "deleted";
+// Faz A: ObiHub web mağaza siparişi (havale bekleniyor) en üstte; onay: POST /settings/website/transfers/{id}/confirm.
+orders.unshift({ ...orders[1], return_request: null, id: "ow1", channel: "website", integration_id: "website:u1", channel_order_id: "OWabc123", customer_name: "Ayşe Yılmaz",
+  status: "pending", payment_status: "awaiting_transfer", payment_method: "bank_transfer", shipping_fee: 49.9, total_amount: 1249.9,
+  created_at: new Date().toISOString(), order_date: new Date().toISOString(),
+  invoice_details: { kind: "company", same_as_shipping: true, company_name: "Örnek Ticaret A.Ş.", tax_office: "Kadıköy", tax_number: "1234567890" },
+  shipping_address_details: { neighborhood: "Moda Mah.", address_detail: "Bahariye Cad. No 12 D 3", district: "Kadıköy", city: "İstanbul", postcode: "34710" } });
 orders[15].status = "deleted";
 
 const products = Array.from({ length: 48 }, (_, i) => ({
@@ -603,6 +609,16 @@ http
         { provider: "trendyol", integration_name: "Trendyol", revenue: 840.5 * k, quantity: 7 * k, orders: 5 * k },
         { provider: "woocommerce", integration_name: "Deneme Mağaza", revenue: 400 * k, quantity: 4 * k, orders: 2 * k },
         { provider: "n11", integration_name: "N11", revenue: 0, quantity: 0, orders: 0 } ] } });
+    }
+    let wtm;
+    if (req.method === "POST" && (wtm = path.match(/^\/settings\/website\/transfers\/([^/]+)\/confirm$/))) {
+      const o = orders.find((x) => x.id === decodeURIComponent(wtm[1]));
+      console.log("WRITE", path);
+      if (state.member === "1") return send(res, 403, { detail: "Bu işlemi yalnız firma sahibi yapabilir." });
+      if (!o) return send(res, 409, { code: "TRANSFER_NOT_PENDING", detail: "Bekleyen havale bulunamadı veya süresi doldu." });
+      if (o.status === "cancelled") return send(res, 409, { code: "ORDER_CANCELLED", detail: "İptal edilen sipariş için tahsilat onaylanamaz." });
+      Object.assign(o, { status: "processing", payment_status: "paid" });
+      return send(res, 200, { id: o.id, state: "completed" });
     }
     // --- Faz A: POS kataloğu (GET /catalog/items?q&for=sale&limit) ve Satış Fişleri (GET /pos/receipts, /pos/receipts/{id}).
     if (req.method === "GET" && path === "/catalog/items") {

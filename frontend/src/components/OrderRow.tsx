@@ -10,6 +10,7 @@ import { returnBadge } from "../recurring";
 import type { StatusKind } from "../utils";
 import { PressableScale } from "./KPICard";
 import { PlatformLogo } from "./PlatformLogo";
+import { awaitingTransfer, paymentStatusText } from "../web-order";
 import { StatusBadge } from "./StatusBadge";
 
 export function orderProvider(o: Order) {
@@ -20,7 +21,8 @@ export function orderProvider(o: Order) {
 export function OrderRow({ order, divider }: { order: Order; divider?: boolean }) {
   const { colors } = useTheme();
   const provider = orderProvider(order);
-  const status = displayOrderStatus(order, provider);
+  const transfer = awaitingTransfer(order as any);
+  const status = transfer ? paymentStatusText("awaiting_transfer") : displayOrderStatus(order, provider);
   const amount = formatTry(order.total_amount || 0);
   const kind = statusKindFromOrder(order, provider);
   // Dalga 5a: pazaryeri iade talebi işareti (sipariş durumu ve stok değişmez).
@@ -64,7 +66,8 @@ export function OrderRow({ order, divider }: { order: Order; divider?: boolean }
             </Text>
             <View style={[styles.fixed, { flexDirection: "row", gap: 4 }]}>
               {ret ? <StatusBadge label={ret.label} kind={ret.kind} size="sm" /> : null}
-              <StatusBadge label={status} kind={kind} size="sm" />
+              {/* Faz A: parası gelmemiş web havalesi, durum yerine "Havale bekleniyor" (satır dar; iki rozet sığmaz). */}
+              <StatusBadge label={status} kind={transfer ? "warning" : kind} size="sm" />
             </View>
           </View>
         </View>
