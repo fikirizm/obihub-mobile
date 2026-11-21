@@ -94,6 +94,17 @@ export default function MenuScreen() {
               onPress={() => router.push("/website" as Href)}
             />
           ) : null}
+          {canAccess(user, "orders") ? (
+            <ListRow
+              testID="menu-returns"
+              divider
+              leading={<IconTile tint={colors.warningBg}><RefreshIcon size={18} color={colors.warning} /></IconTile>}
+              title="İade talepleri"
+              subtitle="Trendyol ve Hepsiburada iadeleri, stok önerisi"
+              chevron
+              onPress={() => router.push("/marketplace-returns" as Href)}
+            />
+          ) : null}
           {canAccess(user, "settings") ? (
             <ListRow
               testID="menu-sms"

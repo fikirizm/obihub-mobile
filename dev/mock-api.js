@@ -158,6 +158,15 @@ const entries = [
   { id: "e1", account_id: "a1", entry_type: "income", amount: 1250, entry_date: "2026-11-10", description: "Nakit satış" },
   { id: "e2", account_id: "a1", entry_type: "expense", amount: 380.5, entry_date: "2026-11-09", description: "Kargo malzemesi" },
 ];
+// Pazaryeri iade talepleri (mock).
+const mpReturns = [
+  { id: "mr1", provider: "trendyol", order_number: "TY-10421", state: "requested", state_label: "İade talebi", claimed_at: "2026-11-21T09:30:00Z", reason: "Beden uymadı",
+    lines: [{ name: "Pamuklu Tişört M", quantity: 2 }], stock_advice: { state: "suggested", message: "Ürün size ulaşınca 2 adedi stoğa geri alın (Ürünler → stok düzelt)." } },
+  { id: "mr2", provider: "hepsiburada", order_number: "HB-88213", state: "approved", state_label: "İade onaylandı", claimed_at: "2026-11-19T14:00:00Z", reason: "Hasarlı ürün",
+    lines: [{ sku: "KUPA-01", quantity: 1 }], stock_advice: { state: "already_restored", message: "Sipariş iade edildi olarak işlendi; stok zaten geri alındı." } },
+  { id: "mr3", provider: "trendyol", order_number: "TY-10002", state: "rejected", state_label: "İade reddedildi", claimed_at: "2026-11-15T08:00:00Z", reason: "",
+    lines: [{ barcode: "8690000000005", quantity: 1 }], stock_advice: { state: "none", message: "" } },
+];
 // Netgsm SMS durumu (mock; gerçek şifre tutulmaz).
 const sms = { connected: false, username: "", enabled: false, sender: "", encoding: "TURKISH", store_name: "Deneme Mağaza", revision: 1,
   channels: { website: true, woocommerce: false },
@@ -1172,6 +1181,23 @@ http
         entries.unshift({ id: "e" + Date.now(), account_id: acc.id, entry_type: b.entry_type, amount: b.amount, entry_date: b.entry_date, description: b.description });
         send(res, 200, { ok: true });
       });
+    // Pazaryeri iade talepleri (routers/marketplace_returns.py).
+    if (path === "/marketplace-returns" && req.method === "GET") {
+      const st = url.searchParams.get("state");
+      const items = mpReturns.filter((r) => !st || r.state === st);
+      const summary = { requested: 0, approved: 0, rejected: 0, cancelled: 0, stock_action_needed: 0 };
+      for (const r of mpReturns) { summary[r.state] += 1; if (r.stock_advice.state === "suggested") summary.stock_action_needed += 1; }
+      return send(res, 200, { items, total: items.length, page: 1, limit: 100, summary });
+    }
+    if (path === "/marketplace-returns/sync" && req.method === "POST") return send(res, 200, { stores: 2, fetched: 3, new: 0, orders_marked: 0, errors: [] });
+    let mrm;
+    if (req.method === "POST" && (mrm = path.match(/^\/marketplace-returns\/([^/]+)\/dismiss-stock-advice$/))) {
+      const r = mpReturns.find((x) => x.id === decodeURIComponent(mrm[1]));
+      if (!r) return send(res, 404, { detail: "İade kaydı bulunamadı" });
+      console.log("WRITE dismiss-stock-advice", r.id);
+      r.stock_advice.state = "dismissed";
+      return send(res, 200, { success: true });
+    }
     // Netgsm SMS (backend/routers/netgsm.py). /__mode?smsUnknown=1 → toplu gönderim 503 UNKNOWN_OUTCOME; smsOwner=0 → ekip üyesi.
     if (path.startsWith("/netgsm")) {
       const g = sms;
