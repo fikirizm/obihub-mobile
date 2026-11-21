@@ -335,7 +335,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig", "yurtici", "yurticiCancel"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -1291,6 +1291,36 @@ http
           { currency: "USD", starting_balance: "50.00", rows: [row("receivables", "Beklenen tahsilatlar", "in", vals({ 1: "80.00" }), "80.00")], net: vals({ 1: "80.00" }),
             balance: Z.map((_, i) => (i === 0 ? "50.00" : "130.00")), totals: { in: "80.00", out: "0.00", net: "80.00" }, overdue: { in: "0.00", out: "0.00", net: "0.00" }, ending_balance: "130.00", items: [] }] });
     }
+    // Yurtiçi Kargo (backend/yurtici_shipping.py). /__mode?yurtici=0 → bağlı değil; yurticiCancel=requested → iptal doğrulanamadı.
+    if (path === "/yurtici/config" && req.method === "GET") return send(res, 200, { configured: state.yurtici !== "0" });
+    if ((path === "/yurtici/shipments" || path === "/yurtici/shipments/cancel") && req.method === "POST") return readBody((b) => {
+      const ids = Array.isArray(b.order_ids) ? b.order_ids : [];
+      if (!ids.length) return send(res, 400, { detail: "Önce en az bir sipariş seçin." });
+      if (ids.length > 20) return send(res, 400, { detail: "Bir seferde en fazla 20 sipariş işlenebilir." });
+      console.log("WRITE", path, JSON.stringify(b));
+      const cancel = path.endsWith("cancel");
+      const results = ids.map((id) => {
+        const o = orders.find((x) => x.id === id);
+        if (!o) return { order_id: id, success: false, status: "error", message: "Sipariş bulunamadı." };
+        if (["trendyol", "hepsiburada", "idefix", "pazarama"].includes(String(o.channel))) return { order_id: id, success: false, status: "error", message: "Pazaryeri siparişi pazaryerinin kendi kargosuyla gider; Yurtiçi gönderisi açılmaz." };
+        if (cancel) {
+          if (state.yurticiCancel === "requested") { state.yurticiCancel = "0"; o.yurtici_cancel_status = "requested"; return { order_id: id, success: false, status: "cancel_requested", message: "İptal istendi ancak Yurtiçi'de doğrulanamadı; sipariş bağı korundu. Yeniden deneyin." }; }
+          Object.assign(o, { cargo_status: "cancelled", cargo_tracking: "", yurtici_cancel_status: undefined });
+          return { order_id: id, success: true, status: "cancelled", message: "Yurtiçi gönderisi iptal edildi." };
+        }
+        const bc = "YK" + String(Date.now()).slice(-9);
+        Object.assign(o, { cargo_provider: "yurtici", cargo_status: "created", cargo_tracking: bc, cargo_company: "Yurtiçi Kargo" });
+        return { order_id: id, success: true, status: "created", message: `Yurtiçi gönderisi oluşturuldu (${bc}).`, barcode: bc };
+      });
+      const ok = results.filter((r) => r.success).length;
+      return send(res, 200, { results, success_count: ok, error_count: results.length - ok, total: results.length });
+    });
+    if (path === "/yurtici/labels" && req.method === "POST") return readBody((b) => {
+      const ids = Array.isArray(b.order_ids) ? b.order_ids : [];
+      const inc = ids.filter((id) => { const o = orders.find((x) => x.id === id); return o && o.cargo_provider === "yurtici" && o.cargo_status === "created"; });
+      if (!inc.length) return send(res, 400, { detail: "Etiketi basılacak Yurtiçi gönderisi yok." });
+      return send(res, 200, { success: true, format: "pdf", filename: "yurtici-etiket.pdf", data: Buffer.from("%PDF-1.4\n%mock\n").toString("base64"), included: inc, skipped: [] });
+    });
     if (path === "/warehouses" && req.method === "GET")
       return send(res, 200, { items: [{ id: "w1", name: "Ana depo", is_default: true }, { id: "w2", name: "Mağaza deposu" }, { id: "w3", name: "Eski depo", archived: true }] });
     // Pazaryeri iade talepleri (routers/marketplace_returns.py).

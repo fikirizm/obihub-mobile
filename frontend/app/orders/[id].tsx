@@ -28,6 +28,7 @@ import {
   type OrderFull,
 } from "../../src/api-siparis";
 import { canManage, isOwner } from "../../src/auth/permissions";
+import { YurticiCard } from "../../src/components/orders/YurticiCard";
 import { request } from "../../src/api";
 import { canConfirmTransfer, CONFIRM_TEXT, confirmPath, invoiceRows, isWebOrder, paymentMethodText, paymentStatusText, shipWarning, transferErrorText } from "../../src/web-order";
 import {
@@ -1008,6 +1009,8 @@ export default function OrderDetail() {
             </Card>
           </SafeAnimatedView>
         ) : null}
+
+        <YurticiCard order={order} onChanged={() => load(true)} />
 
         <SafeAnimatedView entering={FadeInDown.delay(90).duration(380)}>
           <SectionTitle title="Fatura" />
