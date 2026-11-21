@@ -80,3 +80,31 @@ export function readError(e: { status?: number; message?: string } | null | unde
   if (s === 404) return typeof e?.message === "string" && e.message.trim() ? e.message.trim() : "Satış fişi bulunamadı.";
   return "Satış fişleri yüklenemedi. Kayıtlarınız korunuyor; yeniden deneyebilirsiniz.";
 }
+
+// Liste özeti (geri bildirim 2): süzülmüş TÜM kümenin toplamı; iptal edilen/silinmekte olan fişler toplama girmez (excluded_count).
+// Para "123.45" metni; eski sunucu özet göndermezse null. Web: components/pos/receipts/ReceiptsOS.jsx.
+const SUM_METHODS: [string, string][] = [["nakit", "Nakit"], ["kart", "Kart"], ["acik_hesap", "Açık hesap"], ["diger", "Diğer"]];
+export type ReceiptSummary = {
+  total: number;
+  count: number;
+  methods: { key: string; label: string; amount: number }[];
+  uninvoicedCount: number;
+  uninvoicedAmount: number;
+  excludedCount: number;
+  note: string;
+};
+export function receiptSummary(s: any): ReceiptSummary | null {
+  if (!s || typeof s !== "object") return null;
+  const by = s.by_method || {};
+  const count = num(s.count);
+  const excluded = num(s.excluded_count);
+  return {
+    total: num(s.total),
+    count,
+    methods: SUM_METHODS.map(([key, label]) => ({ key, label, amount: num(by[key]) })).filter((m) => Math.abs(m.amount) > 0.004),
+    uninvoicedCount: num(s.uninvoiced_count),
+    uninvoicedAmount: num(s.uninvoiced_amount),
+    excludedCount: excluded,
+    note: excluded > 0 ? `${count} fiş · ${excluded} iptal edilen fiş hariç` : `${count} fiş`,
+  };
+}

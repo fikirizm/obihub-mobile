@@ -11,7 +11,8 @@ import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../src/auth/AuthProvider";
 import { canSell } from "../src/auth/permissions";
-import { getParties, newIdempotencyKey } from "../src/api";
+import { getParties, newIdempotencyKey, request } from "../src/api";
+import { CREATE_HINT, createBody, createdParty, createdText, createErrorText, createLabel, existingText, PROBE_FAILED_TEXT, probePath, quickOption, resolveProbe, SEARCH_FAILED_TEXT, SUGGEST_HINT, suggestLabel } from "../src/pos-quick-customer";
 import { getUiCapabilities } from "../src/api-gider";
 import { cartTotals, cashPostingText, createPosSale, findByBarcode, getPosPaymentSettings, posPayload, rememberPosCardAccount, searchPosProducts, splitCents, toCents, type CartLine, type PaymentType, type PosProduct, type PosSale } from "../src/api-pos";
 import { accountLabel, FIRST_USE_TEXT, keepSelection, NONE_TEXT, pickerMode, REMEMBER_FAILED, rememberBody, rememberDefault, reloadsSettings, WEB_PAYMENT_WARNING, type CardAccount } from "../src/pos-card";
@@ -119,6 +120,11 @@ export default function PosScreen() {
   const [custResults, setCustResults] = useState<Party[]>([]);
   const [custHidden, setCustHidden] = useState(0);
   const [custLoading, setCustLoading] = useState(false);
+  // Geri bildirim 2: arama hatasında "yeni oluştur" gizlenir; adla kart açma tek uçuşta (çift dokunuş tek istek).
+  const [custFailed, setCustFailed] = useState(false);
+  const [creatingCust, setCreatingCust] = useState(false);
+  const [createCustError, setCreateCustError] = useState("");
+  const createCustBusy = useRef(false);
   const keyRef = useRef(newIdempotencyKey("pos"));
   const sending = useRef(false);
   const lookupBusy = useRef(false);
@@ -166,19 +172,67 @@ export default function PosScreen() {
     if (!token || payment !== "acik_hesap" || customer) return;
     let live = true;
     setCustLoading(true);
+    setCreateCustError("");
     getParties(token, { search: custTerm || undefined, role: "customer" })
       .then((r) => {
         if (!live) return;
         const ok = r.items.filter((p) => openAccountBlock(p) === null);
         setCustResults(ok.slice(0, 20));
         setCustHidden(r.items.length - ok.length);
+        setCustFailed(false);
       })
-      .catch(() => live && setCustResults([]))
+      .catch(() => {
+        if (!live) return;
+        setCustResults([]);
+        setCustFailed(true);
+      })
       .finally(() => live && setCustLoading(false));
     return () => {
       live = false;
     };
   }, [token, payment, customer, custTerm]);
+
+  // Aranan ad yoksa yalnız adla müşteri kartı açılır ve seçilir. Önce kesin ad sorgusu: aynı adla seçilebilir kart varsa o seçilir,
+  // yalnız tedarikçi kartı varsa ikinci kart açılmaz; sorgu yapılamazsa kart açılmaz.
+  const createCustomerFromSearch = async (name: string) => {
+    if (!token || !name || createCustBusy.current) return;
+    createCustBusy.current = true;
+    setCreatingCust(true);
+    setCreateCustError("");
+    try {
+      let probe: any;
+      try {
+        probe = await request<any>(probePath(name), { method: "GET" }, token);
+      } catch {
+        setCreateCustError(PROBE_FAILED_TEXT);
+        return;
+      }
+      const r = resolveProbe<Party>(Array.isArray(probe?.items) ? probe.items : [], name);
+      if (r.kind === "existing") {
+        setCustomer({ id: r.party.id, name: r.party.name || r.party.company_name || r.party.full_name || name });
+        toast(existingText(r.party), "info");
+        return;
+      }
+      if (r.kind === "blocked") {
+        setCreateCustError(r.text);
+        return;
+      }
+      const made = createdParty(await request<any>("/customers", { method: "POST", body: JSON.stringify(createBody(name)) }, token), name);
+      if (!made) {
+        setCreateCustError(createErrorText(null));
+        return;
+      }
+      setCustomer(made);
+      haptic.success();
+      toast(createdText(made.name), "success");
+    } catch (e: any) {
+      setCreateCustError(createErrorText(e));
+    } finally {
+      createCustBusy.current = false;
+      setCreatingCust(false);
+    }
+  };
+  const custOption = quickOption<Party>({ term: custSearch, loading: custLoading || custTerm !== custSearch.trim(), failed: custFailed, results: custResults });
 
   const discount = discountText.trim() ? parseAmount(discountText, true) : 0;
   const totals = useMemo(() => cartTotals(cart, discount || 0), [cart, discount]);
@@ -524,7 +578,49 @@ export default function PosScreen() {
                     ) : (
                       <>
                         <Text style={[type.callout, { color: colors.textSecondary, fontWeight: "600" }]}>Cari</Text>
-                        <SearchField testID="pos-customer-search" value={custSearch} onChangeText={setCustSearch} placeholder="Cari adı ara" />
+                        <SearchField inset={false} testID="pos-customer-search" value={custSearch} onChangeText={(v) => (setCustSearch(v), setCreateCustError(""))} placeholder="Cari adı ara" />
+                        {custOption.kind === "failed" ? (
+                          <View style={[styles.custNote, { backgroundColor: colors.errorBg }]} testID="pos-customer-search-error" accessibilityRole="alert">
+                            <Text style={[type.footnote, { color: colors.error }]}>{SEARCH_FAILED_TEXT}</Text>
+                          </View>
+                        ) : custOption.kind === "suggest" ? (
+                          <PressableScale
+                            testID="pos-customer-suggest"
+                            disabled={locked}
+                            onPress={() => setCustomer({ id: custOption.party.id, name: custOption.party.name || custOption.party.company_name || custOption.party.full_name || custSearch.trim() })}
+                            style={[styles.quickCust, { borderColor: colors.primary, backgroundColor: colors.surface }]}
+                          >
+                            <View style={[styles.quickIcon, { backgroundColor: colors.primary }]}>
+                              <CheckIcon size={16} color="#fff" />
+                            </View>
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={2}>{suggestLabel(custOption.party)}</Text>
+                              <Text style={[type.caption, { color: colors.textTertiary }]}>{SUGGEST_HINT}</Text>
+                            </View>
+                          </PressableScale>
+                        ) : custOption.kind === "create" ? (
+                          <PressableScale
+                            testID="pos-customer-create"
+                            disabled={locked || creatingCust}
+                            accessibilityState={{ busy: creatingCust, disabled: locked || creatingCust }}
+                            onPress={() => createCustomerFromSearch(custOption.name)}
+                            style={[styles.quickCust, { borderColor: colors.primary, backgroundColor: colors.surface, opacity: creatingCust ? 0.6 : 1 }]}
+                          >
+                            <View style={[styles.quickIcon, { backgroundColor: colors.primary }]}>
+                              {creatingCust ? <ActivityIndicator size="small" color="#fff" /> : <PlusIcon size={16} color="#fff" />}
+                            </View>
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={2}>{creatingCust ? "Kart açılıyor…" : createLabel(custOption.name)}</Text>
+                              <Text style={[type.caption, { color: colors.textTertiary }]}>{CREATE_HINT}</Text>
+                            </View>
+                          </PressableScale>
+                        ) : null}
+                        {createCustError ? (
+                          <View style={[styles.custNote, { backgroundColor: colors.errorBg }]} testID="pos-customer-create-error" accessibilityRole="alert">
+                            <Text style={[type.footnote, { color: colors.error }]}>{createCustError}</Text>
+                          </View>
+                        ) : null}
+                        {custFailed ? null : (
                         <Card style={{ marginHorizontal: 0 }}>
                           {custLoading && !custResults.length ? (
                             <ActivityIndicator color={colors.primary} style={{ margin: spacing.md }} />
@@ -549,6 +645,7 @@ export default function PosScreen() {
                             <Text style={[type.footnote, { color: colors.textTertiary, padding: spacing.md }]}>Kayıtlı müşteri kartı bulunamadı.</Text>
                           )}
                         </Card>
+                        )}
                         <Text style={[type.caption, { color: colors.textTertiary }]}>
                           {custHidden > 0
                             ? "Yalnız kayıtlı müşteri kartları seçilebilir. Siparişten gelen kişileri önce cari olarak kaydedin."
@@ -655,6 +752,9 @@ const styles = StyleSheet.create({
   camHint: { position: "absolute", bottom: spacing.sm, color: "#FFFFFF", fontSize: 12, fontWeight: "600" },
   scanDenied: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginHorizontal: spacing.lg, marginBottom: spacing.sm, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1 },
   result: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.sm, minHeight: 56 },
+  quickCust: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.sm, minHeight: 56, borderWidth: 1, borderRadius: radius.md },
+  quickIcon: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  custNote: { padding: spacing.sm, borderRadius: radius.md },
   thumb: { width: 40, height: 40, borderRadius: radius.sm, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   thumbImg: { width: "100%", height: "100%" },
   empty: { marginHorizontal: spacing.lg, alignItems: "center", gap: spacing.xs, padding: spacing.xl, borderWidth: 1.5, borderStyle: "dashed", borderRadius: radius.xl },

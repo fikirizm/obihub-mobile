@@ -6,9 +6,10 @@ import { router, useFocusEffect } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canSell } from "../../src/auth/permissions";
 import { request } from "../../src/api";
-import { hasNext, pageCount, readError, receiptRow, receiptsPath, type ReceiptRow } from "../../src/pos-receipts";
+import { hasNext, pageCount, readError, receiptRow, receiptsPath, receiptSummary, type ReceiptRow, type ReceiptSummary } from "../../src/pos-receipts";
 import { useTheme } from "../../src/theme/ThemeProvider";
-import { spacing, type } from "../../src/theme/tokens";
+import { spacing, tabular, type } from "../../src/theme/tokens";
+import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
 import { formatDate, formatTry } from "../../src/utils";
 import { EmptyState } from "../../src/components/EmptyState";
 import { AlertIcon, WalletIcon } from "../../src/components/Icons";
@@ -25,6 +26,8 @@ export default function PosReceiptsScreen() {
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<ReceiptRow[] | null>(null);
   const [total, setTotal] = useState(0);
+  // Geri bildirim 2: süzülmüş tüm kümenin özeti (iptal edilen fişler hariç); eski sunucu göndermezse gösterilmez.
+  const [summary, setSummary] = useState<ReceiptSummary | null>(null);
   const [error, setError] = useState("");
   const [forbidden, setForbidden] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -40,6 +43,7 @@ export default function PosReceiptsScreen() {
         const list = (Array.isArray(r?.items) ? r.items : []).map(receiptRow);
         setRows((prev) => (p > 1 && prev ? [...prev, ...list] : list));
         setTotal(Number(r?.total) || 0);
+        if (p === 1) setSummary(receiptSummary(r?.summary));
         setPage(p);
         setError("");
         setForbidden(false);
@@ -91,6 +95,30 @@ export default function PosReceiptsScreen() {
           contentContainerStyle={{ paddingTop: spacing.sm, paddingBottom: spacing.huge, gap: spacing.xs }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => (setRefreshing(true), load(1))} tintColor={colors.primary} />}
         >
+          {rows && summary && (summary.count > 0 || summary.excludedCount > 0) ? (
+            <HeroCard tone="blue" style={{ marginHorizontal: spacing.lg, marginBottom: spacing.xs }}>
+              <View testID="pos-receipts-summary">
+                <Text style={{ color: ON_HERO.soft, fontSize: 13, fontWeight: "600" }}>{q.trim() ? "Aramadaki satışlar" : "Toplam satış"}</Text>
+                <Text style={[tabular, styles.heroValue]} numberOfLines={1} adjustsFontSizeToFit>{formatTry(summary.total)}</Text>
+                <Text testID="pos-receipts-summary-note" style={{ color: ON_HERO.soft, fontSize: 12, marginTop: 2 }}>{summary.note}</Text>
+                {summary.methods.length ? (
+                  <View style={styles.heroFoot}>
+                    {summary.methods.map((m) => (
+                      <View key={m.key} style={styles.heroCell} testID={`pos-receipts-summary-${m.key}`}>
+                        <Text style={styles.heroLabel}>{m.label}</Text>
+                        <Text style={[tabular, styles.heroSub]} numberOfLines={1} adjustsFontSizeToFit>{formatTry(m.amount)}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+                {summary.uninvoicedCount > 0 ? (
+                  <Text style={{ color: ON_HERO.soft, fontSize: 12, marginTop: spacing.sm }}>
+                    {`Faturalanmamış: ${summary.uninvoicedCount} fiş · ${formatTry(summary.uninvoicedAmount)}`}
+                  </Text>
+                ) : null}
+              </View>
+            </HeroCard>
+          ) : null}
           {rows && !rows.length ? (
             <EmptyState
               icon={<WalletIcon size={30} color={colors.textTertiary} />}
@@ -124,4 +152,12 @@ export default function PosReceiptsScreen() {
   );
 }
 
-const styles = StyleSheet.create({ wrap: { flex: 1 }, block: { marginHorizontal: spacing.lg } });
+const styles = StyleSheet.create({
+  wrap: { flex: 1 },
+  block: { marginHorizontal: spacing.lg },
+  heroValue: { color: ON_HERO.text, fontSize: 30, fontWeight: "800", marginTop: 2 },
+  heroFoot: { flexDirection: "row", flexWrap: "wrap", rowGap: spacing.sm, marginTop: spacing.md },
+  heroCell: { width: "50%" },
+  heroLabel: { color: ON_HERO.soft, fontSize: 12 },
+  heroSub: { color: ON_HERO.text, fontSize: 16, fontWeight: "700", marginTop: 2 },
+});

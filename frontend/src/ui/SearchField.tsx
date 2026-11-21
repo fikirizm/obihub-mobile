@@ -10,16 +10,19 @@ export function SearchField({
   onChangeText,
   placeholder,
   testID,
+  inset = true,
 }: {
   value: string;
   onChangeText: (v: string) => void;
   placeholder: string;
   testID?: string;
+  // false: kendi kenar boşluğu olan bir bölümün içinde (ör. POS ödeme bölümü) kenarlara hizalı durur.
+  inset?: boolean;
 }) {
   const { colors } = useTheme();
   const [focus, setFocus] = useState(false);
   return (
-    <View style={[styles.wrap, { backgroundColor: colors.surface, borderColor: focus ? colors.primary : colors.border }]}>
+    <View style={[styles.wrap, !inset && { marginHorizontal: 0 }, { backgroundColor: colors.surface, borderColor: focus ? colors.primary : colors.border }]}>
       <SearchIcon size={18} color={colors.textTertiary} />
       <TextInput
         testID={testID}

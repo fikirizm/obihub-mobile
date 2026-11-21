@@ -61,4 +61,22 @@ t("okuma hatası metinleri", () => {
   assert.equal(r.readError({ status: 404, message: "Satış fişi bulunamadı." }), "Satış fişi bulunamadı.");
   assert.equal(r.readError({ status: 500 }), "Satış fişleri yüklenemedi. Kayıtlarınız korunuyor; yeniden deneyebilirsiniz.");
 });
+t("özet: kuruş metinleri sayıya, sıfır olmayan ödeme yolları, iptal notu", () => {
+  const s = r.receiptSummary({ count: 3, total: "150.50", by_method: { nakit: "100.00", kart: "50.50", acik_hesap: "0.00", diger: "0.00" }, uninvoiced_count: 2, uninvoiced_amount: "90.00", excluded_count: 2 });
+  assert.equal(s.total, 150.5);
+  assert.equal(s.count, 3);
+  assert.deepEqual(s.methods, [{ key: "nakit", label: "Nakit", amount: 100 }, { key: "kart", label: "Kart", amount: 50.5 }]);
+  assert.equal(s.uninvoicedCount, 2);
+  assert.equal(s.uninvoicedAmount, 90);
+  assert.equal(s.note, "3 fiş · 2 iptal edilen fiş hariç");
+});
+t("özet: Diğer payı görünür; excluded_count yoksa (eski sunucu) not yalnız fiş sayısı", () => {
+  const s = r.receiptSummary({ count: 1, total: "10.00", by_method: { nakit: "0", kart: "0", acik_hesap: "4.00", diger: "6.00" } });
+  assert.deepEqual(s.methods.map((x) => x.label), ["Açık hesap", "Diğer"]);
+  assert.equal(s.note, "1 fiş");
+});
+t("özet: sunucu göndermezse (eski sürüm) null", () => {
+  assert.equal(r.receiptSummary(undefined), null);
+  assert.equal(r.receiptSummary(null), null);
+});
 console.log(`${n} test geçti`);

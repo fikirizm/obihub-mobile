@@ -165,6 +165,7 @@ const parties = [
     collections: [{ id: "cp1", type: "customer", amount: "1500.00", currency: "TRY", date: "2026-11-05", method: "havale", note: "Kasım ödemesi", account_id: "a2", invoices: [{ invoice_id: "li1", invoice_number: "OBI2026101", amount: "1500.00" }], parasut: false }] },
   { id: "c2", name: "Can Öztürk", email: "can@example.test", source: "registered", balance: 12850.5, payments: [] },
   { id: "c3", name: "Tedarikçi A.Ş.", contact_role: "supplier", source: "registered", balance: -9400, payments: [] },
+  { id: "c4", name: "Usta Market", contact_role: "supplier", source: "registered", balance: 0, payments: [] },
   { id: "e:ayse@example.test", name: "Ayşe Yılmaz", source: "orders", balance: 0, payments: [] },
 ];
 const localInvoices = [
@@ -313,7 +314,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -679,7 +680,13 @@ http
       const items = all.slice((page - 1) * per, page * per).map((d) => ({ id: d.id, sale_number: d.sale_number, created_at: d.created_at, total: d.total, vat_amount: d.vat_amount,
         payment_type: d.payment_type, customer_name: d.customer_name, status: d.status, invoice_id: d.invoice_id || null, invoice_number: d.invoice_number || null,
         receipt_delete_started: false, stock_restore_error: null, ledger_pending: false, item_count: d.items.length }));
-      return send(res, 200, { items, total: all.length, page, per_page: per });
+      // Geri bildirim 2: özet (iptal edilen fiş toplama girmez; excluded_count).
+      const live = all.filter((d) => d.status !== "cancelled"), by = { nakit: 0, kart: 0, acik_hesap: 0, diger: 0 };
+      for (const d of live) by[d.payment_type in by && d.payment_type !== "diger" ? d.payment_type : "diger"] += Number(d.total) || 0;
+      const f2 = (v) => (Math.round(v * 100) / 100).toFixed(2), unin = live.filter((d) => !d.invoice_id);
+      const summary = { count: live.length, total: f2(live.reduce((a, d) => a + (Number(d.total) || 0), 0)), by_method: Object.fromEntries(Object.entries(by).map(([k, v]) => [k, f2(v)])),
+        uninvoiced_count: unin.length, uninvoiced_amount: f2(unin.reduce((a, d) => a + (Number(d.total) || 0), 0)), excluded_count: all.length - live.length, currency: "TRY" };
+      return send(res, 200, { items, total: all.length, page, per_page: per, summary });
     }
     let rcm;
     // M3a: fiş silme (/__mode?receiptPending=1 → ilk silme yarım kalır, pending:true).
@@ -1167,8 +1174,11 @@ http
         parties.push(party);
         send(res, 200, { ...party, balance: 0, pos_sales_count: 0, pos_sales_total: 0 });
       });
+    // /__mode?custFail=1 → arama (per_page≠100) 500; probeFail=1 → kesin ad sorgusu (per_page=100) 500.
+    if (path === "/customers" && state.custFail === "1" && url.searchParams.get("per_page") !== "100") return send(res, 500, { detail: "Sunucu hatası" });
+    if (path === "/customers" && state.probeFail === "1" && url.searchParams.get("per_page") === "100") return send(res, 500, { detail: "Sunucu hatası" });
     if (path === "/customers")
-      return send(res, 200, { items: parties.filter((p) => { const q = (url.searchParams.get("search") || "").toLowerCase(); const bs = url.searchParams.get("balance_status"); const rl = url.searchParams.get("role"); return (!q || p.name.toLowerCase().includes(q)) && (!bs || (bs === "receivable" ? p.balance > 0 : p.balance < 0)) && (!rl || (rl === "supplier" ? p.balance < 0 : p.balance >= 0)); }), total: parties.length, page: 1, per_page: 30, total_pages: 1, summary: { total_receivable: 19050.5, total_payable: 9400, by_currency: { TRY: { total_receivable: 19050.5, total_payable: 9400 }, USD: { total_receivable: 1200, total_payable: 0 } } } });
+      return send(res, 200, { items: parties.filter((p) => { const q = (url.searchParams.get("search") || ""); let re; try { re = new RegExp(q, "i"); } catch { re = /$^/; } const bs = url.searchParams.get("balance_status"); const rl = url.searchParams.get("role"); return (!q || re.test(p.name)) && (!bs || (bs === "receivable" ? p.balance > 0 : p.balance < 0)) && (!rl || (rl === "supplier" ? p.balance < 0 : p.balance >= 0)); }), total: parties.length, page: 1, per_page: 30, total_pages: 1, summary: { total_receivable: 19050.5, total_payable: 9400, by_currency: { TRY: { total_receivable: 19050.5, total_payable: 9400 }, USD: { total_receivable: 1200, total_payable: 0 } } } });
     // C5: cari oku / düzenle / sil / siparişleri
     let ca; // Dalga 1: cari arşivle
     if ((ca = path.match(/^\/customers\/([^/]+)\/(archive|unarchive)$/)) && req.method === "POST") {
