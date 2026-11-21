@@ -5,6 +5,7 @@ import { bytesToBase64, inboxQuery, inboxRow } from "./inbox-ui";
 import { expenseCategory } from "./mirror";
 import { actionPath, checkPath, verdictOf, type GuardAction, type Verdict } from "./delete-guard";
 import { manualPaymentFields, paymentStates, type ImportForm, type PaymentStateOption } from "./api-iceri-al";
+import { fxFields } from "./manual-fx";
 import type {
   ExpenseLedgerRow,
   ExpenseSummaryRow,
@@ -572,8 +573,11 @@ export type ManualForm = {
   categoryId: string;
   lines: ManualLineInput[];
   warehouseId: string;
-  // D-14b: Ödenecek · Ödendi (hesap + tarih) · Çalışan cebinden (kapalı).
-  payment?: Pick<ImportForm, "payment_state" | "payment_account_id" | "payment_date">;
+  // D-14b: Ödenecek · Ödendi (hesap + tarih) · P5.3 Çalışan cebinden (çalışan + tarih).
+  payment?: Pick<ImportForm, "payment_state" | "payment_account_id" | "payment_date" | "payment_employee_id">;
+  // P5.3 dövizli elle alış: satır birim fiyatları bu dövizde; kur boşsa sunucu TCMB kurunu kullanır.
+  currency?: string;
+  exchangeRate?: string;
 };
 
 // "1.250,50" / "1250.5" → "1250.50" benzeri düz ondalık dize (en çok `maxDecimals` hane); geçersizse null. Float'a çevrilmez.
@@ -637,6 +641,8 @@ export function buildManualPayload(f: ManualForm): { body: Record<string, unknow
     };
   });
   if (!lines.length || lines.some((l) => l === null)) problems.push("lines");
+  const fx = fxFields(f.currency || "TRY", f.exchangeRate || "");
+  if (fx.problem) problems.push("exchangeRate");
   if (problems.length) return { body: null, problems };
   const hasProduct = lines.some((l) => (l as { kind?: string })?.kind === "product");
   return {
@@ -645,7 +651,7 @@ export function buildManualPayload(f: ManualForm): { body: Record<string, unknow
       document_number: f.documentNumber.trim(),
       issue_date: f.issueDate,
       ...(f.dueDate ? { due_date: f.dueDate } : {}),
-      currency: "TRY",
+      ...fx.fields,
       ...(f.categoryId ? { expense_category_id: f.categoryId } : {}),
       lines,
       other_taxes: [],
@@ -667,6 +673,8 @@ export type ManualPreview = {
   legacyDuplicate: boolean;
   stock: { entry: boolean; warehouseId: string; warehouses: { id: string; name: string }[] } | null;
   paymentStates: PaymentStateOption[];
+  // P5.3: dövizli alışta önizleme döviz özeti {currency, rate, rate_source, totals}; TL'de null.
+  fx: any | null;
 };
 
 const itemText = (it: any) => String(it?.detail || it?.text || it?.message || "Bu madde kontrol edilmeli.");
@@ -690,6 +698,7 @@ export async function previewManualPurchase(token: string, body: Record<string, 
     reviews: (Array.isArray(d?.review_items) ? d.review_items : []).filter((it: any) => it?.key !== "POSSIBLE_LEGACY_DUPLICATE").map(itemText),
     legacyDuplicate: (Array.isArray(d?.review_items) ? d.review_items : []).some((it: any) => it?.key === "POSSIBLE_LEGACY_DUPLICATE"),
     paymentStates: paymentStates(d),
+    fx: d?.fx && d.fx.currency ? d.fx : null,
     stock: st
       ? {
           entry: st.entry === true,

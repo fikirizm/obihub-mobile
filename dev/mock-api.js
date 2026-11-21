@@ -2201,7 +2201,15 @@ http
         const dup = String(b.document_number || "").toUpperCase() === "DUP-1";
         // DUP-2: olası mükerrer eski kayıt; legacy_duplicate_ack: true ile kalkar.
         const legacyDup = String(b.document_number || "").toUpperCase() === "DUP-2" && b.legacy_duplicate_ack !== true;
+        // P5.3: dövizli alış — satırlar döviz; TL karşılığı kurla (kur yoksa TCMB örneği 36,5).
+        const fxCur = b.currency && b.currency !== "TRY" ? b.currency : null;
+        const fxRate = fxCur ? Number(b.exchange_rate || 36.5) : 1;
+        const fxPayable = (taxable + vat).toFixed(2);
+        if (fxCur) { taxable *= fxRate; vat *= fxRate; console.log("FX PREVIEW", JSON.stringify(b)); }
+        if (b.payment_state === "employee") console.log("EMPLOYEE PREVIEW", JSON.stringify({ payment_employee_id: b.payment_employee_id, payment_date: b.payment_date }));
         send(res, 200, {
+          ...(fxCur ? { fx: { currency: fxCur, rate: String(fxRate), rate_source: b.exchange_rate ? "manual" : "tcmb", totals: { payable: fxPayable } } } : {}),
+          payment_options: { states: [{ id: "payable", label: "Ödenecek", available: true }, { id: "paid", label: "Ödendi", available: true }, { id: "employee", label: "Çalışan cebinden", available: true }] },
           draft_id: b.draft_id || "d1", can_confirm: !dup && !legacyDup, decision_digest: "dg-" + Math.round(taxable * 100),
           totals: { taxable: taxable.toFixed(2), vat: vat.toFixed(2), withholding: "0.00", other_taxes: "0.00", payable: (taxable + vat).toFixed(2) },
           blocker_items: dup ? [{ key: "DUPLICATE_MANUAL_DOCUMENT", detail: "Bu belge numarasıyla kayıtlı bir gider faturası var." }] : [],

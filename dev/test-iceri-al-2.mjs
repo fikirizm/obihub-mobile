@@ -89,4 +89,12 @@ t("elle alış: ödeme alanları yalnız Ödendi tamamsa gövdeye girer (taslağ
   assert.deepEqual(m.manualPaymentFields({ payment_state: "payable" }), {});
 });
 
+t("P5.3 çalışan cebinden: çalışan + tarih tamamsa gövdeye; eksikse kayıt kapalı", () => {
+  const f = { payment_state: "employee", payment_employee_id: "emp-1", payment_date: "2026-11-20" };
+  assert.equal(m.paymentComplete(f), true);
+  assert.deepEqual(m.manualPaymentFields(f), { payment_state: "employee", payment_employee_id: "emp-1", payment_date: "2026-11-20" });
+  assert.equal(m.paymentMissing({ ...f, payment_employee_id: null }), true);
+  assert.deepEqual(m.manualPaymentFields({ ...f, payment_employee_id: null }), {});
+  assert.equal(m.paymentMissing({ payment_state: "employee", payment_employee_id: "emp-1", payment_date: null }), true);
+});
 console.log(`\n${n} test geçti`);

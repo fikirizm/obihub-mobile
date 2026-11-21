@@ -13,8 +13,9 @@ import { getExpenseCopy } from "../../src/api-gider";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { newIdempotencyKey } from "../../src/api";
+import { fxFields, fxSummary, payAccountsFor, PURCHASE_CURRENCIES } from "../../src/manual-fx";
 import { cleanPayment, LEGACY_DUPLICATE, legacyAckValid, paymentMissing, paymentResultText, paymentStates } from "../../src/api-iceri-al";
-import { getPickableAccounts } from "../../src/api";
+import { getPickableAccounts, request } from "../../src/api";
 import {
   buildManualPayload,
   confirmManualPurchase,
@@ -188,10 +189,16 @@ export default function ManualExpenseScreen() {
     lines: [routeParams.doc === "expense_voucher" ? { ...emptyLine(), vatRate: "0" } : emptyLine()],
     warehouseId: "",
     payment: { payment_state: "payable", payment_account_id: null, payment_date: null },
+    currency: "TRY",
+    exchangeRate: "",
   });
   const pay = f.payment || { payment_state: "payable" as const, payment_account_id: null, payment_date: null };
   const setPay = (patch: Partial<typeof pay>) => setF((p) => ({ ...p, payment: { ...pay, ...(p.payment || {}), ...patch } }));
-  const [payAccounts, setPayAccounts] = useState<{ id: string; name: string }[] | null>(null);
+  const [payRows, setPayRows] = useState<any[] | null>(null);
+  // Ödendi hesapları: TL ve (dövizli alışta) belgenin dövizindeki hesaplar.
+  const payAccounts = payRows ? payAccountsFor(payRows, f.currency || "TRY").map((a: any) => ({ id: String(a.id), name: `${String(a.name || "Hesap")}${String(a.currency || "TRY").toUpperCase() !== "TRY" ? ` (${a.currency})` : ""}` })) : null;
+  // P5.3 Çalışan cebinden: GET /employees (arşivdekiler gelmez).
+  const [employees, setEmployees] = useState<{ id: string; name: string }[] | null>(null);
   const [issueText, setIssueText] = useState(trDate(today));
   const [dueText, setDueText] = useState("");
   const set = (patch: Partial<ManualForm>) => setF((p) => ({ ...p, ...patch }));
@@ -287,13 +294,17 @@ export default function ManualExpenseScreen() {
   const canConfirm = fresh && pv.data?.canConfirm === true && !saving && !outcome?.final && !paymentMissing(pay);
   const payStates = fresh && pv.data?.paymentStates?.length ? pv.data.paymentStates : paymentStates(null);
   useEffect(() => {
-    if (!token || pay.payment_state !== "paid" || payAccounts) return;
+    if (!token || pay.payment_state !== "paid" || payRows) return;
     getPickableAccounts(token)
-      .then((rows: any[]) =>
-        setPayAccounts(rows.filter((a) => a?.id && String(a.currency || "TRY").toUpperCase() === "TRY" && a.is_active !== false).map((a) => ({ id: String(a.id), name: String(a.name || "Hesap") })))
-      )
-      .catch(() => setPayAccounts([]));
-  }, [token, pay.payment_state, payAccounts]);
+      .then((rows: any[]) => setPayRows(rows.filter((a) => a?.id && a.is_active !== false)))
+      .catch(() => setPayRows([]));
+  }, [token, pay.payment_state, payRows]);
+  useEffect(() => {
+    if (!token || pay.payment_state !== "employee" || employees) return;
+    request<any>("/employees", { method: "GET" }, token)
+      .then((d) => setEmployees((Array.isArray(d?.items) ? d.items : []).map((e: any) => ({ id: String(e.id), name: String(e.name || "Çalışan") }))))
+      .catch(() => setEmployees([]));
+  }, [token, pay.payment_state, employees]);
   const stock = fresh ? pv.data?.stock || null : null;
   const hasProductLine = f.lines.some((l) => l.kind === "product");
   const displayTotal = f.lines.reduce((s, l) => s + (lineTotal(l) || 0), 0);
@@ -380,8 +391,9 @@ export default function ManualExpenseScreen() {
           <HeroCard tone="violet">
             <Text style={styles.heroLabel}>{totals ? "Ödenecek toplam" : "Tahmini tutar (KDV hariç)"}</Text>
             <Text testID="manual-total" style={[styles.heroValue, tabular]} numberOfLines={1} adjustsFontSizeToFit>
-              {totals ? formatMoney(totals.payable, "TRY") : formatMoney(displayTotal, "TRY")}
+              {totals ? formatMoney(totals.payable, "TRY") : formatMoney(displayTotal, f.currency && f.currency !== "TRY" ? f.currency : "TRY")}
             </Text>
+            {fresh && fxSummary(pv.data?.fx) ? <Text testID="manual-fx-summary" style={styles.heroLabel}>{fxSummary(pv.data?.fx)}</Text> : null}
             <Text style={styles.heroHint}>
               {pv.status === "loading" ? "Sunucu toplamı hesaplıyor…" : totals ? `Matrah ${formatMoney(totals.taxable, "TRY")} · KDV ${formatMoney(totals.vat, "TRY")}` : "Bilgiler tamamlanınca toplamı sunucu hesaplar."}
             </Text>
@@ -480,6 +492,33 @@ export default function ManualExpenseScreen() {
             </View>
           </View>
 
+          <SectionTitle title="Para birimi" />
+          <ChipRow>
+            {PURCHASE_CURRENCIES.map(([c, label]) => (
+              <Chip
+                key={c}
+                testID={`manual-currency-${c}`}
+                label={label}
+                selected={(f.currency || "TRY") === c}
+                onPress={() => (set({ currency: c, exchangeRate: "" }), pay.payment_state === "paid" ? setPay({ payment_account_id: null }) : undefined)}
+              />
+            ))}
+          </ChipRow>
+          {f.currency && f.currency !== "TRY" ? (
+            <View style={[styles.pad, { gap: spacing.xs }]}>
+              <FormField
+                testID="manual-rate"
+                label={`Döviz kuru (1 ${f.currency} = ? ₺, isteğe bağlı)`}
+                value={f.exchangeRate || ""}
+                onChangeText={(v) => set({ exchangeRate: v })}
+                keyboardType="decimal-pad"
+                placeholder="Boşsa TCMB kuru"
+                error={fxFields(f.currency, f.exchangeRate || "").problem || undefined}
+              />
+              <Text style={[type.caption, { color: colors.textTertiary }]}>{`Birim fiyatları ${f.currency} olarak girin; kayıt TL karşılığıyla yapılır. Kur boşsa fatura tarihinin TCMB kuru kullanılır.`}</Text>
+            </View>
+          ) : null}
+
           <SectionTitle title="Ödeme durumu" />
           <ChipRow>
             {payStates.map((st) => (
@@ -490,7 +529,13 @@ export default function ManualExpenseScreen() {
                 selected={pay.payment_state === st.id}
                 onPress={() =>
                   st.available
-                    ? setPay(st.id === "paid" ? { payment_state: "paid", payment_date: pay.payment_date || today } : { payment_state: st.id, payment_account_id: null, payment_date: null })
+                    ? setPay(
+                        st.id === "paid"
+                          ? { payment_state: "paid", payment_date: pay.payment_date || today, payment_employee_id: null }
+                          : st.id === "employee"
+                            ? { payment_state: "employee", payment_date: pay.payment_date || today, payment_account_id: null }
+                            : { payment_state: st.id, payment_account_id: null, payment_date: null, payment_employee_id: null }
+                      )
                     : st.reason
                       ? toast(st.reason, "info")
                       : undefined
@@ -523,6 +568,34 @@ export default function ManualExpenseScreen() {
                 ))}
               </ChipRow>
               {paymentMissing(pay) ? <Text style={[type.caption, styles.pad, { color: colors.amber }]}>Ödendi için ödemenin yapıldığı hesabı seçin.</Text> : null}
+            </View>
+          ) : null}
+          {pay.payment_state === "employee" ? (
+            <View testID="manual-employee-fields">
+              <Text style={[type.caption, styles.pad, { color: colors.textSecondary }]}>Masrafı cebinden ödeyen çalışan</Text>
+              {employees === null ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : employees.length ? (
+                <ChipRow>
+                  {employees.map((e) => (
+                    <Chip key={e.id} testID={`manual-pay-emp-${e.id}`} label={e.name} selected={pay.payment_employee_id === e.id} onPress={() => setPay({ payment_employee_id: e.id })} />
+                  ))}
+                </ChipRow>
+              ) : (
+                <Text style={[type.caption, styles.pad, { color: colors.error }]}>Kayıtlı çalışan yok. Önce Finans › Çalışanlar'dan çalışan ekleyin.</Text>
+              )}
+              <Text style={[type.caption, styles.pad, { color: colors.textSecondary, marginTop: spacing.xs }]}>Ödeme tarihi</Text>
+              <ChipRow>
+                {[
+                  { k: "today", label: "Bugün", value: today },
+                  { k: "yesterday", label: "Dün", value: addDays(today, -1) },
+                  ...(/^\d{4}-\d{2}-\d{2}$/.test(f.issueDate) && f.issueDate < addDays(today, -1) ? [{ k: "issue", label: "Fatura tarihi", value: f.issueDate }] : []),
+                ].map((o) => (
+                  <Chip key={o.k} testID={`manual-emp-date-${o.k}`} label={o.label} selected={pay.payment_date === o.value} onPress={() => setPay({ payment_date: o.value })} />
+                ))}
+              </ChipRow>
+              <Text style={[type.caption, styles.pad, { color: colors.textTertiary }]}>Kasadan para çıkmaz; tutar çalışana borç olarak yazılır. Çalışanlar ekranından ödeyerek kapatırsınız.</Text>
+              {paymentMissing(pay) ? <Text style={[type.caption, styles.pad, { color: colors.amber }]}>Çalışan cebinden için çalışanı seçin.</Text> : null}
             </View>
           ) : null}
           {payStates
@@ -566,7 +639,7 @@ export default function ManualExpenseScreen() {
                 <Card style={styles.lineCard}>
                   <View style={styles.lineHead}>
                     <Text style={[type.bodyStrong, { color: colors.textPrimary, flex: 1 }]}>{`Satır ${i + 1}`}</Text>
-                    <Text style={[type.callout, tabular, { color: colors.textPrimary, fontWeight: "700" }]}>{total !== null ? formatMoney(total, "TRY") : "—"}</Text>
+                    <Text style={[type.callout, tabular, { color: colors.textPrimary, fontWeight: "700" }]}>{total !== null ? formatMoney(total, f.currency && f.currency !== "TRY" ? f.currency : "TRY") : "—"}</Text>
                     {f.lines.length > 1 ? (
                       <PressableScale
                         testID={`line-${i}-delete`}
@@ -599,7 +672,7 @@ export default function ManualExpenseScreen() {
                   <FormField testID={`line-${i}-desc`} label="Açıklama" value={l.description} onChangeText={(v) => setLine(i, { description: v })} maxLength={200} />
                   <View style={styles.row2}>
                     <FormField testID={`line-${i}-qty`} label="Miktar" value={l.quantity} onChangeText={(v) => setLine(i, { quantity: v })} keyboardType="decimal-pad" style={{ flex: 1 }} />
-                    <FormField testID={`line-${i}-price`} label="Birim fiyat" value={l.unitPrice} onChangeText={(v) => setLine(i, { unitPrice: v })} keyboardType="decimal-pad" placeholder="0,00" suffix="₺" style={{ flex: 1.4 }} />
+                    <FormField testID={`line-${i}-price`} label="Birim fiyat" value={l.unitPrice} onChangeText={(v) => setLine(i, { unitPrice: v })} keyboardType="decimal-pad" placeholder="0,00" suffix={f.currency && f.currency !== "TRY" ? f.currency : "₺"} style={{ flex: 1.4 }} />
                   </View>
                   <Text style={[type.callout, { color: colors.textSecondary, fontWeight: "600" }]}>KDV</Text>
                   <OptionChips testIDPrefix={`line-${i}-vat`} options={VAT} value={l.vatRate} onChange={(v) => setLine(i, { vatRate: v })} />

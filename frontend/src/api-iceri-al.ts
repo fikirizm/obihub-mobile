@@ -33,13 +33,18 @@ export type ImportForm = {
   payment_state: "payable" | "paid" | "employee";
   payment_account_id: string | null;
   payment_date: string | null;
+  // P5.3: "Çalışan cebinden" (elle gider formunda sunucu açık verir); çalışan kimliği.
+  payment_employee_id?: string | null;
   due_date: string | null;
   expense_category_id: string | null;
 };
 export const EMPTY_FORM: ImportForm = { payment_state: "payable", payment_account_id: null, payment_date: null, due_date: null, expense_category_id: null };
+const dayOk = (v: unknown) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
 export const paymentComplete = (f: Partial<ImportForm> | null | undefined) =>
-  f?.payment_state === "paid" && Boolean(f.payment_account_id) && /^\d{4}-\d{2}-\d{2}$/.test(String(f.payment_date || ""));
-export const paymentMissing = (f: Partial<ImportForm> | null | undefined) => f?.payment_state === "paid" && !paymentComplete(f);
+  (f?.payment_state === "paid" && Boolean(f.payment_account_id) && dayOk(f.payment_date)) ||
+  (f?.payment_state === "employee" && Boolean(f.payment_employee_id) && dayOk(f.payment_date));
+export const paymentMissing = (f: Partial<ImportForm> | null | undefined) =>
+  (f?.payment_state === "paid" || f?.payment_state === "employee") && !paymentComplete(f);
 // Faz C2 (web onPayment): Ödendi ilk seçildiğinde ödeme tarihi fatura tarihidir (bugünden ileri değilse); ileri tarihli ödeme kaydedilmez.
 export const firstPaymentDate = (issueDate: unknown, today: string) =>
   typeof issueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(issueDate) && issueDate <= today ? issueDate : null;
@@ -493,5 +498,7 @@ export const plannedNotice = (count: number) => (count > 0 ? `${count} yeni ür�
 
 // Elle alış (D-14b): ödeme alanları önizleme gövdesine girer ve taslağa saklanır; yalnız Ödendi tamamsa (eksikken kayıt kapalı).
 export function manualPaymentFields(f: Partial<ImportForm> | null | undefined): Record<string, string> {
-  return paymentComplete(f) ? { payment_state: "paid", payment_account_id: String(f!.payment_account_id), payment_date: String(f!.payment_date) } : {};
+  if (!paymentComplete(f)) return {};
+  if (f!.payment_state === "employee") return { payment_state: "employee", payment_employee_id: String(f!.payment_employee_id), payment_date: String(f!.payment_date) };
+  return { payment_state: "paid", payment_account_id: String(f!.payment_account_id), payment_date: String(f!.payment_date) };
 }
