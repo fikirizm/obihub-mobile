@@ -53,7 +53,7 @@ export default function MenuScreen() {
   const canProducts = canAccess(user, "catalog") || canAccess(user, "inventory");
   const canReports = canAccess(user, "reports");
   const canPos = canSell(user);
-  const showOps = canPos || canSeeReceipts(user) || canProducts || canReports || canAccess(user, "catalog") || hepsijet;
+  const showOps = canPos || canSeeReceipts(user) || canAccess(user, "settings") || canProducts || canReports || canAccess(user, "catalog") || hepsijet;
 
   const onLogout = async () => {
     const ok = await confirm({
@@ -83,10 +83,21 @@ export default function MenuScreen() {
               onPress={() => router.push("/pos")}
             />
           ) : null}
+          {canAccess(user, "settings") ? (
+            <ListRow
+              testID="menu-web-store"
+              divider={canPos || canSeeReceipts(user)}
+              leading={<IconTile tint={colors.primarySoft}><SparkleIcon size={18} color={colors.primary} /></IconTile>}
+              title="Web Mağaza"
+              subtitle="Yayın, sepet rezervasyonu ve ödemeler"
+              chevron
+              onPress={() => router.push("/website" as Href)}
+            />
+          ) : null}
           {canSeeReceipts(user) ? (
             <ListRow
               testID="menu-pos-receipts"
-              divider={canPos}
+              divider={canPos || canAccess(user, "settings")}
               leading={<IconTile tint={colors.successBg}><WalletIcon size={18} color={colors.success} /></IconTile>}
               title="Satış Fişleri"
               subtitle="Mağaza satışları, fiş detayı ve fatura bağlantısı"

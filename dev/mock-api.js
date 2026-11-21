@@ -612,6 +612,28 @@ http
         { provider: "woocommerce", integration_name: "Deneme Mağaza", revenue: 400 * k, quantity: 4 * k, orders: 2 * k },
         { provider: "n11", integration_name: "N11", revenue: 0, quantity: 0, orders: 0 } ] } });
     }
+    // Faz A M9: Web Mağaza özet kartı.
+    if (path === "/settings/website/publication-status" || path === "/settings/website/cart-reservations") {
+      const key = path.endsWith("publication-status") ? "pub" : "res";
+      state.web = state.web || { pub: { revision: 2, is_published: true, message: "Yakında buradayız", checkout_enabled: false }, res: { revision: 0, enabled: true, reservation_minutes: 15, checkout_enabled: false, server_ready: true, active_carts: 2, reserved_units: 3 } };
+      if (req.method === "GET") return send(res, 200, state.web[key]);
+      let rawW = "";
+      req.on("data", (c) => (rawW += c));
+      return req.on("end", () => {
+        const b = JSON.parse(rawW || "{}");
+        console.log("WRITE", path, JSON.stringify(b));
+        if (state.member === "1") return send(res, 403, { code: "FORBIDDEN", detail: "Bu işlemi yalnız firma sahibi yapabilir." });
+        if (b.expected_revision !== state.web[key].revision) return send(res, 409, { code: "REVISION_CHANGED", detail: "Bilgiler değişti. Yeniden yükleyip deneyin." });
+        const field = key === "pub" ? "is_published" : "enabled";
+        state.web[key] = { ...state.web[key], [field]: b[field], revision: state.web[key].revision + 1 };
+        return send(res, 200, state.web[key]);
+      });
+    }
+    if (path === "/settings/website/payment-monitor") return send(res, 200, { items: [
+      { id: "ow1aaaaaaaa", state: "awaiting_transfer", total: "1249.90", test_mode: false, created_at: new Date().toISOString(), review_reason: null, needs_attention: false },
+      { id: "c2bbbbbbbbb", state: "completed", total: "349.00", test_mode: false, created_at: new Date(Date.now() - 864e5).toISOString(), review_reason: null, needs_attention: false },
+      { id: "c3ccccccccc", state: "payment_review", total: "99.00", test_mode: true, created_at: new Date(Date.now() - 2 * 864e5).toISOString(), review_reason: "AMOUNT_MISMATCH", needs_attention: false } ] });
+    if (path === "/settings/website/members") return send(res, 200, { revision: 1, enabled: true, email_available: true, member_count: 12 });
     let wtm;
     if (req.method === "POST" && (wtm = path.match(/^\/settings\/website\/transfers\/([^/]+)\/confirm$/))) {
       const o = orders.find((x) => x.id === decodeURIComponent(wtm[1]));

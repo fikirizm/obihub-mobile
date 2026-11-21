@@ -16,7 +16,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   viewer: ["dashboard.view", "catalog.view", "orders.view", "integrations.view", "reports.view", "customers.view"],
 };
 
-export type Area = "catalog" | "inventory" | "billing" | "reports" | "customers" | "integrations" | "orders";
+export type Area = "catalog" | "inventory" | "billing" | "reports" | "customers" | "integrations" | "orders" | "settings";
 
 // Web ile aynı (authz.js permissionSet): rol izinleri ile sunucunun gönderdiği açık izinler birleştirilir.
 // Bilinmeyen roller ve super_admin web'de olduğu gibi hesap sahibi sayılır.
