@@ -40,6 +40,11 @@ export const EMPTY_FORM: ImportForm = { payment_state: "payable", payment_accoun
 export const paymentComplete = (f: Partial<ImportForm> | null | undefined) =>
   f?.payment_state === "paid" && Boolean(f.payment_account_id) && /^\d{4}-\d{2}-\d{2}$/.test(String(f.payment_date || ""));
 export const paymentMissing = (f: Partial<ImportForm> | null | undefined) => f?.payment_state === "paid" && !paymentComplete(f);
+// Faz C2 (web onPayment): Ödendi ilk seçildiğinde ödeme tarihi fatura tarihidir (bugünden ileri değilse); ileri tarihli ödeme kaydedilmez.
+export const firstPaymentDate = (issueDate: unknown, today: string) =>
+  typeof issueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(issueDate) && issueDate <= today ? issueDate : null;
+export const paymentDateError = (f: Partial<ImportForm> | null | undefined, today: string) =>
+  f?.payment_state === "paid" && f.payment_date && String(f.payment_date) > today ? "Ödeme tarihi ileri bir gün olamaz." : null;
 export type ImportArgs = {
   mode: "expense_only" | "expense_and_stock";
   lineChoices: LineChoice[];
@@ -370,10 +375,18 @@ export function supplierVkn(supplier: any): { id: string; label?: string }[] {
 }
 export const canCreateSupplier = (view: any) => view?.decisions?.supplier?.create_new?.available === true && supplierVkn(view?.supplier).length === 0;
 
-// Cevap verildiğinde tek istekle uygulanan seçimler: Evet → tüm kalemler ürün + stok; Hayır → gider kalemi, stok yok.
+// Faz C2 (web QuickImportWorkspace ADJUSTMENT_LINE): indirim, iskonto ya da yuvarlama satırı ("İndirimi (-)", "Yuvarlama Farkı") stoğa giremez.
+const ADJUSTMENT_LINE = /\(-\)|indirim|iskonto|yuvarlama/;
+export const isAdjustmentLine = (description: unknown) => ADJUSTMENT_LINE.test(String(description || "").toLocaleLowerCase("tr-TR"));
+
+// Cevap verildiğinde tek istekle uygulanan seçimler: Evet → kalemler ürün + stok (indirim/yuvarlama satırları gider kalır);
+// Hayır → tüm kalemler gider, stok yok.
 export function answerArgs(a: ImportArgs, view: any, answer: "yes" | "no"): ImportArgs {
   const yes = answer === "yes";
-  const lineChoices: LineChoice[] = (view?.lines || []).map(() => ({ ...EMPTY_CHOICE, kind: yes ? "product" : "service", stock: yes ? true : null }));
+  const lineChoices: LineChoice[] = (view?.lines || []).map((l: any) => {
+    const asProduct = yes && !isAdjustmentLine(l?.description);
+    return { ...EMPTY_CHOICE, kind: asProduct ? "product" : "service", stock: asProduct ? true : null };
+  });
   const supplier = view?.supplier || {};
   const hits = supplierVkn(supplier);
   const unresolved = supplier.state !== "matched" && !a.supplierId;

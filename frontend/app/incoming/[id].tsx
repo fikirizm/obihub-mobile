@@ -21,6 +21,8 @@ import {
   newCardCount,
   acceptGate,
   paymentMissing,
+  firstPaymentDate,
+  paymentDateError,
   paymentResultText,
   paymentStates,
   discountText,
@@ -318,7 +320,7 @@ export default function IncomingImportScreen() {
   const showLegacyAck = issues.some((i) => i.kind === "ack") || args.legacyAck;
   const ready = !stale && !loading && decision?.status === "FAST_READY" && decision?.business_ready === true && !issues.some((i) => i.kind !== "notice");
   const canSave =
-    formOpen && confirmOn && decision?.confirmation_available === true && decision?.can_confirm === true && ready && !confirming && mayWrite && !paymentMissing(args.form);
+    formOpen && confirmOn && decision?.confirmation_available === true && decision?.can_confirm === true && ready && !confirming && mayWrite && !paymentMissing(args.form) && !paymentDateError(args.form, todayIso());
   // Kullanıcı tedarikçiyi seçtikten sonra durum "matched" olur; seçim görünür ve değiştirilebilir kalsın.
   // D-18k: VKN ile eşleşen kayıtlı cari varsa "Yeni cari" önerilmez.
   const createOk = canCreateSupplier(view);
@@ -931,7 +933,7 @@ export default function IncomingImportScreen() {
                   selected={args.form.payment_state === st.id}
                   onPress={() =>
                     st.available && st.id !== args.form.payment_state
-                      ? choosePayment(st.id === "paid" ? { payment_state: "paid", payment_date: args.form.payment_date || todayIso() } : { payment_state: st.id, payment_account_id: null, payment_date: null })
+                      ? choosePayment(st.id === "paid" ? { payment_state: "paid", payment_date: args.form.payment_date || firstPaymentDate(doc.issue_date, todayIso()) || todayIso() } : { payment_state: st.id, payment_account_id: null, payment_date: null })
                       : !st.available && st.reason
                         ? toast(st.reason, "info")
                         : undefined

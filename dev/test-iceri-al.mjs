@@ -76,4 +76,21 @@ t("Faz A M7: belge toplamı esasında satır tutar farkı notları bilgi (kaydı
   assert.ok(m.collectIssues({}, view("lines")).some((x) => x.kind !== "notice"));
 });
 
+t("Faz C2: 'Evet'te (-), indirim, iskonto, yuvarlama satırları gider kalır (Türkçe küçük harf)", () => {
+  const view = { lines: [{ index: 0, description: "Kablo 2m" }, { index: 1, description: "Kampanya İndirimi (-)" }, { index: 2, description: "YUVARLAMA FARKI" }, { index: 3, description: "İskonto" }] };
+  const a = m.answerArgs({ supplierId: "s1", mode: "expense_only", lineChoices: [], warehouseId: null, quickExpense: false }, view, "yes");
+  assert.deepEqual(a.lineChoices.map((c) => c.kind), ["product", "service", "service", "service"]);
+  assert.deepEqual(a.lineChoices.map((c) => c.stock), [true, null, null, null]);
+  const b = m.answerArgs({ supplierId: "s1", mode: "expense_only", lineChoices: [], warehouseId: null, quickExpense: false }, view, "no");
+  assert.ok(b.lineChoices.every((c) => c.kind === "service"));
+});
+t("Faz C2: Ödendi ilk seçilince ödeme tarihi fatura tarihi (bugünden ileri değilse); ileri tarih reddedilir", () => {
+  assert.equal(m.firstPaymentDate("2026-11-20", "2026-11-21"), "2026-11-20");
+  assert.equal(m.firstPaymentDate("2026-11-25", "2026-11-21"), null);
+  assert.equal(m.firstPaymentDate(null, "2026-11-21"), null);
+  assert.equal(m.paymentDateError({ payment_state: "paid", payment_date: "2026-11-22" }, "2026-11-21"), "Ödeme tarihi ileri bir gün olamaz.");
+  assert.equal(m.paymentDateError({ payment_state: "paid", payment_date: "2026-11-21" }, "2026-11-21"), null);
+  assert.equal(m.paymentDateError({ payment_state: "payable", payment_date: "2026-11-30" }, "2026-11-21"), null);
+});
+
 console.log(`\n${n} test geçti`);
