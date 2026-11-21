@@ -7,7 +7,8 @@ import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View }
 import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
-import { getIncomingInvoicePdf } from "../../src/api";
+import { getIncomingInvoicePdf, request } from "../../src/api";
+import { applyPlan, planIndexes } from "../../src/incoming-plan";
 import { getUiCapabilities, respondInbox } from "../../src/api-gider";
 import { getPickableAccounts } from "../../src/api";
 import { respondDoneText } from "../../src/inbox-ui";
@@ -159,6 +160,13 @@ export default function IncomingImportScreen() {
   // Paraşüt akışı (15 Kas 2026): tek soru → (Evet) depo + remember-products → dolu gider formu.
   const [answer, setAnswer] = useState<null | "yes" | "no">(null);
   const [formOpen, setFormOpen] = useState(false);
+  // Faz A M6: form açık mı (önizleme isteği anında) ve sunucunun kart planı aldığı satırlar (belge değişince sıfırlanır).
+  const formOpenRef = useRef(false);
+  formOpenRef.current = formOpen;
+  const plannedRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    plannedRef.current = new Set();
+  }, [id]);
   const [remembered, setRemembered] = useState<Record<number, RememberedLine>>({});
   const [pickedWh, setPickedWh] = useState<string | null>(null);
   const [rememberBusy, setRememberBusy] = useState(false);
@@ -180,6 +188,16 @@ export default function IncomingImportScreen() {
       setLoading(true);
       loadingRef.current = true;
       try {
+        // Faz A M6: "Yeni ürün" seçilen satırlar için önce kart planı (web useQuickImportPreview ile aynı).
+        const idx = planIndexes(next.lineChoices, plannedRef.current, { formOpen: formOpenRef.current, mode: next.mode });
+        if (idx) {
+          const planned = await request<any>(`/incoming-invoices/${encodeURIComponent(id)}/quick-import/remember-products`, { method: "POST", body: JSON.stringify({ line_indexes: idx }) }, token);
+          if (my !== seq.current) return;
+          const applied = applyPlan(next.lineChoices, planned);
+          plannedRef.current = applied.planned;
+          next = { ...next, lineChoices: applied.choices };
+          setArgs(next);
+        }
         const res = await previewQuickImport(token, id, next, confirmOn);
         if (my !== seq.current) return;
         setRejection(null);
@@ -410,6 +428,7 @@ export default function IncomingImportScreen() {
     try {
       setRemembered(await rememberProducts(token, id));
       setFormOpen(true);
+      formOpenRef.current = true;
       if (whPicked) warehouseTouched.current = true;
       load({ ...(committed.current || args), warehouseId: whPicked || null });
     } catch (e: any) {
