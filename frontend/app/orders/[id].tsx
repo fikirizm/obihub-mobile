@@ -259,7 +259,7 @@ export default function OrderDetail() {
 
   const channel = channelKeyOf(provider || order?.channel);
   // Web CargoLabelSidebar: ilk seçenek varsayılan şablon; Hepsiburada ve Idefix'te ikinci şablon aynı ekranda seçilir.
-  const labelOptions = labelOptionsFor(provider || String(order?.channel || ""));
+  const labelOptions = labelOptionsFor(provider || String(order?.channel || ""), order?.cargo_provider);
 
   const handlePrint = async (template: LabelTemplate) => {
     if (!token || !order || printBusy) return;

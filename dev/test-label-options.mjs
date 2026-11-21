@@ -37,4 +37,12 @@ t("pazaryerleri değişmedi: Trendyol / n11 / Pazarama yalnız ürünlü, Hepsib
   assert.deepEqual(tpl("idefix"), ["shared", "product"]);
 });
 
+t("Yurtiçi (ya da başka kargo) takipli siparişte Orijinal HepsiJet etiketi yok; HepsiJet ya da sağlayıcısız siparişte var", () => {
+  assert.deepEqual(m.labelOptionsFor("website", "yurtici").map((o) => o.template), ["cargo"]);
+  assert.deepEqual(m.labelOptionsFor("woocommerce", "Yurtici").map((o) => o.template), ["cargo"]);
+  assert.deepEqual(m.labelOptionsFor("website", "hepsijet").map((o) => o.template), ["original", "cargo"]);
+  assert.deepEqual(m.labelOptionsFor("website", "").map((o) => o.template), ["original", "cargo"]);
+  assert.deepEqual(m.labelOptionsFor("website").map((o) => o.template), ["original", "cargo"]);
+  assert.deepEqual(m.labelOptionsFor("idefix", "yurtici").map((o) => o.template), ["shared", "product"]);
+});
 console.log(`\n${n} test geçti`);

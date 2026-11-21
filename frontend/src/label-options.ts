@@ -24,7 +24,9 @@ export type LabelTemplate = "product" | "marketplace" | "shared" | "cargo" | "or
 export type LabelOption = { template: LabelTemplate; label: string };
 
 // İlk seçenek varsayılandır.
-export function labelOptionsFor(provider: string): LabelOption[] {
+// cargoProvider: siparişin kargo sağlayıcısı (order.cargo_provider). HepsiJet dışında bir sağlayıcıyla (ör. Yurtiçi) gönderilen
+// web/WooCommerce siparişinde "Orijinal HepsiJet etiketi" sunulmaz; yalnız ürünlü etiket kalır. Boşsa (eski kayıt) HepsiJet sayılır.
+export function labelOptionsFor(provider: string, cargoProvider?: string | null): LabelOption[] {
   switch (channelKeyOf(provider)) {
     case "trendyol":
       return [{ template: "product", label: "Ürünlü barkod etiketi" }];
@@ -42,10 +44,13 @@ export function labelOptionsFor(provider: string): LabelOption[] {
       ];
     case "pazarama":
       return [{ template: "product", label: "Pazarama sipariş etiketi" }];
-    default:
+    default: {
+      const cargo = String(cargoProvider || "").trim().toLowerCase();
+      if (cargo && cargo !== "hepsijet") return [{ template: "cargo", label: "Ürünlü etiket" }];
       return [
         { template: "original", label: "Orijinal HepsiJet etiketi" },
         { template: "cargo", label: "Ürünlü etiket" },
       ];
+    }
   }
 }

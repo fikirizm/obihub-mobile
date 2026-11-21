@@ -135,7 +135,7 @@ export async function fetchOrderLabelFile(
   opts: { template?: LabelTemplate; order?: Partial<OrderFull> | null } = {}
 ): Promise<LabelFile> {
   const key = channelKeyOf(provider || opts.order?.channel);
-  const template = opts.template || labelOptionsFor(provider || String(opts.order?.channel || ""))[0].template;
+  const template = opts.template || labelOptionsFor(provider || String(opts.order?.channel || ""), opts.order?.cargo_provider)[0].template;
   const order = opts.order || null;
 
   if (template === "original") return { path: await originalLabel(token, orderId) };
