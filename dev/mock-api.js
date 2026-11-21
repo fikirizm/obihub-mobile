@@ -167,6 +167,8 @@ const mpReturns = [
   { id: "mr3", provider: "trendyol", order_number: "TY-10002", state: "rejected", state_label: "İade reddedildi", claimed_at: "2026-11-15T08:00:00Z", reason: "",
     lines: [{ barcode: "8690000000005", quantity: 1 }], stock_advice: { state: "none", message: "" } },
 ];
+// KDV açılış devri (mock).
+const vatCarry = { opening: null };
 // Netgsm SMS durumu (mock; gerçek şifre tutulmaz).
 const sms = { connected: false, username: "", enabled: false, sender: "", encoding: "TURKISH", store_name: "Deneme Mağaza", revision: 1,
   channels: { website: true, woocommerce: false },
@@ -1215,6 +1217,43 @@ http
         return send(res, 200, body);
       }
       return send(res, 200, { ...body, rows: undefined });
+    }
+    // KDV raporu + devir (backend/reports_vat.py, vat_carry.py); /__mode?member=… ile ekip üyesi yazamaz (403).
+    if (path === "/reports/vat/carry-opening") {
+      if (req.method === "GET") return send(res, 200, { opening: vatCarry.opening, history: [] });
+      if (state.member && state.member !== "0") return send(res, 403, { code: "VAT_CARRY_FORBIDDEN", detail: "Açılış devri bir firma ayarıdır." });
+      if (req.method === "DELETE") { vatCarry.opening = null; console.log("WRITE vat carry clear"); return send(res, 200, { opening: null }); }
+      if (req.method === "PUT") return readBody((b) => {
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(b.month || ""))) return send(res, 422, { code: "VAT_CARRY_INVALID", detail: "Açılış ayı geçersiz." });
+        if (!/^\d{1,12}(\.\d{1,2})?$/.test(String(b.amount || ""))) return send(res, 422, { code: "VAT_CARRY_INVALID", detail: "Tutar geçersiz." });
+        vatCarry.opening = { month: b.month, amount: b.amount, updated_at: new Date().toISOString() }; console.log("WRITE vat carry", JSON.stringify(b)); return send(res, 200, { opening: vatCarry.opening });
+      });
+    }
+    if (path === "/reports/vat" && req.method === "GET") {
+      const month = url.searchParams.get("month") || "2026-11";
+      const prevM = (mm) => { const [y, m] = mm.split("-").map(Number); const i = y * 12 + m - 2; return `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, "0")}`; };
+      const empty = month < "2026-09";
+      const TRY = { currency: "TRY",
+        output: { base: "1800.00", vat: "307.00", withholding: "100.00", declared_vat: "207.00", count: 7, vat_unknown_count: 0, vat_unknown_amount: "0.00", by_rate: [{ rate: "10", base: "150.00", vat: "15.00" }, { rate: "20", base: "1450.00", vat: "290.00" }, { rate: null, base: "200.00", vat: "2.00" }] },
+        input: { base: "600.00", vat: "120.00", withholding: "30.00", count: 3, vat_unknown_count: 2, vat_unknown_amount: "420.00", by_rate: [{ rate: "20", base: "600.00", vat: "120.00" }] },
+        result: { kdv1_net: "87.00", status: "payable", payable: "87.00", carry_forward: "0.00", withholding_payable: "30.00" } };
+      const zero = { base: "0.00", vat: "0.00", withholding: "0.00", declared_vat: "0.00", count: 0, vat_unknown_count: 0, vat_unknown_amount: "0.00", by_rate: [] };
+      const o = vatCarry.opening;
+      const carry = !o ? { currency: "TRY", status: "not_set", opening: null, message: "Önceki aylardan devreden KDV girilmemiş. Devrin hesaplanması için bir kez açılış devrini (hangi aydan önce ne kadar KDV devrettiğinizi) girin." }
+        : month < o.month ? { currency: "TRY", status: "before_opening", opening: o, message: `Açılış devri ${o.month} için girildi; bu aydan önceki devreden KDV bilinmiyor.` }
+        : (() => { const cin = Number(o.amount), dv = empty ? 0 : 207, iv = empty ? 0 : 120, net = dv - iv - cin;
+            return { currency: "TRY", status: "ok", message: null, opening: o, carry_in: cin.toFixed(2), declared_vat: dv.toFixed(2), input_vat: iv.toFixed(2), payable: Math.max(net, 0).toFixed(2), carry_out: Math.max(-net, 0).toFixed(2),
+              result_status: net > 0 ? "payable" : net < 0 ? "carry_forward" : "zero", incomplete_months: empty ? [] : [month], foreign_currency_months: [] }; })();
+      return send(res, 200, { month, carry, period: { from: month + "-01", to: month + "-28" }, previous_month: prevM(month),
+        currencies: empty ? [{ currency: "TRY", output: zero, input: zero, result: { kdv1_net: "0.00", status: "zero", payable: "0.00", carry_forward: "0.00" } }] : [TRY, { currency: "USD", output: { ...zero, base: "100.00", vat: "20.00", declared_vat: "20.00", count: 1, by_rate: [{ rate: "20", base: "100.00", vat: "20.00" }] }, input: zero,
+          result: { kdv1_net: "20.00", status: "payable", payable: "20.00", carry_forward: "0.00" }, try_equivalent: { output_vat: "650.00", input_vat: "0.00", missing_rate_count: 1 } }],
+        previous: { month: prevM(month), currencies: [{ currency: "TRY", output_vat: "60.00", declared_vat: "60.00", input_vat: "20.00", kdv1_net: "40.00" }] },
+        rows: empty ? [] : [
+          { side: "sales", kind: "sales_invoice", id: "S1", number: "FTR-S1", date: month + "-05", party_name: "Elif Kaya", currency: "TRY", is_return: false, origin: "obihub", base: "150.00", vat: "25.00", withholding: "0.00", vat_known: true, rates: [{ rate: "10" }, { rate: "20" }] },
+          { side: "sales", kind: "sales_invoice", id: "R1", number: "VKT2", date: month + "-08", party_name: "Can Öztürk", currency: "TRY", is_return: true, origin: "parasut", base: "-50.00", vat: "-10.00", withholding: "0.00", vat_known: true, rates: [{ rate: "20" }] },
+          { side: "purchases", kind: "purchase_invoice", id: "obihub:inv-1", number: "EL2026-0001", date: month + "-12", party_name: "Tedarikçi A", currency: "TRY", is_return: false, origin: "obihub", base: "245.00", vat: "44.50", withholding: "0.00", vat_known: true, rates: [{ rate: "20" }] },
+          { side: "purchases", kind: "expense_record", id: "rec-old", number: null, date: month + "-20", description: "Kira", currency: "TRY", is_return: false, origin: "obihub", vat_known: false, rates: [] },
+          { side: "sales", kind: "sales_invoice", id: "U1", number: "USD-1", date: month + "-09", party_name: "Yabancı Ltd", currency: "USD", is_return: false, origin: "obihub", base: "100.00", vat: "20.00", withholding: "0.00", vat_known: true, rates: [{ rate: "20" }] }] });
     }
     if (path === "/reports/cash-bank" && req.method === "GET") {
       const acc = (id, name, currency, o, i, out, close, over = {}) => ({ id, name, account_type: "bank", currency, archived: false, read_only: false, opening: o, in: i, out, net: (Number(i) - Number(out)).toFixed(2), closing: close, transfer_in: "0.00", transfer_out: "0.00", count: 2, before_opening_count: 0, ...over });

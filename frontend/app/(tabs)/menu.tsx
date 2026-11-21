@@ -177,7 +177,7 @@ export default function MenuScreen() {
               divider
               leading={<IconTile tint={colors.violetSoft}><ChartIcon size={18} color={colors.violet} /></IconTile>}
               title="Finans raporları"
-              subtitle="Satışlar, giderler, kasa/banka, nakit akışı"
+              subtitle="Satışlar, giderler, KDV, kasa/banka, nakit akışı"
               chevron
               onPress={() => router.push("/finance-reports" as Href)}
             />
