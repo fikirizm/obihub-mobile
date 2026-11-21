@@ -192,6 +192,8 @@ export type DocumentMeta = {
   stock: { owner: string | null; default_mode: "with_document" | "none"; warehouses: { id: string; name: string }[] };
   withholding: { rate: number; label: string }[];
   units: { key: string; label: string }[];
+  // %0 KDV istisna / ihraç kayıtlı kodları; sunucu göndermezse web'deki varsayılan liste (document-form DEFAULT_EXEMPTIONS).
+  exemptions: { code: string; label: string; group?: string }[];
 };
 
 export async function getDocumentMeta(token: string): Promise<DocumentMeta | null> {
@@ -203,6 +205,9 @@ export async function getDocumentMeta(token: string): Promise<DocumentMeta | nul
       stock: { owner: st.owner || null, default_mode: st.default_mode === "none" ? "none" : "with_document", warehouses: Array.isArray(st.warehouses) ? st.warehouses : [] },
       withholding: wh,
       units: Array.isArray(m?.units) ? m.units.filter((u: any) => u?.key).map((u: any) => ({ key: String(u.key), label: String(u.label || u.key) })) : [],
+      exemptions: Array.isArray(m?.exemptions)
+        ? m.exemptions.filter((x: any) => x?.code).map((x: any) => ({ code: String(x.code), label: String(x.label || ""), group: x.group ? String(x.group) : undefined }))
+        : [],
     };
   } catch {
     return null;

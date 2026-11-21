@@ -35,7 +35,7 @@ import {
   WITHHOLDING_RATES,
   type DocForm,
   type DocLine,
-  type DocType, listPrice } from "../document-form";
+  type DocType, listPrice, DEFAULT_EXEMPTIONS, isExportCode, setExemption, vatPatch } from "../document-form";
 import { convertText, quoteActions, quoteOutcomeView } from "../quote-status";
 import { lifecycleActions, amountsLockNote } from "../document-lifecycle";
 import { canChangeCustomer, isPosLocked, posLockedBody, posLockNote } from "../pos-invoice";
@@ -276,10 +276,37 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
         .catch(() => undefined);
     }
   };
+  // E-46: %0 KDV'li satırda istisna kodu (kesmede zorunlu). İhraç kayıtlı kod (701-704) tüm satırlara uygulanır.
+  const exemptions = meta?.exemptions?.length ? meta.exemptions : DEFAULT_EXEMPTIONS;
+  const exemptionPicker = (l: DocLine, i: number, label = "KDV istisna kodu") => (
+    <View testID={`invoice-line-exemption-${i}`}>
+      <Text style={[type.callout, { color: colors.textSecondary, fontWeight: "600" }]}>{label}</Text>
+      <OptionChips
+        testIDPrefix={`invoice-line-exemption-${i}`}
+        options={exemptions.map((x) => ({ value: x.code, label: x.code }))}
+        value={l.vat_exemption_code}
+        onChange={(code) => setForm((f) => ({ ...f, lines: setExemption(f.lines, l.line_key, code) }))}
+      />
+      {l.vat_exemption_code ? (
+        <Text testID={`invoice-line-exemption-${i}-label`} style={[type.footnote, { color: colors.textPrimary, marginTop: 4 }]}>
+          {`${l.vat_exemption_code} · ${exemptions.find((x) => x.code === l.vat_exemption_code)?.label || "Kayıtlı kod"}`}
+        </Text>
+      ) : null}
+      {issueErrors[`exemption${i}`] && tried ? (
+        <Text style={[type.caption, { color: colors.error, marginTop: 4 }]}>{issueErrors[`exemption${i}`]}</Text>
+      ) : isExportCode(l.vat_exemption_code) ? (
+        <Text style={[type.caption, { color: colors.textTertiary, marginTop: 4 }]}>İhraç kayıtlı kod tüm satırlara uygulanır; KDV %0 olur.</Text>
+      ) : !l.vat_exemption_code ? (
+        <Text style={[type.caption, { color: colors.textTertiary, marginTop: 4 }]}>Fatura keserken %0 KDV'li satırda istisna kodu gerekir.</Text>
+      ) : null}
+    </View>
+  );
   const removeLine = (key: string) => setForm((f) => ({ ...f, lines: f.lines.filter((l) => l.line_key !== key) }));
 
   const stockMode = quote ? null : form.stock_mode || meta?.stock.default_mode || null;
   const errors = validateForm(form, { stockMode, docType });
+  // Kesme (ya da kesilmiş faturayı güncelleme) için ek kural: %0 KDV'li satırda istisna kodu.
+  const issueErrors = validateForm(form, { stockMode, docType, action: "issue" });
   const linesOk = form.lines.length > 0 && !Object.keys(errors).some((k) => k !== "customer");
   const preview = usePreview(
     token,
@@ -304,6 +331,10 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
       return toast(m ? `${Number(m[1]) + 1}. satır: ${firstErr[1]}` : firstErr[1], "error");
     }
     const issue = action === "issue";
+    if (!quote && (issue || isIssued)) {
+      const ex = Object.entries(issueErrors).find(([k]) => k.startsWith("exemption"));
+      if (ex) return toast(`${Number(ex[0].slice(9)) + 1}. satır: ${ex[1]}`, "error");
+    }
     const ok = quote
       ? await confirm({
           title: uncertain ? "Teklif yeniden gönderilsin mi?" : editId ? "Değişiklikler kaydedilsin mi?" : "Teklif kaydedilsin mi?",
@@ -689,6 +720,11 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
                   );
                 })}
               </Card>
+              {form.lines.some((l) => Number(l.vat_rate) === 0) ? (
+                <View style={[styles.block, { gap: spacing.sm, marginTop: spacing.sm }]} testID="invoice-pos-exemptions">
+                  {form.lines.map((l, i) => (Number(l.vat_rate) === 0 ? <React.Fragment key={l.line_key}>{exemptionPicker(l, i, `${i + 1}. satır istisna kodu`)}</React.Fragment> : null))}
+                </View>
+              ) : null}
             </>
           ) : null}
           {!posLocked && form.lines.map((l, i) => {
@@ -747,9 +783,10 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
                     testIDPrefix={`invoice-line-vat-${i}`}
                     options={VAT_OPTIONS}
                     value={l.vat_rate as 0 | 1 | 10 | 20}
-                    onChange={(v) => patchLine(l.line_key, { vat_rate: v, withholding: v > 0 ? l.withholding : null })}
+                    onChange={(v) => patchLine(l.line_key, vatPatch(l, v))}
                   />
                 </View>
+                {Number(l.vat_rate) === 0 && !quote ? exemptionPicker(l, i) : null}
                 {meta?.units?.length ? (
                   <View>
                     <Text style={[type.callout, { color: colors.textSecondary, fontWeight: "600" }]}>Birim</Text>

@@ -20,6 +20,8 @@ export type DocLine = {
   unit: string;
   price: string;
   vat_rate: number;
+  // E-46: %0 KDV'li satırda istisna / ihraç kayıtlı kodu (kesmede zorunlu; sunucu LINE_EXEMPTION_INVALID).
+  vat_exemption_code: string;
   tracks_stock: boolean | null;
   discount: Discount;
   withholding: Withholding;
@@ -77,7 +79,7 @@ const has = (v: unknown) => String(v ?? "").trim() !== "";
 export function blankLine(key?: string): DocLine {
   return {
     line_key: key || newLineKey(), kind: "text", product_id: null, product_name: "", description: "", quantity: "1", unit: "ADET", price: "",
-    vat_rate: 20, tracks_stock: false, discount: null, withholding: null, other_taxes: [], warehouse_id: null,
+    vat_rate: 20, vat_exemption_code: "", tracks_stock: false, discount: null, withholding: null, other_taxes: [], warehouse_id: null,
   };
 }
 
@@ -101,6 +103,7 @@ function lineBody(l: DocLine, stockMode: string | null) {
   out.unit_price = has(l.price) ? dot(l.price, 4) : "0";
   out.price_basis = "net";
   out.vat_rate = Number(l.vat_rate);
+  if (Number(l.vat_rate) === 0 && has(l.vat_exemption_code)) out.vat_exemption_code = String(l.vat_exemption_code).trim();
   if (l.discount && has(l.discount.value)) out.discount = { type: l.discount.type, value: dot(l.discount.value, 2) };
   if (l.withholding) out.withholding = { rate: Number(l.withholding.rate), code: String(l.withholding.code || "").trim() };
   if (l.other_taxes?.length) out.other_taxes = l.other_taxes.map((t) => ({ code: t.code, type: t.type, value: dot(t.value, 2) }));
@@ -147,7 +150,31 @@ export function previewBody(f: DocForm, stockMode: string | null, docType: DocTy
   return out;
 }
 
-export function validateForm(f: DocForm, opts: { stockMode?: string | null; docType?: DocType } = {}): Record<string, string> {
+// Web useDocumentMeta DEFAULT_EXEMPTIONS; sunucu /documents/meta `exemptions` gönderirse o kullanılır.
+export type Exemption = { code: string; label: string; group?: string };
+export const DEFAULT_EXEMPTIONS: Exemption[] = [
+  { code: "301", label: "Mal ihracatı (KDV 11/1-a)", group: "exemption" },
+  { code: "302", label: "Hizmet ihracatı (KDV 11/1-a)", group: "exemption" },
+  { code: "351", label: "İstisna olmayan diğer", group: "exemption" },
+  { code: "701", label: "İhraç kayıtlı · 3065 s. KDV Kanunu", group: "export_registered" },
+  { code: "702", label: "İhraç kayıtlı · DİİB / geçici kabul", group: "export_registered" },
+  { code: "703", label: "İhraç kayıtlı · 4760 s. ÖTV Kanunu", group: "export_registered" },
+  { code: "704", label: "İhraç kayıtlı · 3065 s. KDV Kanunu (diğer)", group: "export_registered" },
+];
+export const isExportCode = (code: unknown) => /^70[1-4]$/.test(String(code || ""));
+// KDV oranı değişimi: %0 dışında istisna kodu, %0'da tevkifat düşer.
+export function vatPatch(l: DocLine, v: number): Pick<DocLine, "vat_rate" | "vat_exemption_code" | "withholding"> {
+  return { vat_rate: v, vat_exemption_code: v === 0 ? l.vat_exemption_code || "" : "", withholding: v > 0 ? l.withholding : null };
+}
+// İhraç kayıtlı kod (701-704) tüm satırlara uygulanır ve KDV'yi %0'a çeker; diğer kodlar yalnız o satırı etkiler (web DocumentLines).
+export function setExemption(lines: DocLine[], key: string, code: string): DocLine[] {
+  return lines.map((l) => {
+    if (l.line_key === key) return { ...l, vat_exemption_code: code };
+    return isExportCode(code) ? { ...l, vat_rate: 0, vat_exemption_code: code, withholding: null } : l;
+  });
+}
+
+export function validateForm(f: DocForm, opts: { stockMode?: string | null; docType?: DocType; action?: "save_draft" | "issue" } = {}): Record<string, string> {
   const e: Record<string, string> = {};
   const quote = opts.docType === "quote";
   if (!String(f.customer_name || "").trim()) e.customer = "Müşteri zorunludur.";
@@ -163,6 +190,7 @@ export function validateForm(f: DocForm, opts: { stockMode?: string | null; docT
     if (l.discount && has(l.discount.value) && dotAmount(l.discount.value, 2) === null) e[`discount${i}`] = "İskonto değeri geçerli değil.";
     if (l.withholding && !has(l.withholding.code)) e[`withholding${i}`] = "Tevkifat kodunu girin.";
     if ((l.other_taxes || []).some((t) => dotAmount(t.value, 2) === null)) e[`tax${i}`] = "Vergi değeri geçerli değil.";
+    if (!quote && opts.action === "issue" && Number(l.vat_rate) === 0 && !has(l.vat_exemption_code)) e[`exemption${i}`] = "%0 KDV'li satırda istisna kodu seçin.";
   });
   const dd = f.doc_discount;
   if (dd && has(dd.value) && dotAmount(dd.value, 2) === null) e.doc_discount = "Ara toplam indirimi geçerli değil.";
@@ -220,6 +248,7 @@ function lineFromItem(x: any): DocLine {
     unit: x?.unit || "ADET",
     price: toTr(x?.unit_price),
     vat_rate: x?.vat_rate == null ? 20 : Number(x.vat_rate),
+    vat_exemption_code: x?.vat_exemption_code ? String(x.vat_exemption_code) : "",
     tracks_stock: pid ? null : false,
     discount,
     withholding: x?.withholding && typeof x.withholding === "object" ? { rate: Number(x.withholding.rate), code: String(x.withholding.code || "") } : null,

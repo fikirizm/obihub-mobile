@@ -169,4 +169,43 @@ t("Dalga 5a: fiyat listesi — müşterinin listesinde ürün fiyatı varsa net 
   assert.equal(m.listPrice({ price_list: null, prices: {} }, "p1"), null);
   assert.equal(m.listPrice({ price_list: { name: "Bayi" }, reason: "expired", prices: {} }, "p1"), null);
 });
+t("%0 KDV istisna kodu: gövdede yalnız %0 satırda; kayıttan okunur", () => {
+  const f = base();
+  f.lines[0] = { ...f.lines[0], vat_rate: 0, vat_exemption_code: "301" };
+  f.lines[1] = { ...f.lines[1], vat_exemption_code: "301" };
+  const b = m.buildBody(f, { action: "issue" });
+  assert.equal(b.items[0].vat_exemption_code, "301");
+  assert.equal("vat_exemption_code" in b.items[1], false);
+  assert.equal(m.blankLine().vat_exemption_code, "");
+  const back = m.fromInvoice({ items: [{ line_key: "l-x", description: "İhracat", quantity: 1, unit_price: 10, vat_rate: 0, vat_exemption_code: "302" }] }, "2026-11-22");
+  assert.equal(back.lines[0].vat_exemption_code, "302");
+});
+t("KDV oranı değişince %0 dışında kod silinir; tevkifat %0'da düşer", () => {
+  const l = { ...m.blankLine("l-1"), vat_rate: 0, vat_exemption_code: "351", withholding: null };
+  assert.deepEqual(m.vatPatch(l, 20), { vat_rate: 20, vat_exemption_code: "", withholding: null });
+  const w = { ...m.blankLine("l-2"), vat_rate: 20, withholding: { rate: 50, code: "601" } };
+  assert.deepEqual(m.vatPatch(w, 0), { vat_rate: 0, vat_exemption_code: "", withholding: null });
+  assert.deepEqual(m.vatPatch(w, 10), { vat_rate: 10, vat_exemption_code: "", withholding: { rate: 50, code: "601" } });
+});
+t("ihraç kayıtlı kod (701-704) tüm satırlara uygulanır, KDV %0 ve tevkifat kalkar; diğer kod yalnız o satır", () => {
+  const lines = base().lines.map((l) => ({ ...l, withholding: { rate: 50, code: "601" } }));
+  const ex = m.setExemption(lines, "l-aaaaaaaaaaaa", "701");
+  assert.deepEqual(ex.map((l) => [l.vat_rate, l.vat_exemption_code, l.withholding]), [[20, "701", { rate: 50, code: "601" }], [0, "701", null]]);
+  assert.equal(m.isExportCode("704"), true);
+  assert.equal(m.isExportCode("301"), false);
+  const one = m.setExemption(lines, "l-bbbbbbbbbbbb", "351");
+  assert.deepEqual(one.map((l) => l.vat_exemption_code), ["", "351"]);
+});
+t("kesmede %0 satırda kod zorunlu (taslakta ve teklifte değil)", () => {
+  const f = base();
+  f.lines[1] = { ...f.lines[1], vat_rate: 0, vat_exemption_code: "" };
+  assert.equal(m.validateForm(f, { stockMode: "none" }).exemption1, undefined);
+  assert.equal(m.validateForm(f, { stockMode: "none", action: "issue" }).exemption1, "%0 KDV'li satırda istisna kodu seçin.");
+  assert.equal(m.validateForm(f, { stockMode: "none", action: "issue", docType: "quote" }).exemption1, undefined);
+  f.lines[1].vat_exemption_code = "351";
+  assert.equal(m.validateForm(f, { stockMode: "none", action: "issue" }).exemption1, undefined);
+});
+t("varsayılan istisna listesi web ile aynı kodlar", () => {
+  assert.deepEqual(m.DEFAULT_EXEMPTIONS.map((x) => x.code), ["301", "302", "351", "701", "702", "703", "704"]);
+});
 console.log(`\n${n} test geçti`);

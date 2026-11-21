@@ -12,9 +12,14 @@ export const canChangeCustomer = (record: any) => !(isPosLocked(record) && recor
 export function posLockedBody(body: Record<string, any>, record: any): Record<string, any> {
   const out: Record<string, any> = { ...body };
   delete out.collection;
+  // %0 KDV'li satırın istisna kodu fiyat imzasına girmez; formda seçilen kod (aynı line_key) kayıt kalemine eklenir (web financialLocked).
+  const codes = new Map<string, string>();
+  for (const b of Array.isArray(body?.items) ? body.items : []) if (b?.line_key && b?.vat_exemption_code) codes.set(String(b.line_key), String(b.vat_exemption_code));
   out.items = (Array.isArray(record?.items) ? record.items : []).map((it: any) => {
     const line: Record<string, any> = {};
     for (const k of SIGNATURE_KEYS) if (it && k in it) line[k] = it[k];
+    const code = codes.get(String(it?.line_key || ""));
+    if (code && Number(it?.vat_rate) === 0) line.vat_exemption_code = code;
     return line;
   });
   out.stock_mode = "none";

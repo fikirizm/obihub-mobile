@@ -87,4 +87,10 @@ t("ödemesi fişte alınmış (nakit/kart/karma) fişe bağlı faturada yeniden 
   assert.equal(m.posPrepaid({ pos_payment_type: "nakit" }), false);
   assert.equal(m.POS_PREPAID_NOTE, "Bu satışın tahsilatı satış fişinde kayıtlı; fatura üzerinden yeniden tahsilat alınmaz.");
 });
+t("kilitli gövde: %0 satırın formda seçilen istisna kodu kayıt kalemine eklenir", () => {
+  const record = { pos_sale_id: "s1", items: [{ line_key: "l1", vat_rate: 0, unit_price: "10" }, { line_key: "l2", vat_rate: 20, unit_price: "5" }] };
+  const out = m.posLockedBody({ items: [{ line_key: "l1", vat_exemption_code: "301" }, { line_key: "l2", vat_exemption_code: "351" }] }, record);
+  assert.equal(out.items[0].vat_exemption_code, "301");
+  assert.equal("vat_exemption_code" in out.items[1], false);
+});
 console.log(`${n} test geçti`);
