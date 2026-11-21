@@ -7,6 +7,7 @@ import React, { useState } from "react";
 import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
+import { mainFromResponse, mediaError } from "../media-errors";
 import { deleteProductImage, patchProductImages, setProductSalesStatus, uploadProductImages, type ProductLinks, type UploadFile } from "../api-urun-stok";
 import { haptic } from "../haptics";
 import { useTheme } from "../theme/ThemeProvider";
@@ -29,13 +30,7 @@ const mimeOf = (a: ImagePicker.ImagePickerAsset) => {
   return n.endsWith(".png") ? "image/png" : n.endsWith(".webp") ? "image/webp" : "image/jpeg";
 };
 
-function uploadError(e: any): string {
-  const s = Number(e?.status || 0);
-  if (s === 413) return "Görsel 10 MB'tan büyük; daha küçük bir görsel seçin.";
-  if (s === 415) return "Yalnız JPEG, PNG ya da WebP görsel yüklenebilir.";
-  if (s === 503) return "Görsel depolama şu an kullanılamıyor. Biraz sonra yeniden deneyin.";
-  return e?.message || "Görsel yüklenemedi.";
-}
+// Faz A M5: hata metinleri ve yanıttaki ana görsel ../media-errors (saf, birim testli).
 
 export function ProductMedia({
   token,
@@ -93,7 +88,9 @@ export function ProductMedia({
       toast(out.images.length > 1 ? `${out.images.length} görsel eklendi.` : "Görsel eklendi.", "success");
       onChanged(out.imageUrl || null);
     } catch (e: any) {
-      toast(uploadError(e), "error");
+      const err = mediaError(e);
+      toast(err.text, "error");
+      if (err.reload) onChanged(main || null);
     } finally {
       setBusy(null);
     }
@@ -113,9 +110,10 @@ export function ProductMedia({
     setBusy(url);
     try {
       if (action === "main") {
-        await patchProductImages(token, productId, images, url);
+        // Dış adres ana görsel yapılınca sunucu onu R2'ye (WebP) alır: yanıttaki adres esas.
+        const r = await patchProductImages(token, productId, images, url);
         haptic.success();
-        onChanged(url);
+        onChanged(mainFromResponse(r, url));
       } else {
         // Yüklenmiş görselin kimliği sunucudan (uploaded_images) ya da bu oturumdaki yüklemeden; yoksa PATCH (sunucu R2'den de siler).
         const id = uploadedIds.get(url) || links?.uploadedImages.find((u) => u.url === url)?.id;
@@ -126,13 +124,15 @@ export function ProductMedia({
         } else {
           const rest = images.filter((u) => u !== url);
           const nextMain = url === main ? rest[0] || null : main || null;
-          await patchProductImages(token, productId, rest, nextMain);
-          onChanged(nextMain);
+          const r = await patchProductImages(token, productId, rest, nextMain);
+          onChanged(mainFromResponse(r, nextMain));
         }
         toast("Görsel kaldırıldı.", "success");
       }
     } catch (e: any) {
-      toast(e?.message || "Görsel güncellenemedi.", "error");
+      const err = mediaError(e);
+      toast(err.text, "error");
+      if (err.reload) onChanged(main || null);
     } finally {
       setBusy(null);
     }
