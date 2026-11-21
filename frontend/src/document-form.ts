@@ -162,6 +162,13 @@ export const DEFAULT_EXEMPTIONS: Exemption[] = [
   { code: "704", label: "İhraç kayıtlı · 3065 s. KDV Kanunu (diğer)", group: "export_registered" },
 ];
 export const isExportCode = (code: unknown) => /^70[1-4]$/.test(String(code || ""));
+// Fişe bağlı (kilitli) faturada KDV oranı ve tevkifat fiş imzasındadır (orchestration/pos_invoice.py); ihraç kayıtlı kod bunları
+// değiştireceği için yalnız tüm satırlar zaten %0 ve tevkifatsızsa seçilebilir. İstisna kodunun kendisi imzada değildir.
+export const LOCKED_VAT_TEXT = "Fişten gelen faturada KDV oranı değiştirilemez.";
+export const exportCodesAllowed = (lines: DocLine[]) => lines.every((l) => Number(l.vat_rate) === 0 && !l.withholding);
+export function exemptionChoices(list: Exemption[], lines: DocLine[], locked: boolean) {
+  return locked && !exportCodesAllowed(lines) ? list.filter((x) => !isExportCode(x.code)) : list;
+}
 // KDV oranı değişimi: %0 dışında istisna kodu, %0'da tevkifat düşer.
 export function vatPatch(l: DocLine, v: number): Pick<DocLine, "vat_rate" | "vat_exemption_code" | "withholding"> {
   return { vat_rate: v, vat_exemption_code: v === 0 ? l.vat_exemption_code || "" : "", withholding: v > 0 ? l.withholding : null };

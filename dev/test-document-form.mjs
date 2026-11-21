@@ -208,4 +208,15 @@ t("kesmede %0 satırda kod zorunlu (taslakta ve teklifte değil)", () => {
 t("varsayılan istisna listesi web ile aynı kodlar", () => {
   assert.deepEqual(m.DEFAULT_EXEMPTIONS.map((x) => x.code), ["301", "302", "351", "701", "702", "703", "704"]);
 });
+t("fişe bağlı faturada ihraç kodu yalnız tüm satırlar %0 ve tevkifatsızsa seçilir", () => {
+  const z = (k, extra = {}) => ({ ...m.blankLine(k), vat_rate: 0, ...extra });
+  assert.equal(m.exportCodesAllowed([z("a"), z("b")]), true);
+  assert.equal(m.exportCodesAllowed([z("a"), { ...z("b"), vat_rate: 20 }]), false);
+  assert.equal(m.exportCodesAllowed([z("a", { withholding: { rate: 50, code: "601" } })]), false);
+  const all = m.DEFAULT_EXEMPTIONS;
+  assert.deepEqual(m.exemptionChoices(all, [z("a"), { ...z("b"), vat_rate: 10 }], true).map((x) => x.code), ["301", "302", "351"]);
+  assert.equal(m.exemptionChoices(all, [z("a"), { ...z("b"), vat_rate: 10 }], false).length, 7);
+  assert.equal(m.exemptionChoices(all, [z("a")], true).length, 7);
+  assert.equal(m.LOCKED_VAT_TEXT, "Fişten gelen faturada KDV oranı değiştirilemez.");
+});
 console.log(`\n${n} test geçti`);

@@ -35,7 +35,7 @@ import {
   WITHHOLDING_RATES,
   type DocForm,
   type DocLine,
-  type DocType, listPrice, DEFAULT_EXEMPTIONS, isExportCode, setExemption, vatPatch } from "../document-form";
+  type DocType, listPrice, DEFAULT_EXEMPTIONS, exemptionChoices, isExportCode, LOCKED_VAT_TEXT, setExemption, vatPatch } from "../document-form";
 import { convertText, quoteActions, quoteOutcomeView } from "../quote-status";
 import { lifecycleActions, amountsLockNote } from "../document-lifecycle";
 import { canChangeCustomer, isPosLocked, posLockedBody, posLockNote } from "../pos-invoice";
@@ -278,12 +278,15 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
   };
   // E-46: %0 KDV'li satırda istisna kodu (kesmede zorunlu). İhraç kayıtlı kod (701-704) tüm satırlara uygulanır.
   const exemptions = meta?.exemptions?.length ? meta.exemptions : DEFAULT_EXEMPTIONS;
-  const exemptionPicker = (l: DocLine, i: number, label = "KDV istisna kodu") => (
+  const exemptionPicker = (l: DocLine, i: number, label = "KDV istisna kodu") => {
+    const choices = exemptionChoices(exemptions, form.lines, posLocked);
+    const exportBlocked = choices.length < exemptions.length;
+    return (
     <View testID={`invoice-line-exemption-${i}`}>
       <Text style={[type.callout, { color: colors.textSecondary, fontWeight: "600" }]}>{label}</Text>
       <OptionChips
         testIDPrefix={`invoice-line-exemption-${i}`}
-        options={exemptions.map((x) => ({ value: x.code, label: x.code }))}
+        options={choices.map((x) => ({ value: x.code, label: x.code }))}
         value={l.vat_exemption_code}
         onChange={(code) => setForm((f) => ({ ...f, lines: setExemption(f.lines, l.line_key, code) }))}
       />
@@ -299,8 +302,12 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
       ) : !l.vat_exemption_code ? (
         <Text style={[type.caption, { color: colors.textTertiary, marginTop: 4 }]}>Fatura keserken %0 KDV'li satırda istisna kodu gerekir.</Text>
       ) : null}
+      {exportBlocked ? (
+        <Text testID={`invoice-line-exemption-${i}-locked`} style={[type.caption, { color: colors.textTertiary, marginTop: 4 }]}>{`İhraç kayıtlı kodlar (701–704) seçilemez. ${LOCKED_VAT_TEXT}`}</Text>
+      ) : null}
     </View>
-  );
+    );
+  };
   const removeLine = (key: string) => setForm((f) => ({ ...f, lines: f.lines.filter((l) => l.line_key !== key) }));
 
   const stockMode = quote ? null : form.stock_mode || meta?.stock.default_mode || null;
