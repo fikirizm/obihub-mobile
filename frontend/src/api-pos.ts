@@ -5,9 +5,9 @@
 // Aynı anahtar + farklı sepet → 409. 200 yanıtı = satış ve stok düşümü tamamlandı.
 // Aşama 4 / P4: satışın ödemesi kasaya yazılır (nakit → varsayılan TL kasa, kart → "pos" türü TL hesap, karma → iki bacak).
 // Açık hesap: kayıtlı müşteri kartına borç yazılır, kasaya yazılmaz (customer_id zorunlu; karma yalnız nakit + kart).
-import { getPickableAccounts, request } from "./api";
+import { request } from "./api";
+import { cardFields, cardSettings } from "./pos-card";
 import { karmaPayments, openAccountFields, posTotalsCents, splitCents, toCents } from "./pos-money";
-import type { CashAccount } from "./types";
 import { catalogPath, exactPosMatch, posProductFromItem, type PosProduct } from "./pos-catalog";
 
 // Faz A: ürünler GET /catalog/items?for=sale (satılabilir = fiziksel − web sepet rezervi). Eşleme ./pos-catalog (saf, birim testli).
@@ -74,7 +74,8 @@ export function posPayload(lines: CartLine[], discountAmount: number, payment: P
     notes: split ? `Karma ödeme: Nakit ₺${(split.cash / 100).toFixed(2)}, Kart ₺${(split.card / 100).toFixed(2)}` : "",
     session_number: 1,
     ...(split ? { payments: karmaPayments(totalCents, split.cash) } : {}),
-    ...(usesCard && opts.cardAccountId ? { card_account_id: opts.cardAccountId } : {}),
+    // Faz C1: kart tutarı olan ödemede hesap ve "manual" sağlayıcı (kasiyer POS cihazında çeker).
+    ...cardFields(usesCard, opts.cardAccountId || ""),
     ...(payment === "acik_hesap" && opts.customer ? openAccountFields(opts.customer) : {}),
   };
 }
@@ -116,12 +117,15 @@ export async function createPosSale(token: string, body: ReturnType<typeof posPa
   };
 }
 
-// Kart ödemesinin yazılabileceği POS (Kart) hesapları: "pos" türü, TL, etkin. Birden çoksa kart ödemesinde seçim zorunlu (400 POS_CARD_ACCOUNT_REQUIRED).
-export async function getPosCardAccounts(token: string): Promise<CashAccount[]> {
-  const isTry = (c?: string) => ["TRY", "TL", "TRL", ""].includes(String(c ?? "").trim().toUpperCase());
-  return (await getPickableAccounts(token)).filter(
-    (a) => a.account_type === "pos" && isTry(a.currency) && a.is_active !== false && a.active !== false && a.archived !== true && a.is_deleted !== true
-  );
+// Faz C1: satış ekranı ödeme hesapları ayarı (GET /pos/payment-settings). Kurallar ./pos-card (saf, birim testli).
+// Kart hesapları artık /finance/accounts'tan "pos" süzülerek alınmaz.
+export async function getPosPaymentSettings(token: string) {
+  return cardSettings(await request<any>("/pos/payment-settings", { method: "GET" }, token));
+}
+
+// "Hatırla": ilk kart satışında seçilen hesap satış ekranının varsayılanı olur (Ayarlar yetkisi yoksa 403).
+export async function rememberPosCardAccount(token: string, body: { card_account_ids: string[]; default_card_account_id: string }) {
+  return request<any>("/pos/payment-settings", { method: "PATCH", body: JSON.stringify(body) }, token);
 }
 
 // Satışın kasaya nasıl işlendiğinin metni (özet ekranı).

@@ -3,7 +3,7 @@
 // Belirsiz sonuçta (ağ hatası / 5xx) sepet kilitlenir ve AYNI anahtarla AYNI sepet yeniden gönderilir; stok yalnız bir kez düşer.
 // Sunucu POS satışını henüz kasaya/cariye yazmıyor: özet yalnız satış ve stok sonucunu söyler; "Açık hesap" gizli.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { createScanGuard } from "../src/scan-guard";
@@ -13,8 +13,8 @@ import { useAuth } from "../src/auth/AuthProvider";
 import { canSell } from "../src/auth/permissions";
 import { getParties, newIdempotencyKey } from "../src/api";
 import { getUiCapabilities } from "../src/api-gider";
-import { cartTotals, cashPostingText, createPosSale, findByBarcode, getPosCardAccounts, posPayload, searchPosProducts, splitCents, toCents, type CartLine, type PaymentType, type PosProduct, type PosSale } from "../src/api-pos";
-import type { CashAccount } from "../src/types";
+import { cartTotals, cashPostingText, createPosSale, findByBarcode, getPosPaymentSettings, posPayload, rememberPosCardAccount, searchPosProducts, splitCents, toCents, type CartLine, type PaymentType, type PosProduct, type PosSale } from "../src/api-pos";
+import { accountLabel, FIRST_USE_TEXT, keepSelection, NONE_TEXT, pickerMode, REMEMBER_FAILED, rememberBody, rememberDefault, reloadsSettings, WEB_PAYMENT_WARNING, type CardAccount } from "../src/pos-card";
 import { nextPosKey, openAccountBlock, posErrorAction } from "../src/pos-money";
 import { posSaleErrorText, reservedProductIds, soldOut, stockText } from "../src/pos-catalog";
 import type { Party } from "../src/types";
@@ -107,9 +107,11 @@ export default function PosScreen() {
   // Karma ödemede nakit kısmı; kart = toplam − nakit (kuruşta).
   const [splitCashText, setSplitCashText] = useState("");
   // POS (Kart) hesapları: birden çoksa kart içeren ödemede seçim zorunlu.
-  const [cardAccounts, setCardAccounts] = useState<CashAccount[]>([]);
+  // Faz C1: kart hesabı (GET /pos/payment-settings). Ayar yoksa hiçbir hesap kendiliğinden seçilmez.
+  const [cardAccounts, setCardAccounts] = useState<CardAccount[]>([]);
+  const [cardConfigured, setCardConfigured] = useState(false);
   const [cardAccountId, setCardAccountId] = useState("");
-  const cardPicked = useRef(false);
+  const [rememberCard, setRememberCard] = useState(true);
   // Açık hesap: yalnız kayıtlı müşteri kartı (siparişten türetilen kişi ve tedarikçi kartı seçtirilmez).
   const [customer, setCustomer] = useState<{ id: string; name: string } | null>(null);
   const [custSearch, setCustSearch] = useState("");
@@ -128,13 +130,17 @@ export default function PosScreen() {
 
   const loadCardAccounts = useCallback(() => {
     if (!token) return;
-    getPosCardAccounts(token)
-      .then((list) => {
-        setCardAccounts(list);
-        // Tek hesap kendiliğinden seçilir; birden çoksa yalnız kullanıcının seçtiği korunur (sessiz seçim yok).
-        setCardAccountId((cur) => (list.length === 1 ? list[0].id : cardPicked.current && list.some((a) => a.id === cur) ? cur : ""));
+    getPosPaymentSettings(token)
+      .then((s) => {
+        setCardConfigured(s.configured);
+        setCardAccounts(s.accounts);
+        // Ön seçim yalnız ayardaki etkin varsayılan; kullanıcının seçtiği hesap listede kaldıkça korunur.
+        setCardAccountId((cur) => keepSelection(cur, s.accounts, s.preferred));
       })
-      .catch(() => setCardAccounts([]));
+      .catch(() => {
+        setCardAccounts([]);
+        setCardConfigured(false);
+      });
   }, [token]);
   useEffect(() => {
     loadCardAccounts();
@@ -234,7 +240,8 @@ export default function PosScreen() {
   const splitCash = payment === "karma" && splitCashText.trim() ? parseAmount(splitCashText, true) : null;
   const split = payment === "karma" && splitCash !== null ? splitCents(totalCents, toCents(splitCash)) : null;
   const usesCard = payment === "kart" || (payment === "karma" && (split ? split.card > 0 : true));
-  const needCardAccount = usesCard && cardAccounts.length > 1;
+  const cardMode = pickerMode(cardAccounts, cardConfigured);
+  const pickedCard = cardAccounts.find((a) => a.id === cardAccountId);
 
   const charge = async () => {
     if (!token || sending.current || !cart.length) return;
@@ -246,7 +253,7 @@ export default function PosScreen() {
       if (toCents(splitCash) > totalCents) return setError("Nakit tutarı fiş toplamını aşamaz.");
       if (toCents(splitCash) <= 0 || toCents(splitCash) >= totalCents) return setError("Karma ödemede nakit ve kart tutarlarının ikisi de sıfırdan büyük olmalı.");
     }
-    if (needCardAccount && !cardAccountId) return setError("Kart ödemesinin yazılacağı POS hesabını seçin.");
+    if (usesCard && !cardAccountId) return setError(cardAccounts.length ? "Kart ödemesinin yazılacağı hesabı seçin." : NONE_TEXT);
     if (payment === "acik_hesap" && !customer) return setError("Açık hesap için satışın yazılacağı cariyi seçin.");
     setError("");
     sending.current = true;
@@ -254,7 +261,7 @@ export default function PosScreen() {
     try {
       const body = posPayload(cart, discount || 0, payment, paid ?? totals.total, {
         cashCents: split?.cash,
-        cardAccountId: cardAccounts.length > 1 ? cardAccountId : undefined,
+        cardAccountId: usesCard ? cardAccountId : undefined,
         customer: payment === "acik_hesap" ? customer : null,
       });
       const s = await createPosSale(token, body, keyRef.current);
@@ -263,11 +270,12 @@ export default function PosScreen() {
       setUncertain(false);
       markCatalogDirty();
       haptic.success();
-      // Sunucu ilk kart satışında "POS (Kart)" hesabını açmış olabilir.
-      if (usesCard && !cardAccounts.length) loadCardAccounts();
+      // İlk kart satışı: işaretliyse seçilen hesap satış ekranının varsayılanı olur (Ayarlar yetkisi yoksa yalnız bilgi verilir).
+      const remember = usesCard ? rememberBody(cardConfigured, rememberCard, cardAccountId) : null;
+      if (remember) rememberPosCardAccount(token, remember).then(loadCardAccounts).catch(() => toast(REMEMBER_FAILED, "info"));
     } catch (e: any) {
       const code = String(e?.code || "");
-      if (code === "POS_CARD_ACCOUNT_REQUIRED") loadCardAccounts();
+      if (reloadsSettings(code)) loadCardAccounts();
       // Kural ../src/pos-money (birim testli): belirsizde aynı anahtar + aynı sepet, kesin retten sonra yeni anahtar.
       const action = posErrorAction(e);
       keyRef.current = nextPosKey(keyRef.current, e, () => newIdempotencyKey("pos"));
@@ -549,19 +557,36 @@ export default function PosScreen() {
                       </>
                     )
                   ) : null}
-                  {needCardAccount ? (
+                  {usesCard && cardMode === "none" ? (
+                    <Text testID="pos-card-account-none" style={[type.footnote, { color: colors.amber }]}>{NONE_TEXT}</Text>
+                  ) : usesCard && cardMode === "single" ? (
+                    <Text testID="pos-card-account-single" style={[type.footnote, { color: colors.textSecondary }]}>{`Kart ödemesi ${cardAccounts[0].name} hesabına yazılır.`}</Text>
+                  ) : usesCard ? (
                     <>
-                      <Text style={[type.callout, { color: colors.textSecondary, fontWeight: "600" }]}>Kart hesabı</Text>
+                      <Text style={[type.callout, { color: colors.textSecondary, fontWeight: "600" }]}>Kart ödemesinin yazılacağı hesap</Text>
                       <OptionChips
                         testIDPrefix="pos-card-account"
-                        options={cardAccounts.map((a) => ({ value: a.id, label: a.name }))}
+                        options={cardAccounts.map((a) => ({ value: a.id, label: accountLabel(a) }))}
                         value={cardAccountId}
                         onChange={(v) => {
                           if (locked) return;
-                          cardPicked.current = true;
                           setCardAccountId(v);
+                          // Web ödemesi (PayTR vb.) tezgâh POS'u değildir: seçilebilir ama varsayılan olarak hatırlanması önerilmez.
+                          if (!cardConfigured) setRememberCard(rememberDefault(cardAccounts.find((a) => a.id === v)));
                         }}
                       />
+                      {pickedCard?.web_payment ? (
+                        <Text testID="pos-card-account-web-warning" style={[type.footnote, { color: colors.amber }]}>{WEB_PAYMENT_WARNING}</Text>
+                      ) : null}
+                      {!cardConfigured ? (
+                        <>
+                          <Text style={[type.caption, { color: colors.textTertiary }]}>{FIRST_USE_TEXT}</Text>
+                          <View style={styles.rememberRow}>
+                            <Text style={[type.footnote, { color: colors.textSecondary, flex: 1 }]}>Sonraki kart satışlarında bu hesabı kullan</Text>
+                            <Switch testID="pos-card-account-remember" value={rememberCard} disabled={locked} onValueChange={setRememberCard} trackColor={{ true: colors.primary, false: colors.border }} />
+                          </View>
+                        </>
+                      ) : null}
                     </>
                   ) : null}
                 </>
@@ -620,6 +645,7 @@ export default function PosScreen() {
 }
 
 const styles = StyleSheet.create({
+  rememberRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },
   form: { paddingHorizontal: spacing.lg, gap: spacing.md, marginTop: spacing.md },

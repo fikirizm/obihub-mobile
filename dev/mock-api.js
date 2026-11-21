@@ -715,6 +715,17 @@ http
       const d = posSales.map((x) => x.doc).find((x) => x && x.id === decodeURIComponent(rcm[1]));
       return d ? send(res, 200, d) : send(res, 404, { detail: "Satış fişi bulunamadı." });
     }
+    // Faz C1: satış ekranı ödeme hesapları (başlangıçta ayarsız; adaylar PayTR + Yapı Kredi POS).
+    if (path === "/pos/payment-settings") {
+      state.posPay = state.posPay || { card_account_ids: [], default_card_account_id: null, cash_account_id: null };
+      const cands = [{ id: "a9", name: "PayTR", account_type: "bank", bank_name: "", provider: "paytr", web_payment: true }, { id: "a5", name: "Yapı Kredi POS", account_type: "pos", bank_name: "Yapı Kredi", provider: "", web_payment: false }];
+      const view = () => { const acc = cands.filter((c) => state.posPay.card_account_ids.includes(c.id)); return { ...state.posPay, configured: acc.length > 0, card_accounts: acc,
+        effective_default_card_account_id: acc.some((a) => a.id === state.posPay.default_card_account_id) ? state.posPay.default_card_account_id : null,
+        card_candidates: cands, cash_candidates: [], cash_account: null, cash_account_unavailable: false, payment_provider: "manual" }; };
+      if (req.method === "GET") return send(res, 200, view());
+      let rawS = ""; req.on("data", (c) => (rawS += c));
+      return req.on("end", () => { console.log("WRITE", path, rawS); if (state.member === "1") return send(res, 403, { detail: "Ayarlar modülünde düzenleme yetkiniz yok." }); Object.assign(state.posPay, JSON.parse(rawS || "{}")); send(res, 200, view()); });
+    }
     // --- D1: POS. /__mode?posFail=1 → satış kaydedilir ama yanıt 500 (bir kez).
     if (req.method === "POST" && path === "/pos/sales") {
       let raw = "";
@@ -755,9 +766,11 @@ http
           legs = b.payments.filter((x) => Number(x.amount) > 0).map((x) => ({ method: x.method, amount: Number(x.amount).toFixed(2) }));
         } else legs = [{ method: b.payment_type, amount: Number(b.total).toFixed(2) }];
         const cardLeg = legs.some((l) => l.method === "kart");
-        if (cardLeg && state.posAccts === "2" && !b.card_account_id) return send(res, 400, { code: "POS_CARD_ACCOUNT_REQUIRED", detail: "Birden çok POS hesabı var; kart ödemesinin yazılacağı hesabı seçin." });
+        const pp = state.posPay || { card_account_ids: [] };
+        if (cardLeg && !b.card_account_id && !pp.default_card_account_id) return send(res, 400, { code: "POS_CARD_ACCOUNT_REQUIRED", detail: "Kart ödemesinin yazılacağı hesabı seçin. Her satışta sormaması için Ayarlar → Satış ekranı ödeme hesapları'ndan varsayılanı belirleyin." });
+        if (cardLeg && b.card_account_id && pp.card_account_ids.length && !pp.card_account_ids.includes(b.card_account_id)) return send(res, 422, { code: "POS_CARD_ACCOUNT_NOT_ALLOWED", detail: "Bu hesap satış ekranının kart hesapları arasında değil. Listeden bir hesap seçin." });
         for (const it of b.items) { const p = products.find((x) => x.id === it.product_id); if (p) p.stock -= it.quantity; }
-        const cardName = b.card_account_id === "a5" ? "Yapı Kredi POS" : "POS (Kart)";
+        const cardName = b.card_account_id === "a5" ? "Yapı Kredi POS" : b.card_account_id === "a9" ? "PayTR" : "POS (Kart)";
         const pending = state.posPending === "1";
         const resp = { id: "s" + (posSales.length + 1), sale_number: "POS-20261112-" + String(posSales.length + 1).padStart(4, "0"), created_at: new Date().toISOString(), total: b.total, payment_type: b.payment_type, customer_name: b.customer_name, item_count: b.items.length,
           cash_status: pending ? "pending" : "posted",
