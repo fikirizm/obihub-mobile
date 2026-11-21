@@ -6,6 +6,8 @@ import { request } from "./api";
 export type ProductIdentity = {
   id: string;
   name: string;
+  shortDescription?: string;
+  description?: string;
   sku?: string | null;
   barcode?: string | null;
 };
@@ -31,7 +33,10 @@ export const STOCK_MOVEMENTS_PAGE = 20;
 
 export async function getProductIdentity(token: string, productId: string): Promise<ProductIdentity> {
   const p = await request<any>(`/products/${encodeURIComponent(productId)}`, {}, token);
-  return { id: String(p?.id || productId), name: String(p?.name || ""), sku: p?.sku ?? "", barcode: p?.barcode ?? "" };
+  return {
+    id: String(p?.id || productId), name: String(p?.name || ""), sku: p?.sku ?? "", barcode: p?.barcode ?? "",
+    shortDescription: String(p?.short_description ?? ""), description: String(p?.description ?? ""),
+  };
 }
 
 // Sunucu PATCH gövdesinde yalnızca beyaz listedeki alanları yazar; burada yalnızca kimlik alanları gönderilir
@@ -39,15 +44,21 @@ export async function getProductIdentity(token: string, productId: string): Prom
 export async function updateProductIdentity(
   token: string,
   productId: string,
-  data: { name?: string; sku?: string; barcode?: string }
+  data: { name?: string; sku?: string; barcode?: string; short_description?: string; description?: string }
 ): Promise<ProductIdentity> {
   // Yalnızca verilen (değişen) alanlar gönderilir; dokunulmayan alanın eski kopyası sunucudaki değerin üstüne yazılmaz.
   const body: Record<string, string> = {};
   if (typeof data.name === "string") body.name = data.name;
   if (typeof data.sku === "string") body.sku = data.sku;
   if (typeof data.barcode === "string") body.barcode = data.barcode;
+  // Faz A M10: kısa ve (düz metinse) detaylı açıklama.
+  if (typeof data.short_description === "string") body.short_description = data.short_description;
+  if (typeof data.description === "string") body.description = data.description;
   const p = await request<any>(`/products/${encodeURIComponent(productId)}`, { method: "PATCH", body: JSON.stringify(body) }, token);
-  return { id: String(p?.id || productId), name: String(p?.name ?? data.name ?? ""), sku: p?.sku ?? data.sku ?? "", barcode: p?.barcode ?? data.barcode ?? "" };
+  return {
+    id: String(p?.id || productId), name: String(p?.name ?? data.name ?? ""), sku: p?.sku ?? data.sku ?? "", barcode: p?.barcode ?? data.barcode ?? "",
+    shortDescription: String(p?.short_description ?? data.short_description ?? ""), description: String(p?.description ?? data.description ?? ""),
+  };
 }
 
 // Yeni → eski sıralı sayfa. Devamı olup olmadığını anlamak için bir satır fazla istenir

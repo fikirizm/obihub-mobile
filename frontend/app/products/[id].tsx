@@ -7,6 +7,7 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { isUncertainWrite } from "../../src/api-finans";
 import { channelLinkFor, channelPushBadge, getProductLinks, updateProductPricing, type ChannelPush, type ProductLinks, type PushBadge } from "../../src/api-urun-stok";
+import { WebStoreProductCard } from "../../src/components/WebStoreProductCard";
 import { discountView, priceEditPlan, resolveDiscount, type Discount } from "../../src/product-discount";
 import { getCatalog, setChannelPrice, setChannelStock, setProductPrice, setProductStock, SYNC_NONE } from "../../src/api";
 import { recallChannels, recallProduct, rememberCatalog } from "../../src/catalogCache";
@@ -691,12 +692,12 @@ export default function ProductDetailScreen() {
               testID="product-edit-info"
               onPress={() => router.push({ pathname: "/products/edit", params: { id: product.id } } as any)}
               accessibilityRole="button"
-              accessibilityLabel="Ad ve kodları düzenle"
+              accessibilityLabel="Ad, kod ve açıklamayı düzenle"
               style={styles.editInfo}
             >
               <TagIcon size={16} color={ON_HERO.text} />
               <Text style={styles.editInfoText} numberOfLines={1}>
-                Ad ve kodları düzenle
+                Ad, kod ve açıklama
               </Text>
               <ArrowRightIcon size={16} color={ON_HERO.soft} />
             </PressableScale>
@@ -740,6 +741,12 @@ export default function ProductDetailScreen() {
                 <ListRow divider testID="product-discount-remove" title="İndirimi kaldır" onPress={busyKey ? undefined : removeDiscount} />
               ) : null}
             </Card>
+          </SafeAnimatedView>
+        ) : null}
+
+        {token ? (
+          <SafeAnimatedView entering={FadeInDown.delay(55).duration(380)}>
+            <WebStoreProductCard token={token} productId={product.id} canPush={canEditInfo} />
           </SafeAnimatedView>
         ) : null}
 

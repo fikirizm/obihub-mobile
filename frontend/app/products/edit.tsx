@@ -5,6 +5,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { getProductIdentity, updateProductIdentity } from "../../src/api-urun-stok";
+import { isPlainText, plainPreview } from "../../src/product-text";
 import { recallProduct, rememberCatalog } from "../../src/catalogCache";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, type } from "../../src/theme/tokens";
@@ -29,9 +30,12 @@ export default function ProductEditScreen() {
   const allowed = canManage(user, "catalog");
 
   // Kayıtlı (sunucudaki) değerler: değişiklik olup olmadığı bunlara göre anlaşılır.
-  const [saved, setSaved] = useState<{ name: string; sku: string; barcode: string } | null>(
-    cached ? { name: cached.name || "", sku: String(cached.sku || ""), barcode: String(cached.barcode || "") } : null
+  // Açıklamalar önbellekte yok: sunucudan okunana kadar null (okunmadan boşla üstüne yazılmaz).
+  const [saved, setSaved] = useState<{ name: string; sku: string; barcode: string; short: string | null; desc: string | null } | null>(
+    cached ? { name: cached.name || "", sku: String(cached.sku || ""), barcode: String(cached.barcode || ""), short: null, desc: null } : null
   );
+  const [short, setShort] = useState("");
+  const [desc, setDesc] = useState("");
   const [name, setName] = useState(saved?.name || "");
   const [sku, setSku] = useState(saved?.sku || "");
   const [barcode, setBarcode] = useState(saved?.barcode || "");
@@ -40,7 +44,7 @@ export default function ProductEditScreen() {
   const [busy, setBusy] = useState(false);
   // Kullanıcının yazdığı alanın üstüne sunucudan gelen değer yazılmaz; dokunulmamış alanlar güncel değerle tazelenir
   // (eski kopyadaki dokunulmamış SKU / barkod kaydederken sunucudaki güncel değeri ezmesin).
-  const touched = useRef({ name: false, sku: false, barcode: false });
+  const touched = useRef({ name: false, sku: false, barcode: false, short: false, desc: false });
   const sending = useRef(false);
 
   useEffect(() => {
@@ -52,8 +56,10 @@ export default function ProductEditScreen() {
     getProductIdentity(token, id)
       .then((p) => {
         if (!alive) return;
-        const fresh = { name: p.name || "", sku: String(p.sku || ""), barcode: String(p.barcode || "") };
+        const fresh = { name: p.name || "", sku: String(p.sku || ""), barcode: String(p.barcode || ""), short: p.shortDescription ?? "", desc: p.description ?? "" };
         setSaved(fresh);
+        if (!touched.current.short) setShort(fresh.short);
+        if (!touched.current.desc) setDesc(fresh.desc);
         if (!touched.current.name) setName(fresh.name);
         if (!touched.current.sku) setSku(fresh.sku);
         if (!touched.current.barcode) setBarcode(fresh.barcode);
@@ -69,7 +75,7 @@ export default function ProductEditScreen() {
     };
   }, [token, id, allowed]);
 
-  const edit = (field: "name" | "sku" | "barcode", setter: (v: string) => void) => (v: string) => {
+  const edit = (field: "name" | "sku" | "barcode" | "short" | "desc", setter: (v: string) => void) => (v: string) => {
     touched.current[field] = true;
     setter(v);
   };
@@ -103,8 +109,12 @@ export default function ProductEditScreen() {
 
   const next = { name: name.trim(), sku: sku.trim(), barcode: barcode.trim() };
   const anyTouched = touched.current.name || touched.current.sku || touched.current.barcode;
+  // Detaylı açıklama biçimliyse (HTML) mobilde düzenlenmez; web panelinde düzenlenir.
+  const descEditable = saved.desc !== null && isPlainText(saved.desc);
+  const shortChanged = saved.short !== null && short.trim() !== saved.short.trim();
+  const descChanged = descEditable && saved.desc !== null && desc.trim() !== saved.desc.trim();
   const nameError = next.name.length === 0 ? "Ürün adı boş bırakılamaz." : null;
-  const changed = next.name !== saved.name.trim() || next.sku !== saved.sku.trim() || next.barcode !== saved.barcode.trim();
+  const changed = next.name !== saved.name.trim() || next.sku !== saved.sku.trim() || next.barcode !== saved.barcode.trim() || shortChanged || descChanged;
   const codeChanged = next.sku !== saved.sku.trim() || next.barcode !== saved.barcode.trim();
 
   const submit = async () => {
@@ -113,12 +123,14 @@ export default function ProductEditScreen() {
     setBusy(true);
     try {
       // Yalnızca değişen alanlar yazılır (eski kopyadaki dokunulmamış alan sunucudaki güncel değeri ezmesin).
-      const patch: { name?: string; sku?: string; barcode?: string } = {};
+      const patch: { name?: string; sku?: string; barcode?: string; short_description?: string; description?: string } = {};
+      if (shortChanged) patch.short_description = short.trim();
+      if (descChanged) patch.description = desc.trim();
       if (next.name !== saved.name.trim()) patch.name = next.name;
       if (next.sku !== saved.sku.trim()) patch.sku = next.sku;
       if (next.barcode !== saved.barcode.trim()) patch.barcode = next.barcode;
       const res = await updateProductIdentity(token, id, patch);
-      const written = { name: res.name || next.name, sku: String(res.sku ?? next.sku), barcode: String(res.barcode ?? next.barcode) };
+      const written = { name: res.name || next.name, sku: String(res.sku ?? next.sku), barcode: String(res.barcode ?? next.barcode), short: res.shortDescription ?? short.trim(), desc: res.description ?? desc.trim() };
       // Liste ve detay ekranı yeni değerleri önbellekten okur.
       const row = recallProduct(id);
       if (row) rememberCatalog([{ ...row, name: written.name, sku: written.sku, barcode: written.barcode }], []);
@@ -211,6 +223,41 @@ export default function ProductEditScreen() {
             style={inputStyle}
           />
 
+          <Text style={[type.callout, styles.label, { color: colors.textSecondary }]}>Kısa açıklama</Text>
+          <TextInput
+            testID="product-edit-short"
+            value={short}
+            onChangeText={edit("short", setShort)}
+            editable={saved.short !== null}
+            placeholder={saved.short === null ? "Yükleniyor…" : "Ürün listesinde ve sepette görünen kısa metin"}
+            placeholderTextColor={colors.textTertiary}
+            accessibilityLabel="Kısa açıklama"
+            multiline
+            maxLength={500}
+            style={[inputStyle, styles.multi]}
+          />
+
+          <Text style={[type.callout, styles.label, { color: colors.textSecondary }]}>Detaylı açıklama</Text>
+          {saved.desc !== null && !descEditable ? (
+            <View testID="product-edit-desc-locked" style={[styles.banner, { backgroundColor: colors.surfaceMuted }]}>
+              <Text style={[type.footnote, { color: colors.textSecondary }]} numberOfLines={6}>{plainPreview(saved.desc)}</Text>
+              <Text style={[type.caption, { color: colors.textTertiary, marginTop: spacing.xs }]}>Biçimli açıklama; biçimi bozulmasın diye web panelinden düzenlenir.</Text>
+            </View>
+          ) : (
+            <TextInput
+              testID="product-edit-desc"
+              value={desc}
+              onChangeText={edit("desc", setDesc)}
+              editable={saved.desc !== null}
+              placeholder={saved.desc === null ? "Yükleniyor…" : "Ürün sayfasında görünen ayrıntılı metin"}
+              placeholderTextColor={colors.textTertiary}
+              accessibilityLabel="Detaylı açıklama"
+              multiline
+              maxLength={5000}
+              style={[inputStyle, styles.multiLong]}
+            />
+          )}
+
           {codeChanged ? (
             <View style={[styles.banner, { backgroundColor: colors.amberSoft }]} testID="product-edit-code-warning">
               <Text style={[type.footnote, { color: colors.amber }]}>
@@ -248,6 +295,8 @@ const styles = StyleSheet.create({
   label: { marginTop: spacing.lg },
   input: { borderWidth: 1, borderRadius: radius.md, paddingHorizontal: spacing.md, minHeight: 48, fontSize: 15, marginTop: spacing.xs },
   nameInput: { minHeight: 72, paddingTop: spacing.sm, paddingBottom: spacing.sm },
+  multi: { minHeight: 72, paddingTop: spacing.sm, paddingBottom: spacing.sm, textAlignVertical: "top" },
+  multiLong: { minHeight: 140, paddingTop: spacing.sm, paddingBottom: spacing.sm, textAlignVertical: "top" },
   banner: { marginTop: spacing.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.md },
   note: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.lg },
   noteText: { flex: 1, minWidth: 0 },

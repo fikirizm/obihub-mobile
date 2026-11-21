@@ -88,7 +88,10 @@ products[0].images = ["https://picsum.photos/seed/obi1/300", "https://picsum.pho
 products[0].image_url = products[0].images[0];
 // Faz A: p2 için 2 adet web sepetinde rezerve (satılabilir = stok − rezerv).
 products[1].web_reserved_quantity = 2;
-// Faz A M4: p1 indirimli (normal 150, satış 99,90).
+// Faz A M4: p1 indirimli (normal 150, satış 99,90). M10: p1 biçimli açıklama, p2 düz açıklama.
+products[0].description = "<p>Pamuklu <strong>kupa</strong></p><ul><li>Bulaşık makinesinde yıkanabilir</li></ul>";
+products[1].description = "Düz metin açıklama.";
+products[1].short_description = "Kısa açıklama.";
 products[0].regular_price = 150;
 // Trendyol mağaza ürünleri (source-products): p6 için barkodu aynı olan aday ve barkodu farklı bir aday.
 const tySource = [
@@ -634,6 +637,19 @@ http
       { id: "c2bbbbbbbbb", state: "completed", total: "349.00", test_mode: false, created_at: new Date(Date.now() - 864e5).toISOString(), review_reason: null, needs_attention: false },
       { id: "c3ccccccccc", state: "payment_review", total: "99.00", test_mode: true, created_at: new Date(Date.now() - 2 * 864e5).toISOString(), review_reason: "AMOUNT_MISMATCH", needs_attention: false } ] });
     if (path === "/settings/website/members") return send(res, 200, { revision: 1, enabled: true, email_available: true, member_count: 12 });
+    // Faz A M10: ürünün ObiHub web sitesi durumu ve tek ürün gönderme.
+    let ipm;
+    if (req.method === "GET" && (ipm = path.match(/^\/settings\/website\/integration\/products\/([^/]+)$/))) {
+      const p = products.find((x) => x.id === decodeURIComponent(ipm[1]));
+      if (!p) return send(res, 404, { code: "PRODUCT_NOT_FOUND", detail: "Ürün bulunamadı." });
+      const matched = Boolean(p.web_matched);
+      return send(res, 200, { provider: "obihub_web", product_id: p.id, external_id: matched ? p.id : null, domain: "magaza.ornek.test", connected: true, matched,
+        selected: matched, ready: matched, published: matched, state: matched ? "ready" : "not_sent", reason: matched ? null : null, url: matched ? "https://magaza.ornek.test/#/product/" + p.id : null });
+    }
+    if (req.method === "POST" && path === "/settings/website/integration/publish") {
+      let rawP = ""; req.on("data", (c) => (rawP += c));
+      return req.on("end", () => { const b = JSON.parse(rawP || "{}"); console.log("WRITE", path, rawP); for (const id of b.product_ids || []) { const p = products.find((x) => x.id === id); if (p) p.web_matched = true; } send(res, 202, { queued: (b.product_ids || []).length }); });
+    }
     let wtm;
     if (req.method === "POST" && (wtm = path.match(/^\/settings\/website\/transfers\/([^/]+)\/confirm$/))) {
       const o = orders.find((x) => x.id === decodeURIComponent(wtm[1]));
@@ -834,7 +850,7 @@ http
           : x.id === "p3"
           ? { i2: { provider: "trendyol", ok: null, state: "pending", at: new Date().toISOString(), code: null, detail: null } }
           : {};
-      const view = () => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, price: p.price, regular_price: p.regular_price ?? p.price, channel_push: pushFor(p), channel_links: p.links, channel_details: p.details, images: p.images || [], image_url: p.image_url || null, channel_sales_status: p.sales || {} });
+      const view = () => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, price: p.price, regular_price: p.regular_price ?? p.price, short_description: p.short_description ?? "", description: p.description ?? "", channel_push: pushFor(p), channel_links: p.links, channel_details: p.details, images: p.images || [], image_url: p.image_url || null, channel_sales_status: p.sales || {} });
       if (req.method === "GET") return send(res, 200, view());
       let raw = "";
       req.on("data", (c) => (raw += c));
@@ -846,6 +862,8 @@ http
         // Faz A M4: indirim (price satış, regular_price normal fiyat).
         if (typeof b.price === "number") p.price = b.price;
         if (typeof b.regular_price === "number") p.regular_price = b.regular_price;
+        if (typeof b.short_description === "string") p.short_description = b.short_description;
+        if (typeof b.description === "string") p.description = b.description;
         console.log("WRITE", path, raw);
         send(res, 200, view());
       });
