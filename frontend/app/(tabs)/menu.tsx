@@ -171,6 +171,17 @@ export default function MenuScreen() {
               onPress={() => router.push("/reports")}
             />
           ) : null}
+          {canAccess(user, "reports") ? (
+            <ListRow
+              testID="menu-finance-reports"
+              divider
+              leading={<IconTile tint={colors.violetSoft}><ChartIcon size={18} color={colors.violet} /></IconTile>}
+              title="Finans raporları"
+              subtitle="Satışlar, giderler, kasa/banka, nakit akışı"
+              chevron
+              onPress={() => router.push("/finance-reports" as Href)}
+            />
+          ) : null}
           {canAccess(user, "catalog") ? (
             <ListRow
               testID="menu-jobs"

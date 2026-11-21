@@ -329,7 +329,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -1181,6 +1181,73 @@ http
         entries.unshift({ id: "e" + Date.now(), account_id: acc.id, entry_type: b.entry_type, amount: b.amount, entry_date: b.entry_date, description: b.description });
         send(res, 200, { ok: true });
       });
+    // Finans raporları (backend/reports_period.py, reports_cash.py); örnekler web testlerinden. /__mode?reportBig=1 → döküm 409.
+    if ((path === "/reports/sales" || path === "/reports/expenses") && req.method === "GET") {
+      const sales = path.endsWith("sales");
+      const from = url.searchParams.get("from"), to = url.searchParams.get("to"), group = url.searchParams.get("group") || "month";
+      const r = (o) => ({ vat_known: true, is_return: false, origin: "obihub", category_name: "", tag_names: [], other_taxes: "0.00", ...o });
+      const body = sales ? {
+        period: { from, to }, group,
+        currencies: [
+          { currency: "TRY", totals: { count: 10, return_count: 2, net: "1750.00", vat: "342.00", other_taxes: "5.00", gross: "2197.00", vat_unknown_count: 1, vat_unknown_gross: "100.00" },
+            periods: [{ key: from, to: from, count: 6, net: "1000.00", vat: "200.00", gross: "1250.00" }, { key: to, to, count: 4, net: "750.00", vat: "142.00", gross: "947.00" }],
+            customers: [{ name: "Elif Kaya", count: 2, net: "1100.00", vat: "220.00", gross: "1320.00" }, { name: "Genel Müşteri", count: 8, net: "650.00", vat: "122.00", gross: "877.00" }],
+            categories: [{ name: "Mağaza Satışı", count: 2, net: "150.00", vat: "30.00", gross: "185.00" }, { name: "Kategorisiz", count: 8, net: "1600.00", vat: "312.00", gross: "2012.00" }] },
+          { currency: "USD", totals: { count: 1, return_count: 0, net: "100.00", vat: "20.00", other_taxes: "0.00", gross: "120.00", vat_unknown_count: 0, vat_unknown_gross: "0.00" },
+            periods: [{ key: from, to, count: 1, net: "100.00", vat: "20.00", gross: "120.00" }], customers: [{ name: "Yabancı Ltd", count: 1, net: "100.00", vat: "20.00", gross: "120.00" }], categories: [],
+            try_equivalent: { gross: "3900.00", missing_rate_count: 1 } }],
+        rows: [r({ kind: "sales_invoice", number: "FTR-S1", date: from, party_name: 'Elif "Kaya"; Ltd', currency: "TRY", net: "100.00", vat: "20.00", gross: "120.00" }),
+          r({ kind: "sales_invoice", number: "FTR-R1", date: to, party_name: "Can Öztürk", currency: "TRY", is_return: true, net: "-40.00", vat: "-8.00", gross: "-48.00" }),
+          r({ kind: "pos_sale", number: "POS-1", date: to, party_name: "Genel Müşteri", currency: "TRY", net: "100.00", vat: "20.00", gross: "120.00" }),
+          r({ kind: "sales_invoice", number: "USD-1", date: from, party_name: "Yabancı Ltd", currency: "USD", net: "100.00", vat: "20.00", gross: "120.00" })],
+      } : {
+        period: { from, to }, group,
+        currencies: [{ currency: "TRY", totals: { count: 5, return_count: 1, net: "900.00", vat: "180.00", other_taxes: "0.00", gross: "1200.00", vat_unknown_count: 1, vat_unknown_gross: "120.00" },
+          periods: [{ key: from, to, count: 5, net: "900.00", vat: "180.00", gross: "1200.00" }],
+          categories: [{ name: "Kira", count: 3, net: "700.00", vat: "140.00", gross: "840.00" }],
+          suppliers: [{ name: "Kiralayan A.Ş.", count: 1, net: "500.00", vat: "100.00", gross: "600.00" }],
+          tags: [{ name: "Ofis", count: 2, net: "800.00", vat: "160.00", gross: "960.00" }, { name: "Etiketsiz", count: 3, net: "100.00", vat: "20.00", gross: "240.00" }] }],
+        rows: [r({ kind: "purchase_invoice", number: "KR-1", date: from, party_name: "Kiralayan A.Ş.", currency: "TRY", category_name: "Kira", tag_names: ["Ofis"], net: "500.00", vat: "100.00", gross: "600.00" }),
+          r({ kind: "expense_record", number: null, description: "Kırtasiye", date: to, currency: "TRY", net: "300.00", vat: "60.00", gross: "360.00" })],
+      };
+      if (url.searchParams.get("rows") === "true") {
+        if (state.reportBig === "1") return send(res, 409, { code: "REPORT_TOO_LARGE", detail: "Çok büyük" });
+        return send(res, 200, body);
+      }
+      return send(res, 200, { ...body, rows: undefined });
+    }
+    if (path === "/reports/cash-bank" && req.method === "GET") {
+      const acc = (id, name, currency, o, i, out, close, over = {}) => ({ id, name, account_type: "bank", currency, archived: false, read_only: false, opening: o, in: i, out, net: (Number(i) - Number(out)).toFixed(2), closing: close, transfer_in: "0.00", transfer_out: "0.00", count: 2, before_opening_count: 0, ...over });
+      return send(res, 200, { date_from: url.searchParams.get("date_from"), date_to: url.searchParams.get("date_to"), as_of: "2026-11-22",
+        accounts: [acc("cash", "Nakit Kasa", "TRY", "150.00", "40.00", "22.00", "168.00", { account_type: "cash", transfer_out: "15.00" }), acc("bank", "Ana Banka", "TRY", "0.00", "15.00", "0.00", "15.00", { transfer_in: "15.00" }),
+          acc("old", "Kapanan Banka", "TRY", "0.00", "5.00", "0.00", "5.00", { archived: true, before_opening_count: 2 }), acc("usd", "Dolar Hesabı", "USD", "50.00", "20.00", "0.00", "70.00")],
+        currencies: [{ currency: "TRY", opening: "150.00", in: "60.00", out: "22.00", net: "38.00", closing: "188.00", transfer_in: "15.00", transfer_out: "15.00", count: 5, account_count: 3 },
+          { currency: "USD", opening: "50.00", in: "20.00", out: "0.00", net: "20.00", closing: "70.00", transfer_in: "0.00", transfer_out: "0.00", count: 1, account_count: 1 }], scope: { source: "finance_entries" } });
+    }
+    if (path === "/reports/cashflow" && req.method === "GET") {
+      const view = url.searchParams.get("view") === "month" ? "month" : "week";
+      const Z = Array(12).fill("0.00"), vals = (mm) => Z.map((z, i) => mm[i] || z);
+      const row = (key, label, direction, values, total, overdue = "0.00", later = "0.00") => ({ key, label, direction, values, total, overdue, later, count: 1 });
+      const periods = Array.from({ length: 12 }, (_, i) => { if (view === "month") { const s = new Date(Date.UTC(2026, 10 + i, 1)), e = new Date(Date.UTC(2026, 11 + i, 0)); return { index: i, start: s.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) }; }
+        const s = new Date(Date.UTC(2026, 10, 16 + 7 * i)), e = new Date(Date.UTC(2026, 10, 22 + 7 * i)); return { index: i, start: s.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) }; });
+      return send(res, 200, { as_of: "2026-11-22", view, periods, scope: { starting_balance: "active_accounts_balance_as_of_today" },
+        currencies: [{ currency: "TRY", starting_balance: "500.00",
+          rows: [row("receivables", "Beklenen tahsilatlar", "in", vals({ 1: "100.00" }), "100.00", "200.00", "300.00"), row("cheques_received", "Alınan çekler (portföy)", "in", vals({ 3: "500.00" }), "500.00", "40.00"),
+            row("recurring_in", "Tekrarlayan satışlar", "in", vals({ 0: "1000.00", 5: "1000.00" }), "2000.00"), row("scheduled_in", "İleri tarihli girişler", "in", vals({ 2: "75.00" }), "75.00"),
+            row("payables", "Beklenen ödemeler", "out", vals({ 2: "250.00" }), "250.00", "70.00"), row("cheques_issued", "Verilen çekler", "out", vals({ 2: "300.00" }), "300.00"),
+            row("recurring_out", "Tekrarlayan giderler", "out", vals({ 0: "10.00", 1: "10.00" }), "20.00"), row("scheduled_out", "İleri tarihli çıkışlar", "out", vals({ 4: "40.00" }), "40.00")],
+          net: vals({ 0: "990.00", 1: "90.00", 2: "-475.00", 3: "500.00", 4: "-40.00", 5: "1000.00" }),
+          balance: ["1490.00", "1580.00", "1105.00", "1605.00", "1565.00", "2565.00", "2565.00", "2565.00", "2565.00", "2565.00", "2565.00", "2565.00"],
+          totals: { in: "2675.00", out: "610.00", net: "2065.00" }, overdue: { in: "240.00", out: "70.00", net: "170.00" }, ending_balance: "2565.00",
+          items: [{ id: "L2", row: "receivables", direction: "in", date: "2026-11-12", amount: "200.00", number: "FTR-L2", party: "Elif Kaya", link: { type: "sales_invoice", id: "L2" }, overdue: true, later: false, period: null },
+            { id: "L1", row: "receivables", direction: "in", date: "2026-11-25", amount: "100.00", number: "FTR-L1", party: "Elif Kaya", link: { type: "sales_invoice", id: "L1" }, overdue: false, later: false, period: 1 },
+            { id: "R0", row: "recurring_in", direction: "in", date: "2026-11-18", amount: "1000.00", number: null, party: null, label: "Aylık bakım", link: { type: "recurring_plan", id: "rp1" }, overdue: false, later: false, period: 0 },
+            { id: "S2", row: "scheduled_in", direction: "in", date: "2026-12-01", amount: "75.00", number: null, party: "Ana Banka", link: { type: "cash_account", id: "bank" }, overdue: false, later: false, period: 2 },
+            { id: "D4", row: "scheduled_out", direction: "out", date: "2026-12-15", amount: "40.00", number: "GD-4", party: "Tedarikçi X", link: { type: "expense_draft", id: "d4" }, overdue: false, later: false, period: 4 },
+            { id: "P1", row: "payables", direction: "out", date: "2026-12-02", amount: "250.00", number: "NO-p1", party: "Tedarikçi X", link: { type: "expense_invoice", ref: "obihub:p1" }, overdue: false, later: false, period: 2 }] },
+          { currency: "USD", starting_balance: "50.00", rows: [row("receivables", "Beklenen tahsilatlar", "in", vals({ 1: "80.00" }), "80.00")], net: vals({ 1: "80.00" }),
+            balance: Z.map((_, i) => (i === 0 ? "50.00" : "130.00")), totals: { in: "80.00", out: "0.00", net: "80.00" }, overdue: { in: "0.00", out: "0.00", net: "0.00" }, ending_balance: "130.00", items: [] }] });
+    }
     if (path === "/warehouses" && req.method === "GET")
       return send(res, 200, { items: [{ id: "w1", name: "Ana depo", is_default: true }, { id: "w2", name: "Mağaza deposu" }, { id: "w3", name: "Eski depo", archived: true }] });
     // Pazaryeri iade talepleri (routers/marketplace_returns.py).

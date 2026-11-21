@@ -63,6 +63,7 @@ const ROUTE_AREAS: Record<string, Area[]> = {
   // Netgsm SMS: GET /netgsm Ayarlar modülüyle açılır (team_access ("netgsm","mod",("settings",))).
   sms: ["settings"],
   reports: ["reports"],
+  "finance-reports": ["reports"],
 };
 
 export function canOpenRoute(user: User | null | undefined, firstSegment: string): boolean {
