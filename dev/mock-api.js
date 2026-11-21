@@ -171,6 +171,13 @@ const mpReturns = [
   { id: "mr3", provider: "trendyol", order_number: "TY-10002", state: "rejected", state_label: "İade reddedildi", claimed_at: "2026-11-15T08:00:00Z", reason: "",
     lines: [{ barcode: "8690000000005", quantity: 1 }], stock_advice: { state: "none", message: "" } },
 ];
+// Çalışanlar (mock).
+const employees = [
+  { id: "emp-1", name: "Ece Yılmaz", title: "Kasiyer", phone: "0532 111 22 33", email: "", iban: "", notes: "", archived: false,
+    entries: [{ id: "x1", date: "2026-11-10", label: "Avans", side: "debit", amount: "500.00", currency: "TRY", kind: "payment", reversed: false, transaction_id: "tx1", can_void: true, reference: "Nakit Kasa" },
+      { id: "x2", date: "2026-11-18", label: "Fatura OK-77 cebinden", side: "credit", amount: "1250.50", currency: "TRY", kind: "accrual", reversed: false, transaction_id: null, can_void: false, pocket: true }] },
+  { id: "emp-2", name: "Can Demir", title: "Depo", phone: "", email: "", iban: "", notes: "", archived: false, entries: [] },
+];
 // KDV açılış devri (mock).
 const vatCarry = { opening: null };
 // Netgsm SMS durumu (mock; gerçek şifre tutulmaz).
@@ -1321,6 +1328,54 @@ http
       if (!inc.length) return send(res, 400, { detail: "Etiketi basılacak Yurtiçi gönderisi yok." });
       return send(res, 200, { success: true, format: "pdf", filename: "yurtici-etiket.pdf", data: Buffer.from("%PDF-1.4\n%mock\n").toString("base64"), included: inc, skipped: [] });
     });
+    // Çalışanlar (backend/routers/employees.py). Bakiye = borç − alacak (eksi: çalışana borcumuz).
+    if (path.startsWith("/employees")) {
+      const bal = (e) => { const v = e.entries.filter((x) => !x.reversed).reduce((a, x) => a + (x.side === "debit" ? 1 : -1) * Number(x.amount), 0);
+        return { amount: Math.abs(v).toFixed(2), currency: "TRY", direction: v > 0.004 ? "they_owe" : v < -0.004 ? "we_owe" : "none" }; };
+      const view = (e) => ({ id: e.id, name: e.name, title: e.title, email: e.email, phone: e.phone, iban: e.iban, notes: e.notes, archived: e.archived, balance: bal(e),
+        statement: { items: [...e.entries].reverse(), truncated: false } });
+      let em;
+      if (path === "/employees" && req.method === "GET") {
+        const arch = url.searchParams.get("archived") === "1";
+        const items = employees.filter((e) => !!e.archived === arch).map(view);
+        const sum = (d) => items.filter((x) => x.balance.direction === d).reduce((a, x) => a + Number(x.balance.amount), 0).toFixed(2);
+        return send(res, 200, { items, summary: { count: items.length, currency: "TRY", we_owe: sum("we_owe"), they_owe: sum("they_owe") } });
+      }
+      if (path === "/employees" && req.method === "POST") return readBody((b) => {
+        if (!String(b.name || "").trim()) return send(res, 422, { code: "EMPLOYEE_NAME_INVALID", detail: "Çalışanın adını girin (en çok 120 karakter)." });
+        const k = req.headers["idempotency-key"]; const prev = employees.find((e) => e.key && e.key === k); if (prev) return send(res, 200, view(prev));
+        const e = { id: "emp-" + Date.now(), key: k, ...b, archived: false, entries: [] }; employees.push(e); console.log("WRITE employee", JSON.stringify(b)); return send(res, 200, view(e));
+      });
+      if ((em = path.match(/^\/employees\/([^/]+)$/))) {
+        const e = employees.find((x) => x.id === em[1]); if (!e) return send(res, 404, { code: "EMPLOYEE_NOT_FOUND", detail: "Çalışan bulunamadı." });
+        if (req.method === "GET") return send(res, 200, view(e));
+        if (req.method === "PUT") return readBody((b) => { Object.assign(e, b); return send(res, 200, view(e)); });
+      }
+      if ((em = path.match(/^\/employees\/([^/]+)\/transactions$/)) && req.method === "POST") return readBody((b) => {
+        const e = employees.find((x) => x.id === em[1]); if (!e) return send(res, 404, { code: "EMPLOYEE_NOT_FOUND", detail: "Çalışan bulunamadı." });
+        const k = req.headers["idempotency-key"]; if (!k) return send(res, 400, { code: "IDEMPOTENCY_KEY_REQUIRED", detail: "İşlem anahtarı gerekli." });
+        if (e.archived) return send(res, 409, { code: "EMPLOYEE_ARCHIVED", detail: "Bu çalışan arşivde. İşlem için önce arşivden çıkarın." });
+        const acc = accounts.find((a) => a.id === b.account_id); if (!acc || acc.currency !== "TRY") return send(res, 422, { code: "EMPLOYEE_ACCOUNT_CURRENCY", detail: "Çalışan ödemeleri TL kasa ya da banka hesabından yapılır. TL bir hesap seçin." });
+        if (e.entries.some((x) => x.key === k)) return send(res, 200, { replayed: true, employee: view(e) });
+        console.log("WRITE employee txn", k, JSON.stringify(b));
+        const label = { advance: "Avans", salary: "Maaş", bonus: "Prim", payment: "Ödeme" }[b.kind] + (b.period ? ` ${b.period}` : "");
+        const t = "t" + Date.now();
+        if (b.kind === "salary" || b.kind === "bonus") e.entries.push({ id: t + "c", key: k + "c", date: b.date, label: label + " tahakkuku", side: "credit", amount: b.amount, currency: "TRY", kind: "accrual", reversed: false, transaction_id: t, can_void: true });
+        e.entries.push({ id: t + "d", key: k, date: b.date, label, side: "debit", amount: b.amount, currency: "TRY", kind: "payment", reversed: false, transaction_id: t, can_void: true, reference: acc.name });
+        return send(res, 200, { transaction_id: t, replayed: false, balance: bal(e), employee: view(e) });
+      });
+      if ((em = path.match(/^\/employees\/([^/]+)\/transactions\/([^/]+)$/)) && req.method === "DELETE") {
+        const e = employees.find((x) => x.id === em[1]); const rows = e ? e.entries.filter((x) => x.transaction_id === em[2]) : [];
+        if (!rows.length) return send(res, 404, { code: "EMPLOYEE_TXN_NOT_FOUND", detail: "İşlem bulunamadı." });
+        rows.forEach((x) => { x.reversed = true; x.can_void = false; }); return send(res, 200, { employee: view(e) });
+      }
+      if ((em = path.match(/^\/employees\/([^/]+)\/(archive|unarchive)$/)) && req.method === "POST") {
+        const e = employees.find((x) => x.id === em[1]); if (!e) return send(res, 404, { code: "EMPLOYEE_NOT_FOUND", detail: "Çalışan bulunamadı." });
+        if (em[2] === "archive" && bal(e).direction !== "none") return send(res, 409, { code: "EMPLOYEE_BALANCE_OPEN", detail: "Bu çalışanın açık bakiyesi var. Bakiye kapanmadan arşivlenemez." });
+        e.archived = em[2] === "archive"; return send(res, 200, view(e));
+      }
+      return send(res, 404, { detail: "Bulunamadı" });
+    }
     if (path === "/warehouses" && req.method === "GET")
       return send(res, 200, { items: [{ id: "w1", name: "Ana depo", is_default: true }, { id: "w2", name: "Mağaza deposu" }, { id: "w3", name: "Eski depo", archived: true }] });
     // Pazaryeri iade talepleri (routers/marketplace_returns.py).

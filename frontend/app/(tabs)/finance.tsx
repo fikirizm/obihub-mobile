@@ -265,7 +265,7 @@ export default function FinanceScreen() {
           ) : null}
         </Card>
 
-        {billing && (incomingVisible || expenseModuleOn) ? (
+        {billing ? (
           <>
             <SectionTitle title="Giderler" />
             <Card style={styles.block}>
@@ -290,6 +290,15 @@ export default function FinanceScreen() {
                   onPress={() => router.push("/expenses")}
                 />
               ) : null}
+              <ListRow
+                testID="finance-employees"
+                divider={incomingVisible || expenseModuleOn}
+                leading={<IconTile tint={colors.primarySoft}><UserIcon size={18} color={colors.primary} /></IconTile>}
+                title="Çalışanlar"
+                subtitle="Avans, maaş, prim ve cebinden ödemeler"
+                chevron
+                onPress={() => router.push("/employees" as any)}
+              />
             </Card>
           </>
         ) : null}

@@ -56,6 +56,7 @@ const ROUTE_AREAS: Record<string, Area[]> = {
   // Web: /panel/finans fatura izni ya da rapor görme izniyle açılır.
   cash: ["billing", "reports"],
   expenses: ["billing"],
+  employees: ["billing"],
   incoming: ["billing"],
   customers: ["customers"],
   "pos-receipts": ["orders"],
