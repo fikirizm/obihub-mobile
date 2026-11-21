@@ -7,7 +7,7 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { getDashboardStats, getFinanceOverview, getOrdersPage, getRecentOrders, getSalesChart, getSmartAlerts } from "../../src/api";
-import { canAccess, canManage } from "../../src/auth/permissions";
+import { canAccess, canManage, canSeeReceipts, canSell } from "../../src/auth/permissions";
 import { QuickSaleCard } from "../../src/components/QuickSaleCard";
 import { formatCompact, formatTry } from "../../src/utils";
 import { AnimatedNumber, Sparkline } from "../../src/components/Charts";
@@ -167,7 +167,7 @@ export default function DashboardScreen() {
           contentContainerStyle={{ paddingBottom: spacing.xxl }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(true); }} tintColor={colors.primary} />}
         >
-          {canManage(user, "billing") ? (
+          {canSell(user) ? (
             <SafeAnimatedView entering={FadeInDown.duration(380)}>
               <QuickSaleCard />
             </SafeAnimatedView>

@@ -40,6 +40,11 @@ export function canManage(user: User | null | undefined, area: Area): boolean {
   return perms.includes("*") || perms.includes(`${area}.manage`);
 }
 
+// Faz A (web Sidebar): "Satış Ekranı" (hızlı satış) yalnız Satışlar düzenleme (orders.manage); "Satış Fişleri" orders.view|manage.
+// Sunucu /pos uçlarını Satışlar modülüyle denetler (team_access: ("pos","mod",("sales",))).
+export const canSell = (user: User | null | undefined) => canManage(user, "orders");
+export const canSeeReceipts = (user: User | null | undefined) => canAccess(user, "orders");
+
 // Rota → gereken alanlardan herhangi biri. Listede olmayan rotalar herkese açıktır.
 const ROUTE_AREAS: Record<string, Area[]> = {
   products: ["catalog", "inventory"],
@@ -53,6 +58,7 @@ const ROUTE_AREAS: Record<string, Area[]> = {
   expenses: ["billing"],
   incoming: ["billing"],
   customers: ["customers"],
+  "pos-receipts": ["orders"],
   reports: ["reports"],
 };
 

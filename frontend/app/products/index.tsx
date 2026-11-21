@@ -11,7 +11,7 @@ import {
 import { Image as ExpoImage } from "expo-image";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
-import { canManage } from "../../src/auth/permissions";
+import { canManage, canSell } from "../../src/auth/permissions";
 import { getCatalog, request } from "../../src/api";
 import { consumeCatalogDirty, recallProduct, rememberCatalog } from "../../src/catalogCache";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -98,7 +98,7 @@ export default function ProductsScreen() {
   // Ürün kartı oluşturmak katalog yönetme izni ister.
   const canCreate = canManage(user, "catalog");
   // D1: hızlı satış girişi (PM kararı) fatura/kasa yönetme yetkisinde.
-  const canPos = canManage(user, "billing");
+  const canPos = canSell(user);
   const { colors, shadows } = useTheme();
   const [search, setSearch] = useState("");
   const debounced = useDebounce(search.trim(), 350);

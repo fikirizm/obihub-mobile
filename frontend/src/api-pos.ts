@@ -8,40 +8,20 @@
 import { getPickableAccounts, request } from "./api";
 import { karmaPayments, openAccountFields, posTotalsCents, splitCents, toCents } from "./pos-money";
 import type { CashAccount } from "./types";
+import { catalogPath, exactPosMatch, posProductFromItem, type PosProduct } from "./pos-catalog";
 
-export type PosProduct = { id: string; name: string; sku: string; barcode: string; price: number; vatRate: number; stock: number; imageUrl: string };
+// Faz A: ürünler GET /catalog/items?for=sale (satılabilir = fiziksel − web sepet rezervi). Eşleme ./pos-catalog (saf, birim testli).
+export type { PosProduct };
 
-function productOf(p: any): PosProduct {
-  const vat = Number(p?.vat_rate);
-  return {
-    id: String(p?.id || ""),
-    name: String(p?.name || "Ürün"),
-    sku: String(p?.sku || ""),
-    barcode: String(p?.barcode || ""),
-    price: Number(p?.price) || 0,
-    // Web POSPage varsayılanı (vat_rate ?? 18).
-    vatRate: Number.isFinite(vat) && p?.vat_rate !== null && p?.vat_rate !== undefined ? vat : 18,
-    stock: Number(p?.stock) || 0,
-    imageUrl: /^https?:\/\//i.test(String(p?.image_url || "")) ? String(p.image_url) : "",
-  };
-}
-
-// GET /products?search&limit → düz dizi (ad / SKU / barkod, silinmiş hariç).
 export async function searchPosProducts(token: string, term: string, limit = 20): Promise<PosProduct[]> {
-  const qs = new URLSearchParams({ search: term.trim(), limit: String(limit) });
-  const d = await request<any>(`/products?${qs.toString()}`, { method: "GET" }, token);
-  return (Array.isArray(d) ? d : []).filter((p: any) => p?.id && p.deleted !== true).map(productOf);
+  const d = await request<any>(catalogPath(term, limit), { method: "GET" }, token);
+  return (Array.isArray(d?.items) ? d.items : []).filter((p: any) => p?.id).map(posProductFromItem);
 }
 
-// Barkodla tek ürün: önce birebir barkod, yoksa birebir SKU; birden çok aday varsa null (kullanıcı seçer).
+// Barkodla tek ürün: barkod / EAN / SKU birebir (büyük-küçük harf duyarsız); yoksa null (kullanıcı listeden seçer).
 export async function findByBarcode(token: string, code: string): Promise<{ exact: PosProduct | null; candidates: PosProduct[] }> {
   const list = await searchPosProducts(token, code, 10);
-  const c = code.trim();
-  const byBarcode = list.filter((p) => p.barcode === c);
-  if (byBarcode.length === 1) return { exact: byBarcode[0], candidates: list };
-  const bySku = list.filter((p) => p.sku === c);
-  if (!byBarcode.length && bySku.length === 1) return { exact: bySku[0], candidates: list };
-  return { exact: null, candidates: list };
+  return { exact: exactPosMatch(list, code), candidates: list };
 }
 
 export type CartLine = { product: PosProduct; quantity: number };

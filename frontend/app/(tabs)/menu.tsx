@@ -8,7 +8,7 @@ import { useNotifications } from "../../src/notifications/store";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing, type } from "../../src/theme/tokens";
 import { BellIcon, ChartIcon, LogoutIcon, MailIcon, PackageIcon, RefreshIcon, SettingsIcon, SparkleIcon, TruckIcon, WalletIcon } from "../../src/components/Icons";
-import { canAccess, canManage } from "../../src/auth/permissions";
+import { canAccess, canManage, canSeeReceipts, canSell } from "../../src/auth/permissions";
 import { TabHeader } from "../../src/ui/Header";
 import { useFeedback } from "../../src/ui/Feedback";
 import { Card, IconTile, ListRow, SectionTitle } from "../../src/ui/ListRow";
@@ -52,8 +52,8 @@ export default function MenuScreen() {
 
   const canProducts = canAccess(user, "catalog") || canAccess(user, "inventory");
   const canReports = canAccess(user, "reports");
-  const canPos = canManage(user, "billing");
-  const showOps = canPos || canProducts || canReports || canAccess(user, "catalog") || hepsijet;
+  const canPos = canSell(user);
+  const showOps = canPos || canSeeReceipts(user) || canProducts || canReports || canAccess(user, "catalog") || hepsijet;
 
   const onLogout = async () => {
     const ok = await confirm({
@@ -83,10 +83,21 @@ export default function MenuScreen() {
               onPress={() => router.push("/pos")}
             />
           ) : null}
+          {canSeeReceipts(user) ? (
+            <ListRow
+              testID="menu-pos-receipts"
+              divider={canPos}
+              leading={<IconTile tint={colors.successBg}><WalletIcon size={18} color={colors.success} /></IconTile>}
+              title="Satış Fişleri"
+              subtitle="Mağaza satışları, fiş detayı ve fatura bağlantısı"
+              chevron
+              onPress={() => router.push("/pos-receipts" as Href)}
+            />
+          ) : null}
           {canAccess(user, "catalog") || canAccess(user, "inventory") ? (
             <ListRow
               testID="menu-products"
-              divider={canPos}
+              divider={canPos || canSeeReceipts(user)}
               leading={<IconTile tint={colors.primarySoft}><PackageIcon size={18} color={colors.primary} /></IconTile>}
               title="Ürünler ve stok"
               subtitle="Arama, barkod, stok ve fiyat"

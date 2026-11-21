@@ -68,6 +68,8 @@ export function posErrorAction(e: { status?: number; code?: string; message?: st
   if (code === "IDEMPOTENCY_CONFLICT" || (status === 409 && /farklı bir sepet/i.test(String(e?.message || "")))) return "conflict";
   if (status === 0 || status >= 500) return "retry-same";
   if (code.startsWith("POS_")) return "new-key";
+  // Eski sunucu yedeği: kodsuz 409 rezerv ya da silinmiş fiş reddiyse de kesin ret (hiçbir şey yazılmadı).
+  if (status === 409 && /rezerve|silinmiş|iptal edilmiş|siliniyor/i.test(String(e?.message || ""))) return "new-key";
   if (status === 409) return "retry-same";
   return "new-key";
 }

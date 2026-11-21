@@ -10,12 +10,13 @@ import { createScanGuard } from "../src/scan-guard";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../src/auth/AuthProvider";
-import { canManage } from "../src/auth/permissions";
+import { canSell } from "../src/auth/permissions";
 import { getParties, newIdempotencyKey } from "../src/api";
 import { getUiCapabilities } from "../src/api-gider";
 import { cartTotals, cashPostingText, createPosSale, findByBarcode, getPosCardAccounts, posPayload, searchPosProducts, splitCents, toCents, type CartLine, type PaymentType, type PosProduct, type PosSale } from "../src/api-pos";
 import type { CashAccount } from "../src/types";
 import { nextPosKey, openAccountBlock, posErrorAction } from "../src/pos-money";
+import { posSaleErrorText, reservedProductIds, soldOut, stockText } from "../src/pos-catalog";
 import type { Party } from "../src/types";
 import { markCatalogDirty } from "../src/catalogCache";
 import { useDebounce } from "../src/hooks/useDebounce";
@@ -85,7 +86,7 @@ export default function PosScreen() {
   const { colors, shadows } = useTheme();
   const { toast, confirm } = useFeedback();
   const insets = useSafeAreaInsets();
-  const allowed = canManage(user, "billing");
+  const allowed = canSell(user);
 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [search, setSearch] = useState("");
@@ -99,6 +100,8 @@ export default function PosScreen() {
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [error, setError] = useState("");
+  // POS_STOCK_RESERVED: web sepetlerinde rezerve olduğu için satılamayan sepet satırları (vurgulanır).
+  const [reservedIds, setReservedIds] = useState<string[]>([]);
   const [sale, setSale] = useState<PosSale | null>(null);
   const [ownerAccounting, setOwnerAccounting] = useState(false);
   // Karma ödemede nakit kısmı; kart = toplam − nakit (kuruşta).
@@ -215,6 +218,12 @@ export default function PosScreen() {
 
   const setQty = (id: string, q: number) => {
     if (locked) return;
+    // Rezerve satır düzeltildiyse o retten kalan mesaj kalkar (son rezerve satır düzelince).
+    if (reservedIds.includes(id)) {
+      const rest = reservedIds.filter((x) => x !== id);
+      setReservedIds(rest);
+      if (!rest.length) setError("");
+    }
     if (q <= 0) setCart((prev) => prev.filter((l) => l.product.id !== id));
     else setCart((prev) => prev.map((l) => (l.product.id === id ? { ...l, quantity: q } : l)));
   };
@@ -271,8 +280,17 @@ export default function PosScreen() {
         const status = Number(e?.status || 0);
         setError(e?.message && status !== 0 ? e.message : "Sonuç alınamadı. Satış kaydedilmiş olabilir; aynı ödemeyi yeniden gönderin, ikinci kez işlenmez.");
       } else {
-        // Kesin ret (POS_* kodları, 400/422 …): hiçbir şey yazılmadı.
-        setError(e?.message || "Satış kaydedilemedi.");
+        // Kesin ret (POS_* kodları, 400/422 …): hiçbir şey yazılmadı; sepet açık kalır.
+        setUncertain(false);
+        const ids = reservedProductIds(e);
+        if (code === "POS_STOCK_RESERVED" || code === "POS_SALE_DELETED") {
+          setError(posSaleErrorText(e, cart));
+          setReservedIds(ids);
+          // Rezerve ürün sepetten çıkarılabilsin diye sepete dönülür.
+          if (ids.length) setStage("cart");
+        } else {
+          setError(e?.message || "Satış kaydedilemedi.");
+        }
       }
     } finally {
       sending.current = false;
@@ -289,6 +307,7 @@ export default function PosScreen() {
     setCustSearch("");
     setSale(null);
     setError("");
+    setReservedIds([]);
     setUncertain(false);
     setStage("cart");
     keyRef.current = newIdempotencyKey("pos");
@@ -307,7 +326,7 @@ export default function PosScreen() {
     return (
       <View style={[styles.wrap, { backgroundColor: colors.background }]}>
         <StackHeader title="Hızlı satış" />
-        <EmptyState icon={<WalletIcon size={30} color={colors.textTertiary} />} title="Yetkiniz yok" description="Hızlı satış için fatura ve kasa yönetimi yetkisi gerekir." />
+        <EmptyState icon={<WalletIcon size={30} color={colors.textTertiary} />} title="Yetkiniz yok" description="Hızlı satış için Satışlar modülünde düzenleme yetkisi gerekir." />
       </View>
     );
   }
@@ -366,6 +385,9 @@ export default function PosScreen() {
             </View>
           ) : null}
           <Button testID="pos-new-sale" label="Yeni satış" icon={<PlusIcon size={18} color="#FFFFFF" />} onPress={newSale} />
+          {sale.id ? (
+            <Button testID="pos-open-receipt" variant="secondary" label="Satış fişini aç" onPress={() => router.push({ pathname: "/pos-receipts/[id]", params: { id: sale.id } } as any)} />
+          ) : null}
           <Button variant="secondary" label="Kapat" onPress={close} />
         </ScrollView>
       </View>
@@ -403,8 +425,8 @@ export default function PosScreen() {
                           <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={1}>
                             {p.name}
                           </Text>
-                          <Text style={[type.caption, tabular, { color: p.stock <= 0 ? colors.error : colors.textTertiary }]} numberOfLines={1}>
-                            {[p.barcode || p.sku, `Stok ${p.stock}`].filter(Boolean).join(" · ")}
+                          <Text style={[type.caption, tabular, { color: soldOut(p) ? colors.error : p.reserved > 0 ? colors.amber : colors.textTertiary }]} numberOfLines={2}>
+                            {[p.barcode || p.sku, stockText(p)].filter(Boolean).join(" · ")}
                           </Text>
                         </View>
                         <Text style={[type.callout, tabular, { color: colors.textPrimary, fontWeight: "700" }]}>{formatTry(p.price)}</Text>
@@ -431,7 +453,7 @@ export default function PosScreen() {
           ) : (
             <Card style={styles.block}>
               {cart.map((l, i) => (
-                <View key={l.product.id} testID={`pos-line-${l.product.id}`} style={[styles.line, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
+                <View key={l.product.id} testID={`pos-line-${l.product.id}`} style={[styles.line, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }, reservedIds.includes(l.product.id) && { backgroundColor: colors.warningBg }]}>
                   <View style={styles.lineTop}>
                     <Text style={[type.bodyStrong, { color: colors.textPrimary, flex: 1 }]} numberOfLines={2}>
                       {l.product.name}
@@ -439,7 +461,9 @@ export default function PosScreen() {
                     <Text style={[type.callout, tabular, styles.lineTotal, { color: colors.textPrimary }]}>{formatTry(l.product.price * l.quantity)}</Text>
                   </View>
                   <View style={styles.lineTop}>
-                    <Text style={[type.caption, tabular, { color: colors.textTertiary, flex: 1 }]}>{`${formatTry(l.product.price)} · KDV %${l.product.vatRate}`}</Text>
+                    <Text style={[type.caption, tabular, { color: reservedIds.includes(l.product.id) ? colors.amber : colors.textTertiary, flex: 1 }]} testID={reservedIds.includes(l.product.id) ? `pos-reserved-${l.product.id}` : undefined}>
+                      {reservedIds.includes(l.product.id) ? `Web sepetinde rezerve · ${stockText(l.product) || "satılamaz"}` : `${formatTry(l.product.price)} · KDV %${l.product.vatRate}`}
+                    </Text>
                     <View style={[styles.stepper, { borderColor: colors.border }]}>
                       <PressableScale testID={`pos-minus-${l.product.id}`} disabled={locked || stage !== "cart"} onPress={() => setQty(l.product.id, l.quantity - 1)} style={styles.stepBtn} hitSlop={4} accessibilityRole="button" accessibilityLabel={l.quantity === 1 ? `${l.product.name} sepetten çıkar` : `${l.product.name} adedini azalt`}>
                         {l.quantity === 1 ? <TrashIcon size={16} color={colors.error} /> : <Text style={[styles.stepTxt, { color: colors.textPrimary }]}>−</Text>}

@@ -80,6 +80,8 @@ const products = Array.from({ length: 48 }, (_, i) => ({
 }));
 products[0].images = ["https://picsum.photos/seed/obi1/300", "https://picsum.photos/seed/obi2/300"];
 products[0].image_url = products[0].images[0];
+// Faz A: p2 için 2 adet web sepetinde rezerve (satılabilir = stok − rezerv).
+products[1].web_reserved_quantity = 2;
 // Trendyol mağaza ürünleri (source-products): p6 için barkodu aynı olan aday ve barkodu farklı bir aday.
 const tySource = [
   { id: "ty-6", name: "Deneme Ürün 6 (Trendyol)", sku: "SKU-6", barcode: "8690000000006" },
@@ -602,6 +604,32 @@ http
         { provider: "woocommerce", integration_name: "Deneme Mağaza", revenue: 400 * k, quantity: 4 * k, orders: 2 * k },
         { provider: "n11", integration_name: "N11", revenue: 0, quantity: 0, orders: 0 } ] } });
     }
+    // --- Faz A: POS kataloğu (GET /catalog/items?q&for=sale&limit) ve Satış Fişleri (GET /pos/receipts, /pos/receipts/{id}).
+    if (req.method === "GET" && path === "/catalog/items") {
+      const q = (url.searchParams.get("q") || "").trim().toLowerCase();
+      const limit = Math.min(50, Number(url.searchParams.get("limit") || 20));
+      const hit = products.filter((p) => !q || [p.name, p.sku, p.barcode].some((v) => String(v || "").toLowerCase().includes(q)));
+      const items = hit.slice(0, limit).map((p) => {
+        const held = Number(p.web_reserved_quantity || 0);
+        return { id: p.id, kind: "goods", name: p.name, sku: p.sku, barcode: p.barcode, ean: null, image_url: p.image_url || null, vat_rate: 20,
+          unit_price_gross: Number(p.price).toFixed(2), tracks_stock: true, available: p.stock - held, physical_quantity: p.stock, reserved_quantity: held, sale_available_quantity: p.stock - held };
+      });
+      return send(res, 200, { items, truncated: hit.length > limit });
+    }
+    if (req.method === "GET" && path === "/pos/receipts") {
+      const q = (url.searchParams.get("q") || "").trim().toLowerCase();
+      const page = Number(url.searchParams.get("page") || 1), per = Number(url.searchParams.get("per_page") || 25);
+      const all = posSales.map((x) => x.doc).filter(Boolean).reverse().filter((d) => !q || d.sale_number.toLowerCase().includes(q) || String(d.customer_name || "").toLowerCase().includes(q));
+      const items = all.slice((page - 1) * per, page * per).map((d) => ({ id: d.id, sale_number: d.sale_number, created_at: d.created_at, total: d.total, vat_amount: d.vat_amount,
+        payment_type: d.payment_type, customer_name: d.customer_name, status: d.status, invoice_id: d.invoice_id || null, invoice_number: d.invoice_number || null,
+        receipt_delete_started: false, stock_restore_error: null, ledger_pending: false, item_count: d.items.length }));
+      return send(res, 200, { items, total: all.length, page, per_page: per });
+    }
+    let rcm;
+    if (req.method === "GET" && (rcm = path.match(/^\/pos\/receipts\/([^/]+)$/))) {
+      const d = posSales.map((x) => x.doc).find((x) => x && x.id === decodeURIComponent(rcm[1]));
+      return d ? send(res, 200, d) : send(res, 404, { detail: "Satış fişi bulunamadı." });
+    }
     // --- D1: POS. /__mode?posFail=1 → satış kaydedilir ama yanıt 500 (bir kez).
     if (req.method === "POST" && path === "/pos/sales") {
       let raw = "";
@@ -616,6 +644,9 @@ http
           if (prev.fp !== fp) return send(res, 409, { detail: "Bu ödeme anahtarı farklı bir sepetle kullanılmış; yeni satış başlatın" });
           return send(res, 200, prev.resp);
         }
+        const held = b.items.filter((it) => { const p = products.find((x) => x.id === it.product_id); return p && p.web_reserved_quantity > 0 && it.quantity > p.stock - p.web_reserved_quantity; });
+        if (held.length) return send(res, 409, { code: "POS_STOCK_RESERVED", detail: "Ürün web sepetlerinde rezerve edilmiş. Satılabilir stok yetersiz; sepeti yenileyin.",
+          product_ids: held.map((it) => it.product_id), reserved_quantity: held.reduce((t, it) => t + products.find((x) => x.id === it.product_id).web_reserved_quantity, 0) });
         // P4: kasa bacakları
         const totalC = Math.round(b.total * 100);
         let legs;
@@ -648,7 +679,8 @@ http
           cash_entries: pending ? [] : legs.map((l, i) => ({ method: l.method, account_id: l.method === "kart" ? (b.card_account_id || "a3") : "a1", account_name: l.method === "kart" ? cardName : "Nakit Kasa", amount: l.amount, entry_id: "ce" + i })),
           payments: legs };
         console.log("POS card_account_id=" + (b.card_account_id || "-") + " payments=" + JSON.stringify(b.payments || null));
-        posSales.push({ key, fp, resp });
+        posSales.push({ key, fp, resp, doc: { ...resp, status: "completed", subtotal: b.subtotal, discount_amount: b.discount_amount, vat_amount: b.vat_amount, notes: b.notes,
+          items: b.items.map((it) => ({ ...it, line_total: Math.round(it.unit_price * it.quantity * 100) / 100 })) } });
         if (state.posFail === "1") { state.posFail = "0"; return send(res, 500, { detail: `Satış ${resp.sale_number} kaydedildi ancak stok düşülemedi (deneme). Aynı ödemeyi tekrar deneyin; stok yalnız bir kez düşülür.` }); }
         send(res, 200, resp);
       });

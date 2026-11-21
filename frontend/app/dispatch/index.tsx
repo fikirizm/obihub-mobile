@@ -110,7 +110,7 @@ export default function DispatchListScreen() {
           onChange={(v) => (setDirection(v), setSelecting(false), setPicked([]))}
         />
       </View>
-      <View style={[styles.block, { marginTop: spacing.sm }]}>
+      <View style={{ marginTop: spacing.sm }}>
         <SearchField value={q} onChangeText={setQ} placeholder="No, cari ya da takip no" />
       </View>
       <ChipRow>

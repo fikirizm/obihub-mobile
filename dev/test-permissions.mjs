@@ -40,4 +40,15 @@ t("403 PERMISSION_DENIED: sunucu detail'i aynen", () => {
   assert.equal(m.permissionDeniedText({ status: 403, code: "PERMISSION_DENIED", message: "Satışlar modülünde düzenleme yetkiniz yok." }), "Satışlar modülünde düzenleme yetkiniz yok.");
   assert.equal(m.permissionDeniedText({ status: 403, code: "OTHER" }), null);
 });
+t("Faz A menü kuralı: Satış Ekranı orders.manage, Satış Fişleri orders.view|manage (web Sidebar)", () => {
+  const member = (permissions) => ({ role: "member", permissions });
+  assert.equal(m.canSell(member(["orders.manage"])), true);
+  assert.equal(m.canSell(member(["orders.view"])), false);
+  assert.equal(m.canSell(member(["billing.manage"])), false);
+  assert.equal(m.canSeeReceipts(member(["orders.view"])), true);
+  assert.equal(m.canSeeReceipts(member(["orders.manage"])), true);
+  assert.equal(m.canSeeReceipts(member(["billing.manage"])), false);
+  assert.equal(m.canSell({ role: "owner" }), true);
+  assert.equal(m.canSell({ role: "accountant" }), false);
+});
 console.log(`\n${n} test geçti`);
