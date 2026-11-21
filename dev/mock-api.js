@@ -1181,6 +1181,8 @@ http
         entries.unshift({ id: "e" + Date.now(), account_id: acc.id, entry_type: b.entry_type, amount: b.amount, entry_date: b.entry_date, description: b.description });
         send(res, 200, { ok: true });
       });
+    if (path === "/warehouses" && req.method === "GET")
+      return send(res, 200, { items: [{ id: "w1", name: "Ana depo", is_default: true }, { id: "w2", name: "Mağaza deposu" }, { id: "w3", name: "Eski depo", archived: true }] });
     // Pazaryeri iade talepleri (routers/marketplace_returns.py).
     if (path === "/marketplace-returns" && req.method === "GET") {
       const st = url.searchParams.get("state");

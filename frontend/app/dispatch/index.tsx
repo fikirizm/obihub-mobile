@@ -99,8 +99,16 @@ export default function DispatchListScreen() {
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="dispatch-screen">
-      <StackHeader title="İrsaliyeler" subtitle={direction === "out" ? "Giden" : "Gelen"} />
-      <View style={styles.block}>
+      <StackHeader
+        title="İrsaliyeler"
+        subtitle={direction === "out" ? "Giden" : "Gelen"}
+        right={
+          mayWrite ? (
+            <Button testID="dispatch-new-manual" size="sm" label="Yeni" onPress={() => router.push({ pathname: "/dispatch/form", params: { direction } } as any)} />
+          ) : undefined
+        }
+      />
+      <View>
         <SegmentedControl
           options={[
             { value: "out", label: "Giden" },
@@ -132,7 +140,7 @@ export default function DispatchListScreen() {
             <EmptyState
               icon={<PackageIcon size={30} color={colors.textTertiary} />}
               title="İrsaliye yok"
-              description={direction === "out" ? "Siparişten ya da faturadan irsaliye oluşturabilirsiniz." : "Gelen irsaliyeler web panelinden girilir."}
+              description={direction === "out" ? "Yeni irsaliye oluşturun; siparişten ya da faturadan da açabilirsiniz." : "Tedarikçinizden gelen ürünleri “Yeni” ile irsaliyeyle stoğa alın."}
             />
           ) : null}
           {(items || []).map((n) => {
