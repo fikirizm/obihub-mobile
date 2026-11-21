@@ -452,7 +452,20 @@ export type PayableInfo = {
   currency: string;
   status: string;
   canPay: boolean;
-  items: { id: string; date: string; amount: string; currency: string; account_name: string; completed: boolean; canVoid: boolean }[];
+  // P5.3: dövizli borç (belge dövizi, fatura kuru, döviz cinsinden toplam/ödenen/kalan); yoksa null.
+  fx: { currency: string; rate: string; total: string; paid: string; remaining: string } | null;
+  items: {
+    id: string;
+    date: string;
+    amount: string;
+    currency: string;
+    account_name: string;
+    completed: boolean;
+    canVoid: boolean;
+    fx: { amount: string; currency: string } | null;
+    method: string;
+    employee_name: string;
+  }[];
   // 15 Kas 2026 ödeme silme: silinen ödemeler (status voided, voided_at).
   voidedItems: { id: string; date: string; amount: string; currency: string; account_name: string; voided_at: string }[];
 };
@@ -472,6 +485,9 @@ export async function getPayableInfo(token: string, ref: string): Promise<Payabl
     currency: curOf(p.currency),
     status: String(p.status || ""),
     canPay: d?.can_pay === true,
+    fx: p.fx && p.fx.currency
+      ? { currency: curOf(p.fx.currency), rate: String(p.fx.rate ?? ""), total: String(p.fx.total ?? "0"), paid: String(p.fx.paid ?? "0"), remaining: String(p.fx.remaining ?? "0") }
+      : null,
     items: (Array.isArray(d?.items) ? d.items : []).map((x: any) => ({
       id: String(x?.id || ""),
       date: String(x?.date || ""),
@@ -480,6 +496,9 @@ export async function getPayableInfo(token: string, ref: string): Promise<Payabl
       account_name: String(x?.account_name || ""),
       completed: x?.status === "completed",
       canVoid: x?.can_void === true,
+      fx: x?.fx && x.fx.currency ? { amount: String(x.fx.amount ?? x.fx.foreign_amount ?? ""), currency: curOf(x.fx.currency || x.fx.invoice_currency) } : null,
+      method: String(x?.method || ""),
+      employee_name: String(x?.employee_name || ""),
     })),
     voidedItems: (Array.isArray(d?.voided_items) ? d.voided_items : []).map((x: any) => ({
       id: String(x?.id || ""),
@@ -497,10 +516,9 @@ export async function getPayableInfo(token: string, ref: string): Promise<Payabl
 export async function addPayablePayment(
   token: string,
   ref: string,
-  body: { amount: string; date: string; account_id: string; idempotency_key: string; note?: string }
+  // P5.3: gövde src/payable-fx.ts paymentBody ile kurulur (currency her zaman; dövizli borcu TL hesaptan öderken cash_amount).
+  payload: Record<string, string>
 ) {
-  const payload: Record<string, string> = { amount: body.amount, date: body.date, account_id: body.account_id, idempotency_key: body.idempotency_key };
-  if (body.note && body.note.trim()) payload.note = body.note.trim();
   return request<any>(`/accounting/payables/${encodeURIComponent(ref)}/payments`, { method: "POST", body: JSON.stringify(payload) }, token);
 }
 

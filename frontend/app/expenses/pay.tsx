@@ -45,6 +45,7 @@ import { StackHeader } from "../../src/ui/Header";
 import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
 import { Card, SectionTitle } from "../../src/ui/ListRow";
 import type { CashAccount } from "../../src/types";
+import { cashOutOfBand, cashSuggestion, fxErrorText, needsCash, payAccounts, payCurrency, paymentBody, paymentLine, payRemaining } from "../../src/payable-fx";
 
 const curOf = (c: unknown) => {
   const v =
@@ -94,6 +95,8 @@ export default function PayablePayScreen() {
   const [dateText, setDateText] = useState(trDate(today));
   const [accountId, setAccountId] = useState("");
   const [note, setNote] = useState("");
+  // P5.3: dövizli borcu TL hesaptan öderken hesaptan çıkan TL (öneri: döviz × fatura kuru; kullanıcı düzeltebilir).
+  const [cashText, setCashText] = useState("");
   const [tried, setTried] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -114,18 +117,19 @@ export default function PayablePayScreen() {
         getPickableAccounts(token),
       ]);
       setInfo(p);
-      setAccounts(
-        acc.filter((a) => a && a.id && curOf(a.currency) === p.currency),
-      );
-      // Kalan tutar önerilir (web ile aynı); kullanıcı kısmi ödeme için değiştirebilir.
+      // Dövizli borçta TL hesapları ve borcun dövizindeki hesaplar birlikte listelenir (TL önce).
+      setAccounts(payAccounts(acc.filter((a) => a && a.id), p));
+      // Kalan tutar önerilir (web ile aynı; dövizli borçta döviz cinsinden); kullanıcı kısmi ödeme için değiştirebilir.
+      const rem = payRemaining(p);
       setAmountText(
         (prev) =>
           prev ||
-          Number(p.remaining).toLocaleString("tr-TR", {
+          Number(rem).toLocaleString("tr-TR", {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
           }),
       );
+      if (p.fx) setCashText((prev) => prev || cashSuggestion(rem, p.fx!.rate));
       setState("ready");
     } catch (e: any) {
       setLoadError(
@@ -141,19 +145,20 @@ export default function PayablePayScreen() {
     load();
   }, [load]);
 
-  const currency = info?.currency || "TRY";
+  // Dövizli borçta tutar, kalan ve ödeme dövizdir; TL karşılığı ayrıca gösterilir.
+  const currency = info ? payCurrency(info) : "TRY";
   // Tutar dize olarak ayrıştırılır ve kuruşa çevrilir; float'a girilmez (en çok 2 ondalık, fazlası reddedilir).
   const amountStr = decimalText(amountText, 2);
   const minor = amountStr !== null ? toMinor(amountStr) : null;
   const amount = minor !== null ? minor / 100 : null;
-  const remainingMinor = info ? toMinor(info.remaining) : null;
+  const remainingMinor = info ? toMinor(payRemaining(info)) : null;
   const date = parseDateInput(dateText);
   const amountErr = !tried
     ? undefined
     : minor === null || minor <= 0
       ? "Geçerli bir tutar girin: en çok 2 ondalık, ör. 1.234,56."
       : remainingMinor !== null && minor > remainingMinor
-        ? `Tutar kalan borçtan büyük olamaz (kalan ${formatMoney(info!.remaining, currency)}).`
+        ? `Tutar kalan borçtan büyük olamaz (kalan ${formatMoney(payRemaining(info), currency)}).`
         : undefined;
   const dateErr =
     tried && (!date || date > today)
@@ -165,6 +170,15 @@ export default function PayablePayScreen() {
     () => accounts.find((a) => a.id === accountId) || null,
     [accounts, accountId],
   );
+  const cashNeeded = needsCash(info, selected);
+  const cashStr = cashNeeded ? decimalText(cashText, 2) : null;
+  const cashMinor = cashStr !== null ? toMinor(cashStr) : null;
+  const cashErr =
+    tried && cashNeeded && (cashMinor === null || cashMinor <= 0) ? "Hesaptan çıkan TL tutarını girin." : undefined;
+  const cashWarn =
+    cashNeeded && info?.fx && amountStr && cashMinor !== null && cashOutOfBand(fixed2(minor || 0), info.fx.rate, fixed2(cashMinor))
+      ? "Bu TL tutarı, döviz tutarının fatura kuruyla karşılığından çok farklı; sunucu kabul etmeyebilir. Tutarı ve kuru kontrol edin."
+      : "";
 
   const submit = async () => {
     setTried(true);
@@ -176,19 +190,18 @@ export default function PayablePayScreen() {
       (remainingMinor !== null && minor > remainingMinor) ||
       !accountId ||
       !date ||
-      date > today
+      date > today ||
+      (cashNeeded && (cashMinor === null || cashMinor <= 0))
     )
       return;
     busy.current = true;
     setSaving(true);
     try {
-      await addPayablePayment(token, ref, {
-        amount: fixed2(minor),
-        date,
-        account_id: accountId,
-        idempotency_key: keyRef.current,
-        note,
-      });
+      await addPayablePayment(
+        token,
+        ref,
+        paymentBody(info, selected, { amount: fixed2(minor), date, account_id: accountId, idempotency_key: keyRef.current, note }, cashNeeded && cashMinor !== null ? fixed2(cashMinor) : null),
+      );
       toast("Ödeme kaydedildi.", "success");
       if (router.canGoBack()) router.back();
       else router.replace("/expenses");
@@ -208,11 +221,12 @@ export default function PayablePayScreen() {
         setUncertain(false);
       }
       setError(
-        status === 404
+        fxErrorText(e) ||
+        (status === 404
           ? "Ödeme özelliği şu anda kullanılamıyor."
           : status >= 400 && status < 500 && e?.message
             ? e.message
-            : "Ödeme kaydedilemedi. Tekrar deneyebilirsiniz; aynı ödeme ikinci kez işlenmez.",
+            : "Ödeme kaydedilemedi. Tekrar deneyebilirsiniz; aynı ödeme ikinci kez işlenmez."),
       );
     } finally {
       busy.current = false;
@@ -240,9 +254,12 @@ export default function PayablePayScreen() {
           {info.items.map((p, i) => (
             <View key={p.id || i} testID={`payable-payment-${p.id}`} style={[styles.prev, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
               <Text style={[type.callout, { color: colors.textSecondary, flex: 1 }]} numberOfLines={1}>
-                {[formatDate(p.date), p.account_name || null, p.completed ? null : "kayıt tamamlanıyor"].filter(Boolean).join(" · ")}
+                {[formatDate(p.date), p.method === "employee" ? `Çalışan cebinden${p.employee_name ? ` · ${p.employee_name}` : ""}` : p.account_name || null, p.completed ? null : "kayıt tamamlanıyor"].filter(Boolean).join(" · ")}
               </Text>
-              <Text style={[type.callout, tabular, { color: colors.textPrimary, fontWeight: "600" }]}>{formatMoney(p.amount, p.currency)}</Text>
+              <View style={{ alignItems: "flex-end" }}>
+                <Text style={[type.callout, tabular, { color: colors.textPrimary, fontWeight: "600" }]}>{formatMoney(p.amount, p.currency)}</Text>
+                {p.fx ? <Text style={[type.caption, tabular, { color: colors.textTertiary }]}>{paymentLine({ amount: p.fx.amount, currency: p.fx.currency })}</Text> : null}
+              </View>
               {p.canVoid ? <Button testID={`payable-payment-${p.id}-void`} size="sm" variant="ghost" label="Sil" onPress={() => voidPayment(p)} /> : null}
             </View>
           ))}
@@ -329,11 +346,18 @@ export default function PayablePayScreen() {
               {formatMoney(amount || 0, currency)}
             </Text>
             <View style={styles.heroFacts}>
-              {[
-                ["Borç", info.total],
-                ["Ödenen", info.paid],
-                ["Kalan", info.remaining],
-              ].map(([k, v]) => (
+              {(info.fx
+                ? [
+                    ["Borç", info.fx.total],
+                    ["Ödenen", info.fx.paid],
+                    ["Kalan", info.fx.remaining],
+                  ]
+                : [
+                    ["Borç", info.total],
+                    ["Ödenen", info.paid],
+                    ["Kalan", info.remaining],
+                  ]
+              ).map(([k, v]) => (
                 <View key={k} style={styles.heroFact}>
                   <Text style={styles.heroFactLabel}>{k}</Text>
                   <Text
@@ -347,6 +371,11 @@ export default function PayablePayScreen() {
               ))}
             </View>
           </HeroCard>
+          {info.fx ? (
+            <Text testID="pay-fx-note" style={[type.caption, styles.block, { color: colors.textSecondary, marginTop: spacing.sm }]}>
+              {`Dövizli borç: tutar ${info.fx.currency} cinsindendir. Fatura kuru ${String(info.fx.rate).replace(".", ",")} · TL karşılığı kalan ${formatMoney(info.remaining, info.currency)}. ${info.fx.currency} hesabından ödemede tutar aynen döviz çıkar; TL hesaptan ödemede hesaptan çıkan TL'yi de girin.`}
+            </Text>
+          ) : null}
 
           {paymentsList}
 
@@ -395,8 +424,9 @@ export default function PayablePayScreen() {
           {accounts.length === 0 ? (
             <Card padded style={styles.block}>
               <Text style={[type.body, { color: colors.amber }]}>
-                {currency} para biriminde kasa/banka hesabınız yok. Önce Kasa ve
-                Bankalar ekranından bir {currency} hesabı ekleyin.
+                {info.fx
+                  ? `TL ya da ${info.fx.currency} kasa/banka hesabınız yok. Önce Kasa ve Bankalar ekranından bir hesap ekleyin.`
+                  : `${currency} para biriminde kasa/banka hesabınız yok. Önce Kasa ve Bankalar ekranından bir ${currency} hesabı ekleyin.`}
               </Text>
             </Card>
           ) : (
@@ -419,6 +449,33 @@ export default function PayablePayScreen() {
             <Text style={[type.caption, styles.err, { color: colors.error }]}>
               {accountErr}
             </Text>
+          ) : null}
+          {cashNeeded && info.fx ? (
+            <View style={[styles.form, { gap: spacing.xs }]}>
+              <FormField
+                testID="pay-cash-amount"
+                label="Hesaptan çıkan TL"
+                suffix="₺"
+                value={cashText}
+                onChangeText={setCashText}
+                editable={!uncertain}
+                keyboardType="decimal-pad"
+                placeholder="0,00"
+                error={cashErr}
+                hint={`Öneri: döviz tutarı × fatura kuru ${String(info.fx.rate).replace(".", ",")}. Fatura kuruyla karşılığından farkı kur farkı olarak ayrı satıra yazılır.`}
+              />
+              {amountStr ? (
+                <Button
+                  testID="pay-cash-suggest"
+                  size="sm"
+                  variant="ghost"
+                  label="Öneriyi kullan"
+                  onPress={() => !uncertain && setCashText(cashSuggestion(fixed2(minor || 0), info.fx!.rate))}
+                  style={{ alignSelf: "flex-start" }}
+                />
+              ) : null}
+              {cashWarn ? <Text style={[type.caption, { color: colors.amber }]}>{cashWarn}</Text> : null}
+            </View>
           ) : null}
 
           <View style={styles.form}>

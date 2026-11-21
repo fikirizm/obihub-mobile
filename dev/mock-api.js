@@ -117,10 +117,14 @@ const accounts = [
   { id: "a2", name: "Garanti Ticari", account_type: "bank", currency: "TRY", balance: 86320.1, bank_name: "Garanti BBVA", iban: "TR330006100519786457841326" },
   { id: "a3", name: "POS (Kart)", account_type: "pos", currency: "TRY", balance: 0 },
   { id: "a4", name: "Eski Kasa", account_type: "cash", currency: "TRY", balance: 0, is_active: false },
+  { id: "a5", name: "Dolar Hesabı", account_type: "bank", currency: "USD", balance: 1250, bank_name: "İş Bankası" },
 ];
 // Dalga 3 / C2 gider durumları (detay + ödeme).
 const expenseState = {
   "obihub:e1": { supplier: "Kargo Lojistik A.Ş.", doc: "ABC2026000123", kind: "import", total: "1840.60", remaining: 1840.6, levies: "0", status: "pending", payments: [], seenKeys: [] },
+  // P5.3 dövizli borç (USD, fatura kuru 36,5): kalan döviz cinsinden.
+  "obihub:e3": { supplier: "Acme Supplies Ltd", doc: "INV-US-9", kind: "manual", total: "3650.00", remaining: 3650, levies: "0", status: "pending", payments: [], seenKeys: [],
+    fx: { currency: "USD", rate: "36.5", total: 100, remaining: 100 } },
   "obihub:e2": { supplier: "Ofis Kırtasiye", doc: "OK-77", kind: "manual", total: "1250.50", remaining: 1250.5, levies: "50.00", status: "overdue", payments: [{ id: "pp-old", date: "2026-10-25", amount: "0.00", currency: "TRY", account_name: "Nakit Kasa", status: "completed" }].slice(1), seenKeys: [] },
 };
 // Dalga 3 / C1: gelen fatura içeri alma durumları.
@@ -2056,7 +2060,7 @@ http
       const ref = decodeURIComponent(gm[1]);
       const ex = expenseState[ref];
       if (!ex) return send(res, 404, { code: "NOT_FOUND", detail: "Bulunamadı" });
-      const view = () => ({ payable: { total: ex.total, paid: (Number(ex.total) - ex.remaining).toFixed(2), remaining: ex.remaining.toFixed(2), currency: "TRY", status: ex.remaining <= 0 ? "paid" : "open" }, can_pay: ex.remaining > 0, items: ex.payments.map((x) => ({ ...x, can_void: x.status === "completed" })), voided_items: ex.voided || [] });
+      const view = () => ({ payable: { total: ex.total, paid: (Number(ex.total) - ex.remaining).toFixed(2), remaining: ex.remaining.toFixed(2), currency: "TRY", status: ex.remaining <= 0 ? "paid" : "open", ...(ex.fx ? { fx: { currency: ex.fx.currency, rate: ex.fx.rate, total: ex.fx.total.toFixed(2), paid: (ex.fx.total - ex.fx.remaining).toFixed(2), remaining: ex.fx.remaining.toFixed(2) } } : {}) }, can_pay: ex.remaining > 0, items: ex.payments.map((x) => ({ ...x, can_void: x.status === "completed" })), voided_items: ex.voided || [] });
       if (req.method === "GET") return send(res, 200, view());
       let raw = "";
       req.on("data", (c) => (raw += c));
@@ -2065,6 +2069,23 @@ http
         const b = JSON.parse(raw || "{}");
         if (ex.seenKeys.includes(b.idempotency_key)) return send(res, 200, view());
         const amt = Number(b.amount);
+        const acc0 = accounts.find((x) => x.id === b.account_id);
+        if (ex.fx) {
+          // Sunucu kuralları (orchestration/payable_payment.py): tutar döviz; TL hesaptan cash_amount zorunlu ve ±%50 bantta.
+          if (b.currency !== ex.fx.currency) return send(res, 422, { code: "PAYMENT_CURRENCY_MISMATCH", detail: "Ödeme para birimi borcun para birimiyle aynı olmalı." });
+          if (amt > ex.fx.remaining + 1e-9) return send(res, 409, { code: "PAYMENT_EXCEEDS_OUTSTANDING", detail: "Tutar kalan borçtan büyük." });
+          const tl = acc0 && acc0.currency === "TRY";
+          if (tl && !b.cash_amount) return send(res, 422, { code: "PAYMENT_CASH_AMOUNT_REQUIRED", detail: "Dövizli borcu TL hesaptan öderken hesaptan çıkan TL tutarını da girin." });
+          if (!tl && b.cash_amount) return send(res, 422, { code: "PAYMENT_CASH_AMOUNT_INVALID", detail: "Ödenen TL tutarı bu hesapta girilmez." });
+          const exp = amt * Number(ex.fx.rate);
+          if (tl && (Number(b.cash_amount) < exp * 0.5 || Number(b.cash_amount) > exp * 1.5)) return send(res, 422, { code: "PAYMENT_CASH_AMOUNT_OUT_OF_RANGE", detail: "Hesaptan çıkan TL tutarı çok farklı." });
+          ex.seenKeys.push(b.idempotency_key);
+          ex.fx.remaining = Math.round((ex.fx.remaining - amt) * 100) / 100;
+          ex.remaining = Math.round(ex.fx.remaining * Number(ex.fx.rate) * 100) / 100;
+          ex.payments.push({ id: "pp" + ex.payments.length, date: b.date, amount: tl ? Number(b.cash_amount).toFixed(2) : amt.toFixed(2), currency: tl ? "TRY" : ex.fx.currency, account_name: acc0 ? acc0.name : "", status: "completed",
+            ...(tl ? { fx: { amount: amt.toFixed(2), currency: ex.fx.currency } } : {}) });
+          return send(res, 201, view());
+        }
         if (amt > ex.remaining + 1e-9) return send(res, 409, { code: "PAYMENT_EXCEEDS_OUTSTANDING", detail: "Tutar kalan borçtan büyük." });
         ex.seenKeys.push(b.idempotency_key);
         ex.remaining = Math.round((ex.remaining - amt) * 100) / 100;
