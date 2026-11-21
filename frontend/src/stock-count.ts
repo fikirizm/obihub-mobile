@@ -49,9 +49,16 @@ const TEXT: Record<string, string> = {
   IDEMPOTENCY_KEY_REUSED: "Bu sayım daha önce farklı bilgilerle gönderilmiş. Önizlemeyi yenileyin.",
   COUNT_UNCHANGED: "Onaylanacak fark yok.",
 };
-export function countErrorText(e: { code?: string; message?: string } | null | undefined) {
+export function countErrorText(e: { code?: string; message?: string; data?: any } | null | undefined) {
   const m = typeof e?.message === "string" ? e.message.trim() : "";
   if (m && !/^Sunucu hatası/.test(m) && m !== e?.code) return m;
+  // Faz A M8: web mağaza sepet rezervi stok tabanı (sayım/ayarla/toplu sayım; 409 {code, reserved_quantity}).
+  if (e?.code === "STOCK_RESERVED_FLOOR") {
+    const q = Number(e?.data?.reserved_quantity) || 0;
+    return q > 0
+      ? `Bu ürünün ${q} adedi web mağaza sepetlerinde müşteriler için ayrılmış; stok bu miktarın altına indirilemez. Sepetler boşalınca ya da rezervasyon süresi dolunca yeniden deneyin.`
+      : "Bu ürünün bir kısmı web mağaza sepetlerinde müşteriler için ayrılmış; stok ayrılan miktarın altına indirilemez. Sepetler boşalınca ya da rezervasyon süresi dolunca yeniden deneyin.";
+  }
   return (e?.code && TEXT[e.code]) || "Sayım kaydedilemedi.";
 }
 export function applyResultText(r: { status?: string; applied?: number; unchanged?: number; replayed?: number; failed?: unknown[] } | null | undefined) {

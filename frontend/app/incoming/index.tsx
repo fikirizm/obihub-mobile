@@ -9,6 +9,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { getIncomingInvoicePdf, getIncomingInvoices, resolveIncomingSource } from "../../src/api";
+import { BENIMPOS_TEXT, NO_SOURCE_TEXT } from "../../src/incoming-source";
 import { archiveInbox, downloadInbox, getIncomingInbox, getUiCapabilities, InboxUnavailable, type InboxMeta } from "../../src/api-gider";
 import { getQuickImportCapability } from "../../src/api-iceri-al";
 import { acceptGate } from "../../src/api-iceri-al";
@@ -54,6 +55,7 @@ export default function IncomingInvoicesScreen() {
   const [resolving, setResolving] = useState(true);
   const [connected, setConnected] = useState<IncomingSource[]>([]);
   const [source, setSource] = useState<IncomingSource | null>(null);
+  const [benimposOnly, setBenimposOnly] = useState(false);
   const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
   const [importOn, setImportOn] = useState(false);
   const mayWrite = canManage(user, "billing");
@@ -84,6 +86,7 @@ export default function IncomingInvoicesScreen() {
         inboxOn.current = caps.inboxRead === true;
         setConnected(r.connected);
         setSource(r.source);
+        setBenimposOnly(r.benimposOnly);
       })
       .catch(() => undefined)
       .finally(() => setResolving(false));
@@ -221,8 +224,8 @@ export default function IncomingInvoicesScreen() {
       ) : !source ? (
         <EmptyState
           icon={<InboxIcon size={30} color={colors.amber} />}
-          title="Gelen fatura kaynağı yok"
-          description="Gelen e-faturalar Paraşüt, BenimPOS veya Turkcell e-Fatura bağlantısıyla çalışır. Bağlantı web panelinden yapılır."
+          title={benimposOnly ? "BenimPOS gelen e-fatura kaynağı değil" : "Gelen fatura kaynağı yok"}
+          description={benimposOnly ? BENIMPOS_TEXT : NO_SOURCE_TEXT}
         />
       ) : (
         <>

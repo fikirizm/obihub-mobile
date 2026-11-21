@@ -224,19 +224,24 @@ function classifyIssue(key: string, detail: unknown): Omit<Issue, "line"> {
 }
 
 export function collectIssues(decision: any, view: any): Issue[] {
-  const raw: { key: string; line: number | null; detail: unknown }[] = [...(decision?.blocker_items || []), ...(decision?.review_items || [])].map((i: any) => ({
+  const raw: { key: string; line: number | null; detail: unknown; info?: boolean }[] = [...(decision?.blocker_items || []), ...(decision?.review_items || [])].map((i: any) => ({
     key: String(i?.key || ""),
     line: Number.isInteger(i?.line_index) ? i.line_index : null,
     detail: i?.detail ?? null,
   }));
   for (const key of view?.document?.document_issues || []) raw.push({ key, line: null, detail: null });
   for (const key of view?.supplier?.issues || []) raw.push({ key, line: null, detail: null });
-  for (const l of view?.lines || []) for (const key of l.issues || []) raw.push({ key, line: l.index, detail: null });
+  // Faz A M7 (web model.js): tutarlar belge toplamından geldiyse satır tutar notları yalnız bilgi; hızlı giderde tüm satır notları bilgi.
+  const documentTotals = view?.document?.totals_basis === "document";
+  const quickTotals = view?.document?.quick_expense === true && documentTotals;
+  const amountNotes = new Set(["LINE_NET_DIFFERS_FROM_UBL", "LINE_VAT_DIFFERS_FROM_UBL", "LINE_DISCOUNT_UNREADABLE", "LINE_DISCOUNT_DECLARATION_DIFFERS"]);
+  for (const l of view?.lines || []) for (const key of l.issues || []) raw.push({ key, line: l.index, detail: null, info: quickTotals || (documentTotals && amountNotes.has(key)) });
   const supplierActionable = (view?.supplier?.candidates || []).length > 0 || view?.decisions?.supplier?.create_new?.available === true;
   const seen = new Set<string>();
   const out: Issue[] = [];
-  for (const { key, line, detail } of raw) {
+  for (const { key, line, detail, info } of raw) {
     let c = classifyIssue(key, detail);
+    if (info && c.kind !== "notice") c = { kind: "notice", text: c.text } as Issue;
     if (c.kind === "fix" && c.step === 0 && /^SUPPLIER_/.test(key) && !supplierActionable) c = { kind: "system", text: "Tedarikçi bu hesapta eşleştirilemedi." };
     const id = `${c.kind}|${line}|${c.text}`;
     if (seen.has(id)) continue;

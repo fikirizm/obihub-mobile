@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import { incomingSources } from "./incoming-source";
 // Premium ObiHub API client targeting api.obihub.app/api by default.
 // Override via EXPO_PUBLIC_OBIHUB_API_URL env if needed.
 
@@ -1039,20 +1040,15 @@ export async function getParasutExpenseInvoices(token: string, page = 1) {
 // Gelen e-faturalar (Faz 4)
 // ---------------------------------------------------------------------------
 
-// Web paneliyle aynı sıra: kayıtlı kaynak, etkin muhasebe programı, ilk bağlı kaynak. BizimHesap gelen faturayı desteklemez.
-export async function resolveIncomingSource(token: string): Promise<{ source: IncomingSource | null; connected: IncomingSource[] }> {
+// Web paneliyle aynı sıra: kayıtlı kaynak, etkin muhasebe programı, ilk bağlı kaynak. BizimHesap ve BenimPOS gelen faturayı desteklemez.
+export async function resolveIncomingSource(token: string): Promise<{ source: IncomingSource | null; connected: IncomingSource[]; benimposOnly: boolean }> {
   const [acc, turkcell, saved] = await Promise.all([
     request<any>("/settings/accounting", { method: "GET" }, token).catch(() => null),
     request<any>("/turkcell-efatura/status", { method: "GET" }, token).catch(() => null),
     request<any>("/settings/incoming-einvoice-source", { method: "GET" }, token).catch(() => null),
   ]);
-  const connected: IncomingSource[] = [];
-  if (acc?.parasut?.connected) connected.push("parasut");
-  if (acc?.benimpos?.connected) connected.push("benimpos");
-  if (turkcell?.connected) connected.push("turkcell-efatura");
-  const wanted = [saved?.source, acc?.provider].map((x) => String(x || ""));
-  const source = (wanted.find((w) => connected.includes(w as IncomingSource)) as IncomingSource | undefined) ?? connected[0] ?? null;
-  return { source, connected };
+  // Faz A M7: BenimPOS gelen e-fatura kaynağı değil (sunucu boş döner); kural ./incoming-source (saf, birim testli).
+  return incomingSources(acc, turkcell, saved);
 }
 
 export async function getIncomingInvoices(token: string, source: IncomingSource, page = 1) {

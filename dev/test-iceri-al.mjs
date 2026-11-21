@@ -70,4 +70,10 @@ t("elle alış: kabul belge alanları değişince düşer", () => {
   assert.equal(m.legacyAckValid(false, '{"a":1}', '{"a":1}'), false);
 });
 
+t("Faz A M7: belge toplamı esasında satır tutar farkı notları bilgi (kaydı engellemez); web model.js collectIssues", () => {
+  const view = (basis, quick = false) => ({ document: { totals_basis: basis, quick_expense: quick }, lines: [{ index: 0, issues: ["LINE_NET_DIFFERS_FROM_UBL", "LINE_DISCOUNT_UNREADABLE"] }] });
+  for (const x of m.collectIssues({}, view("document"))) assert.equal(x.kind, "notice");
+  assert.ok(m.collectIssues({}, view("lines")).some((x) => x.kind !== "notice"));
+});
+
 console.log(`\n${n} test geçti`);

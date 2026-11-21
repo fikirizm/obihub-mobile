@@ -52,4 +52,11 @@ t("özet ve hata metinleri", () => {
   assert.match(m.applyResultText({ status: "partial", applied: 1, failed: [{ product_id: "p9" }] }), /1 ürün yazılamadı/);
 });
 
+t("Faz A M8: STOCK_RESERVED_FLOOR: sunucu metni, yoksa adetli yedek metin", () => {
+  assert.equal(m.countErrorText({ code: "STOCK_RESERVED_FLOOR", message: "Bu ürünün 2 adedi web mağaza sepetlerinde ayrılmış." }), "Bu ürünün 2 adedi web mağaza sepetlerinde ayrılmış.");
+  assert.equal(m.countErrorText({ code: "STOCK_RESERVED_FLOOR", data: { reserved_quantity: 3 } }),
+    "Bu ürünün 3 adedi web mağaza sepetlerinde müşteriler için ayrılmış; stok bu miktarın altına indirilemez. Sepetler boşalınca ya da rezervasyon süresi dolunca yeniden deneyin.");
+  assert.equal(m.countErrorText({ code: "STOCK_RESERVED_FLOOR" }),
+    "Bu ürünün bir kısmı web mağaza sepetlerinde müşteriler için ayrılmış; stok ayrılan miktarın altına indirilemez. Sepetler boşalınca ya da rezervasyon süresi dolunca yeniden deneyin.");
+});
 console.log(`\n${n} test geçti`);
