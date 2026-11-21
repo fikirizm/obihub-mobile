@@ -178,6 +178,9 @@ export async function dismissReconciliation(token: string, itemIds: string[]) {
 
 export type ProductLinks = {
   name: string;
+  // Faz A M4: satış (indirimli) fiyatı ve normal fiyat (regular_price > price → indirim).
+  price: number;
+  regularPrice: number;
   // Görseller (adresler) ve birincil görsel; kanal satış durumu (sağlayıcı → active | inactive).
   images: string[];
   imageUrl: string;
@@ -201,6 +204,8 @@ export async function getProductLinks(token: string, productId: string): Promise
   for (const [k, v] of Object.entries(obj(p?.channel_links))) if (v != null && String(v).trim()) links[k.toLowerCase()] = String(v);
   return {
     name: String(p?.name || ""),
+    price: Number(p?.price) || 0,
+    regularPrice: Number(p?.regular_price) || 0,
     images: (Array.isArray(p?.images) ? p.images : []).map((x: any) => (typeof x === "string" ? x : String(x?.url || x?.src || ""))).filter((u: string) => /^https?:\/\//i.test(u)),
     imageUrl: String(p?.image_url || ""),
     uploadedImages: (Array.isArray(p?.uploaded_images) ? p.uploaded_images : [])
@@ -406,4 +411,9 @@ export async function getProductInsights(token: string, productId: string, range
       .filter((x: any) => x.orders > 0 || x.quantity > 0)
       .sort((a: any, b: any) => b.revenue - a.revenue),
   };
+}
+
+// Faz A M4: fiyat ve normal fiyat birlikte (PATCH /products/{id}; web ProductDetailPage handleSave ile aynı alanlar).
+export async function updateProductPricing(token: string, productId: string, body: { price?: number; regular_price?: number }) {
+  return request<any>(`/products/${encodeURIComponent(productId)}`, { method: "PATCH", body: JSON.stringify(body) }, token);
 }

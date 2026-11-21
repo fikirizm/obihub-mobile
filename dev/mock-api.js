@@ -88,6 +88,8 @@ products[0].images = ["https://picsum.photos/seed/obi1/300", "https://picsum.pho
 products[0].image_url = products[0].images[0];
 // Faz A: p2 için 2 adet web sepetinde rezerve (satılabilir = stok − rezerv).
 products[1].web_reserved_quantity = 2;
+// Faz A M4: p1 indirimli (normal 150, satış 99,90).
+products[0].regular_price = 150;
 // Trendyol mağaza ürünleri (source-products): p6 için barkodu aynı olan aday ve barkodu farklı bir aday.
 const tySource = [
   { id: "ty-6", name: "Deneme Ürün 6 (Trendyol)", sku: "SKU-6", barcode: "8690000000006" },
@@ -810,7 +812,7 @@ http
           : x.id === "p3"
           ? { i2: { provider: "trendyol", ok: null, state: "pending", at: new Date().toISOString(), code: null, detail: null } }
           : {};
-      const view = () => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, price: p.price, channel_push: pushFor(p), channel_links: p.links, channel_details: p.details, images: p.images || [], image_url: p.image_url || null, channel_sales_status: p.sales || {} });
+      const view = () => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, price: p.price, regular_price: p.regular_price ?? p.price, channel_push: pushFor(p), channel_links: p.links, channel_details: p.details, images: p.images || [], image_url: p.image_url || null, channel_sales_status: p.sales || {} });
       if (req.method === "GET") return send(res, 200, view());
       let raw = "";
       req.on("data", (c) => (raw += c));
@@ -819,6 +821,9 @@ http
         for (const k of ["name", "sku", "barcode"]) if (typeof b[k] === "string") p[k] = b[k];
         if (Array.isArray(b.images)) p.images = b.images;
         if ("image_url" in b) p.image_url = b.image_url;
+        // Faz A M4: indirim (price satış, regular_price normal fiyat).
+        if (typeof b.price === "number") p.price = b.price;
+        if (typeof b.regular_price === "number") p.regular_price = b.regular_price;
         console.log("WRITE", path, raw);
         send(res, 200, view());
       });

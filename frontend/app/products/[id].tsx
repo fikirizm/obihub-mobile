@@ -6,7 +6,8 @@ import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { isUncertainWrite } from "../../src/api-finans";
-import { channelLinkFor, channelPushBadge, getProductLinks, type ChannelPush, type ProductLinks, type PushBadge } from "../../src/api-urun-stok";
+import { channelLinkFor, channelPushBadge, getProductLinks, updateProductPricing, type ChannelPush, type ProductLinks, type PushBadge } from "../../src/api-urun-stok";
+import { discountView, priceEditPlan, resolveDiscount, type Discount } from "../../src/product-discount";
 import { getCatalog, setChannelPrice, setChannelStock, setProductPrice, setProductStock, SYNC_NONE } from "../../src/api";
 import { recallChannels, recallProduct, rememberCatalog } from "../../src/catalogCache";
 import { useTheme } from "../../src/theme/ThemeProvider";
@@ -24,7 +25,7 @@ import { DetailHero } from "../../src/ui/DetailHero";
 import { useFeedback } from "../../src/ui/Feedback";
 import { StackHeader } from "../../src/ui/Header";
 import { ON_HERO } from "../../src/ui/HeroCard";
-import { Card, IconTile, SectionTitle } from "../../src/ui/ListRow";
+import { Card, IconTile, ListRow, SectionTitle } from "../../src/ui/ListRow";
 import type { CatalogProduct, ChannelRef } from "../../src/types";
 
 // Koyu gradyan üzerinde okunabilen uyarı kırmızısı (koyu tema paletinden).
@@ -198,7 +199,7 @@ export default function ProductDetailScreen() {
   const id = String(params.id || "");
   const { token, user, accountingProgram, accountingLoaded, reloadAccounting } = useAuth();
   const { colors } = useTheme();
-  const { toast, promptNumber, promptEntry } = useFeedback();
+  const { toast, promptNumber, promptEntry, confirm } = useFeedback();
   const [product, setProduct] = useState<CatalogProduct | null>(() => recallProduct(id));
   const [channels, setChannels] = useState<ChannelRef[]>(() => recallChannels());
   const [refreshing, setRefreshing] = useState(false);
@@ -397,12 +398,62 @@ export default function ProductDetailScreen() {
     if (out) setUnsent((u) => ({ ...u, stock: Array.from(new Set([...u.stock, ...mirrored])) }));
   };
 
+  // Faz A M4: indirim (price = satış fiyatı, regular_price = normal fiyat). Kaydetme PATCH {price, regular_price} (web ile aynı).
+  const disc = discountView({ price: product.price, regular_price: links?.regularPrice });
+  const savePricing = async (body: { price?: number; regular_price?: number }, message: string) => {
+    if (!token) return false;
+    setBusyKey("price");
+    try {
+      await updateProductPricing(token, product.id, body);
+      if (typeof body.price === "number") setProduct((prev) => (prev ? { ...prev, price: body.price! } : prev));
+      toast(message, "success");
+      setPushKey((k) => k + 1);
+      await reload(false);
+      return true;
+    } catch (e: any) {
+      toast(e?.message || "Fiyat kaydedilemedi.", "error");
+      return false;
+    } finally {
+      setBusyKey(null);
+    }
+  };
+  const editDiscount = async () => {
+    const base = disc.regular || product.price;
+    const entry = await promptEntry({
+      title: disc.discounted ? "İndirimi düzenle" : "İndirim ekle",
+      message: `Normal fiyat ${formatTry(base)}. Mağazada normal fiyat üstü çizili, indirimli fiyat satış fiyatı olarak görünür.`,
+      initial: disc.discounted ? Number(disc.percent.replace("%", "").replace(",", ".")) || 0 : 0,
+      decimal: true,
+      methods: [
+        { value: "percent", label: "Yüzde (%)" },
+        { value: "sale", label: "İndirimli fiyat (₺)" },
+      ],
+      confirmLabel: "İndirimi kaydet",
+    });
+    if (!entry) return;
+    const amount = String(entry.amount).replace(",", ".");
+    const value: Discount = entry.method === "sale" ? { mode: "sale", percent: "", sale: amount } : { mode: "percent", percent: amount, sale: "" };
+    let pricing;
+    try {
+      pricing = resolveDiscount(base.toFixed(2), value);
+    } catch (e: any) {
+      toast(e?.message || "İndirim geçersiz.", "error");
+      return;
+    }
+    await savePricing({ price: pricing.price, regular_price: pricing.regular_price }, `İndirim kaydedildi: ${formatTry(pricing.price)} (normal ${formatTry(pricing.regular_price)}).`);
+  };
+  const removeDiscount = async () => {
+    const ok = await confirm({ title: "İndirim kaldırılsın mı?", message: `Satış fiyatı normal fiyata (${formatTry(disc.regular)}) döner.`, confirmLabel: "İndirimi kaldır" });
+    if (ok) await savePricing({ price: disc.regular, regular_price: disc.regular }, "İndirim kaldırıldı.");
+  };
+
   const editBasePrice = async () => {
     if (!token) return;
     // Kapsam aynı sayfada seçilir (iOS'ta art arda iki sayfa açılamaz). Varsayılan web ile aynı: bağlı tüm kanallar.
+    // İndirimli üründe hangi fiyatın değişeceği de aynı sayfada sorulur (indirim sessizce bozulmaz).
     const entry = await promptEntry({
-      title: "Ana fiyat",
-      message: product.name,
+      title: disc.discounted ? "Fiyat" : "Ana fiyat",
+      message: disc.discounted ? `${product.name}\nİndirimli ${formatTry(disc.sale)} · Normal ${formatTry(disc.regular)}` : product.name,
       initial: product.price,
       decimal: true,
       suffix: "₺",
@@ -410,9 +461,26 @@ export default function ProductDetailScreen() {
         { value: "all", label: "Bağlı tüm kanallara gönder" },
         { value: "base", label: accountingProgram ? "Yalnız muhasebe programına" : "Yalnızca ana fiyat" },
       ],
+      ...(disc.discounted
+        ? { accounts: [{ value: "sale", label: "İndirimli fiyatı değiştir" }, { value: "regular", label: "Normal fiyatı değiştir" }], accountsLabel: "Değişecek fiyat" }
+        : {}),
     });
     if (!entry) return;
     const v = entry.amount;
+    const plan = priceEditPlan({ price: product.price, regular_price: links?.regularPrice }, v, disc.discounted ? (entry.account === "regular" ? "regular" : "sale") : "single");
+    if (plan.error) {
+      toast(plan.error, "error");
+      return;
+    }
+    if (plan.adjust === null && plan.patch) {
+      // Normal fiyat: yalnız regular_price (satış fiyatı ve kanallar değişmez).
+      await savePricing(plan.patch, `Normal fiyat ${formatTry(v)} oldu; indirimli fiyat değişmedi.`);
+      return;
+    }
+    // Eski normal fiyat yeni fiyattan yüksekse eşitlenir; aksi hâlde mağaza istenmeden indirim gösterir.
+    const syncRegular = async () => {
+      if (plan.patch && token) await updateProductPricing(token, product.id, plan.patch).then(() => setPushKey((k) => k + 1)).catch(() => {});
+    };
     const pushAll = entry.method !== "base";
     if (v === product.price && !pushAll) return;
     if (!pushAll) {
@@ -424,7 +492,10 @@ export default function ProductDetailScreen() {
         (p) => ({ ...p, price: v }),
         mirrored.length > 0 ? "Fiyat güncellendi. Pazaryeri fiyatları değişmedi." : "Fiyat güncellendi"
       );
-      if (out) setUnsent((u) => ({ ...u, price: Array.from(new Set([...u.price, ...mirrored])) }));
+      if (out) {
+        await syncRegular();
+        setUnsent((u) => ({ ...u, price: Array.from(new Set([...u.price, ...mirrored])) }));
+      }
       return;
     }
     // Sunucu toplu gönderimde her kanala göndermez (ör. İdefix, Pazarama); yanıttaki `synced_providers` esas alınır.
@@ -454,6 +525,7 @@ export default function ProductDetailScreen() {
       }
     );
     if (!out) return;
+    await syncRegular();
     const sent = sentTo(out.res);
     const sentIds = channels.filter(sent).map((ch) => ch.id);
     const missedIds = missedOf(out.res).map((ch) => ch.id);
@@ -585,7 +657,7 @@ export default function ProductDetailScreen() {
             />
             <View style={styles.statDivider} />
             <HeroStat
-              label="Ana fiyat"
+              label={disc.discounted ? `İndirimli fiyat · ${disc.percent}` : "Ana fiyat"}
               value={formatTry(product.price)}
               busy={busyKey === "price"}
               onPress={canEdit ? editBasePrice : undefined}
@@ -630,6 +702,46 @@ export default function ProductDetailScreen() {
             </PressableScale>
           ) : null}
         </DetailHero>
+
+        {/* Faz A M4: normal / indirimli fiyat (mağazada normal fiyat üstü çizili görünür). */}
+        {links ? (
+          <SafeAnimatedView entering={FadeInDown.delay(50).duration(380)}>
+            <SectionTitle title="Fiyat ve indirim" />
+            <Card style={styles.block}>
+              <ListRow
+                testID="product-regular-price"
+                title="Normal fiyat"
+                trailing={
+                  <Text style={[type.callout, tabular, { color: disc.discounted ? colors.textTertiary : colors.textPrimary, fontWeight: "600", textDecorationLine: disc.discounted ? "line-through" : "none" }]}>
+                    {formatTry(disc.regular)}
+                  </Text>
+                }
+              />
+              {disc.discounted ? (
+                <ListRow
+                  divider
+                  testID="product-sale-price"
+                  title="İndirimli fiyat"
+                  subtitle={`${disc.percent} indirim`}
+                  trailing={<Text style={[type.callout, tabular, { color: colors.success, fontWeight: "700" }]}>{formatTry(disc.sale)}</Text>}
+                />
+              ) : null}
+              {canEdit ? (
+                <ListRow
+                  divider
+                  testID="product-discount-edit"
+                  title={disc.discounted ? "İndirimi düzenle" : "İndirim ekle"}
+                  subtitle={disc.discounted ? undefined : "Yüzde ya da indirimli fiyatla"}
+                  chevron
+                  onPress={busyKey ? undefined : editDiscount}
+                />
+              ) : null}
+              {canEdit && disc.discounted ? (
+                <ListRow divider testID="product-discount-remove" title="İndirimi kaldır" onPress={busyKey ? undefined : removeDiscount} />
+              ) : null}
+            </Card>
+          </SafeAnimatedView>
+        ) : null}
 
         {token ? (
           <SafeAnimatedView entering={FadeInDown.delay(60).duration(380)}>
