@@ -158,6 +158,12 @@ const entries = [
   { id: "e1", account_id: "a1", entry_type: "income", amount: 1250, entry_date: "2026-11-10", description: "Nakit satış" },
   { id: "e2", account_id: "a1", entry_type: "expense", amount: 380.5, entry_date: "2026-11-09", description: "Kargo malzemesi" },
 ];
+// Netgsm SMS durumu (mock; gerçek şifre tutulmaz).
+const sms = { connected: false, username: "", enabled: false, sender: "", encoding: "TURKISH", store_name: "Deneme Mağaza", revision: 1,
+  channels: { website: true, woocommerce: false },
+  rules: { created: { enabled: true, text: "Merhaba [ad], [siparis_no] numaralı siparişiniz alındı. [magaza]" }, shipped: { enabled: false, text: "" }, delivered: { enabled: false, text: "" }, cancelled: { enabled: false, text: "" }, admin_created: { enabled: false, text: "Yeni sipariş: [siparis_no] [tutar]", phones: [] } },
+  senders: [{ name: "DENEMEMGZ", type: "ALPHANUMERIC", usable: true }, { name: "8501234567", type: "SUBSCRIBER_NUMBER", usable: true }, { name: "ESKIBASLIK", type: "ALPHANUMERIC", usable: false, reason: "ROUTING_CODE_MISSING" }],
+  campaigns: [] };
 const parties = [
   { id: "c9", name: "Hareketli Cari Ltd.", source: "registered", balance: 0, has_activity: true, payments: [] },
   { id: "c1", name: "Elif Kaya", phone: "0555 111 22 33", source: "registered", balance: 4725, advance: 250, payments: [],
@@ -314,7 +320,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -1166,6 +1172,66 @@ http
         entries.unshift({ id: "e" + Date.now(), account_id: acc.id, entry_type: b.entry_type, amount: b.amount, entry_date: b.entry_date, description: b.description });
         send(res, 200, { ok: true });
       });
+    // Netgsm SMS (backend/routers/netgsm.py). /__mode?smsUnknown=1 → toplu gönderim 503 UNKNOWN_OUTCOME; smsOwner=0 → ekip üyesi.
+    if (path.startsWith("/netgsm")) {
+      const g = sms;
+      const view = () => ({ connected: g.connected, auth_failed: false, username: g.connected ? g.username : "", enabled: g.enabled, sender: g.sender, encoding: g.encoding, store_name: g.store_name,
+        channels: g.channels, rules: g.rules, senders: g.connected ? g.senders : [], revision: g.revision, last_error: "", verified_at: g.connected ? "2026-11-22T09:15:00Z" : null,
+        variables: { order: ["ad", "siparis_no", "tutar", "kargo_firmasi", "takip_no", "magaza"], bulk: ["ad", "magaza"] }, max_recipients: 5000, can_manage_credentials: state.smsOwner !== "0" });
+      const err = (st, code, detail) => send(res, st, { code, detail });
+      if (path === "/netgsm" && req.method === "GET") return send(res, 200, view());
+      if (path === "/netgsm/credentials" && req.method === "PUT") return readBody((b) => {
+        if (state.smsOwner === "0") return err(403, "FORBIDDEN", "Netgsm hesabını yalnız firma sahibi bağlayabilir.");
+        if (b.password === "hatali") return err(400, "AUTH_FAILED", "Netgsm kullanıcı adı veya şifresi hatalı.");
+        console.log("WRITE netgsm credentials user=" + b.username + " password=<gizli>");
+        Object.assign(g, { connected: true, username: String(b.username || ""), revision: g.revision + 1 });
+        send(res, 200, view());
+      });
+      if (path === "/netgsm/credentials" && req.method === "DELETE") { Object.assign(g, { connected: false, sender: "", revision: g.revision + 1 }); return send(res, 200, view()); }
+      if (path === "/netgsm/settings" && req.method === "PUT") return readBody((b) => {
+        if (b.expected_revision !== g.revision) return err(409, "DRAFT_CHANGED", "Ayarlar başka yerde değişti.");
+        if (b.enabled && !b.sender) return err(400, "SENDER_REQUIRED", "Otomatik SMS'i açmak için bir gönderici adı seçin.");
+        console.log("WRITE netgsm settings", JSON.stringify(b));
+        Object.assign(g, { enabled: b.enabled, sender: b.sender, encoding: b.encoding, store_name: b.store_name, channels: b.channels, rules: b.rules, revision: g.revision + 1 });
+        send(res, 200, view());
+      });
+      if (path === "/netgsm/senders") return send(res, 200, { senders: g.senders });
+      if (path === "/netgsm/balance") return send(res, 200, { items: [{ name: "SMS", amount: "1.240 adet" }, { name: "TL", amount: "85,40" }] });
+      if (path === "/netgsm/preview") return readBody((b) => {
+        const known = b.scope === "bulk" ? ["ad", "magaza"] : ["ad", "siparis_no", "tutar", "kargo_firmasi", "takip_no", "magaza"];
+        const unknown = [...String(b.text || "").matchAll(/\[([^\]]+)\]/g)].map((x) => x[1]).filter((x) => !known.includes(x));
+        const sample = { ad: "Ayşe Yılmaz", siparis_no: "1042", tutar: "349,90 TL", kargo_firmasi: "Aras Kargo", takip_no: "AR123", magaza: g.store_name || "Mağaza" };
+        const text = String(b.text || "").replace(/\[([^\]]+)\]/g, (a, k) => sample[k] || a);
+        const limit = b.encoding === "DEFAULT" ? 917 : 900;
+        send(res, 200, { text, unknown, length: text.length, limit, fits: text.length <= limit });
+      });
+      if (path === "/netgsm/recipients") {
+        const src = url.searchParams.get("source");
+        const items = src === "customers" ? [{ name: "Elif Kaya", phone: "+905551112233" }, { name: "Can Öztürk", phone: "+905321234567" }, { name: "Ayşe Yılmaz", phone: "+905431112233" }]
+          : src === "website_members" ? [{ name: "Mehmet Demir", phone: "+905301112233" }, { name: "Elif Kaya", phone: "+905551112233" }] : [];
+        return send(res, 200, { items, without_phone: src === "customers" ? 2 : 0, truncated: false });
+      }
+      if (path === "/netgsm/campaigns" && req.method === "GET") return send(res, 200, { items: g.campaigns.map(({ recipients, ...r }) => r) });
+      if (path === "/netgsm/campaigns" && req.method === "POST") return readBody((b) => {
+        const prev = g.campaigns.find((c) => c.request_id === b.request_id);
+        if (prev) { console.log("netgsm campaign replay", b.request_id); return send(res, 200, prev); }
+        if (!g.sender) return err(400, "SENDER_REQUIRED", "SMS göndermek için ayarlardan bir gönderici adı seçin.");
+        if (b.commercial && !["BRAND", "RETAILER", "BRAND_AND_RETAILER"].includes(b.iys_filter)) return err(400, "IYS_FILTER_REQUIRED", "Ticari SMS için İYS filtresi seçilmelidir.");
+        if (b.commercial && !b.consent_ack) return err(400, "CONSENT_REQUIRED", "İzin onayı gerekli.");
+        console.log("WRITE netgsm campaign", b.request_id, b.recipients.length);
+        if (state.smsUnknown === "1") { state.smsUnknown = "0"; return err(503, "UNKNOWN_OUTCOME", "Netgsm'e istek gönderildi ama yanıt alınamadı; SMS gitmiş olabilir. Yeniden göndermeden önce Netgsm panelinden kontrol edin."); }
+        const c = { id: "cmp" + (g.campaigns.length + 1), request_id: b.request_id, state: "sent", text: b.text, commercial: b.commercial, iys_filter: b.iys_filter, sender: g.sender,
+          total: b.recipients.length, accepted: b.recipients.length, rejected: 0, invalid: 0, duplicates: 0, rejected_items: [], created_at: new Date().toISOString() };
+        g.campaigns.unshift(c);
+        send(res, 200, c);
+      });
+      if (path === "/netgsm/messages") return send(res, 200, { items: [
+        { id: "m1", event: "created", order_no: "1042", customer_name: "Ayşe Yılmaz", phone: "+90 543 *** ** 33", state: "sent", delivery: "DELIVERED", created_at: "2026-11-22T08:10:00Z" },
+        { id: "m2", event: "shipped", order_no: "1039", customer_name: "Can Öztürk", phone: "+90 532 *** ** 67", state: "sent", delivery: "NOT_DELIVERED", fail_reason: "IYS_REJECTED", created_at: "2026-11-21T16:40:00Z" },
+        { id: "m3", event: "admin_created", order_no: "1042", customer_name: "", phone: "+90 555 *** ** 33", state: "unknown", error: "Netgsm yanıt vermedi.", created_at: "2026-11-21T12:00:00Z" },
+      ] });
+      return send(res, 404, { detail: "Bulunamadı" });
+    }
     // Yeni cari (gerçek uç: backend/routers/customers.py create_customer)
     if (path === "/customers" && req.method === "POST")
       return readBody((b) => {

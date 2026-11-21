@@ -7,7 +7,7 @@ import { hepsiJetVisible } from "../../src/hepsijet-ui";
 import { useNotifications } from "../../src/notifications/store";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { spacing, type } from "../../src/theme/tokens";
-import { BellIcon, ChartIcon, LogoutIcon, MailIcon, PackageIcon, RefreshIcon, SettingsIcon, SparkleIcon, TruckIcon, WalletIcon } from "../../src/components/Icons";
+import { BellIcon, ChartIcon, LogoutIcon, MailIcon, PackageIcon, PhoneIcon, RefreshIcon, SettingsIcon, SparkleIcon, TruckIcon, WalletIcon } from "../../src/components/Icons";
 import { canAccess, canManage, canSeeReceipts, canSell } from "../../src/auth/permissions";
 import { TabHeader } from "../../src/ui/Header";
 import { useFeedback } from "../../src/ui/Feedback";
@@ -92,6 +92,17 @@ export default function MenuScreen() {
               subtitle="Yayın, sepet rezervasyonu ve ödemeler"
               chevron
               onPress={() => router.push("/website" as Href)}
+            />
+          ) : null}
+          {canAccess(user, "settings") ? (
+            <ListRow
+              testID="menu-sms"
+              divider
+              leading={<IconTile tint={colors.violetSoft}><PhoneIcon size={18} color={colors.violet} /></IconTile>}
+              title="SMS"
+              subtitle="Netgsm, sipariş SMS'leri ve toplu SMS"
+              chevron
+              onPress={() => router.push("/sms" as Href)}
             />
           ) : null}
           {canSeeReceipts(user) ? (

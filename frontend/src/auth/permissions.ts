@@ -59,6 +59,8 @@ const ROUTE_AREAS: Record<string, Area[]> = {
   incoming: ["billing"],
   customers: ["customers"],
   "pos-receipts": ["orders"],
+  // Netgsm SMS: GET /netgsm Ayarlar modülüyle açılır (team_access ("netgsm","mod",("settings",))).
+  sms: ["settings"],
   reports: ["reports"],
 };
 
