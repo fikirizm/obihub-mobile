@@ -2,18 +2,18 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Platform, RefreshControl, StyleSheet, Text, View } from "react-native";
 import ReanimatedSwipeable, { type SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import * as Haptics from "expo-haptics";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, type } from "../../src/theme/tokens";
 import { getIntegrations, getOrdersPage, getOrderStats, type OrderStats } from "../../src/api";
-import { groupCount, ORDER_GROUPS, orderQuery, type OrderGroupKey } from "../../src/order-filters";
+import { groupCount, ORDER_GROUPS, orderQuery, orderReportLink, type OrderGroupKey } from "../../src/order-filters";
 import { bulkDeleteOrders, canCreateHepsiJetShipment } from "../../src/api-siparis";
 import { createHepsiJetShipment } from "../../src/api";
-import { canManage } from "../../src/auth/permissions";
+import { canAccess, canManage } from "../../src/auth/permissions";
 import { Button } from "../../src/ui/Button";
 import { isStoreIntegration, providerLabel } from "../../src/utils";
-import { InboxIcon, PrinterIcon, TrashIcon } from "../../src/components/Icons";
+import { ChartIcon, InboxIcon, PrinterIcon, TrashIcon } from "../../src/components/Icons";
 import { PressableScale } from "../../src/components/KPICard";
 import { printOrderLabel } from "../../src/labels";
 import { useFeedback } from "../../src/ui/Feedback";
@@ -102,6 +102,7 @@ function SwipeableOrder({ order, divider, onPrint, busy }: { order: Order; divid
 export default function OrdersScreen() {
   const params = useLocalSearchParams<{ filter?: string; stale?: string; t?: string }>();
   const { token, user } = useAuth();
+  const reportLink = orderReportLink(canAccess(user, "reports"));
   const { colors } = useTheme();
   const [filter, setFilter] = useState<FilterKey>("all");
   // Panel uyarısından gelindiğinde yalnızca 3 günden eski bekleyen siparişler, en eskiden yeniye listelenir.
@@ -306,7 +307,27 @@ export default function OrdersScreen() {
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="orders-screen">
-      <TabHeader title="Siparişler" subtitle={loading ? undefined : `${total}${staleOnly && hasMore ? "+" : ""} sipariş`} />
+      <TabHeader
+        title="Siparişler"
+        subtitle={loading ? undefined : `${total}${staleOnly && hasMore ? "+" : ""} sipariş`}
+        action={
+          reportLink ? (
+            <PressableScale
+              testID="orders-report-btn"
+              onPress={() => router.push(reportLink.route)}
+              accessibilityRole="button"
+              accessibilityLabel={reportLink.a11y}
+              hitSlop={6}
+              style={[styles.reportBtn, { backgroundColor: colors.violetSoft }]}
+            >
+              <ChartIcon size={16} color={colors.violet} />
+              <Text style={[type.caption, styles.reportText, { color: colors.violet }]} numberOfLines={1}>
+                {reportLink.label}
+              </Text>
+            </PressableScale>
+          ) : undefined
+        }
+      />
       <SearchField testID="orders-search" value={search} onChangeText={setSearch} placeholder="Müşteri veya sipariş no ara" />
       {canBulk && (selectMode || eligibleCount > 0) ? (
         <View style={styles.bulkToggle}>
@@ -474,6 +495,8 @@ export default function OrdersScreen() {
 }
 
 const styles = StyleSheet.create({
+  reportBtn: { flexDirection: "row", alignItems: "center", gap: 6, minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.pill },
+  reportText: { fontWeight: "700" },
   bulkToggle: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginHorizontal: spacing.lg, marginBottom: spacing.xs },
   bulkBar: { padding: spacing.md, borderTopWidth: StyleSheet.hairlineWidth },
   selectRow: { flexDirection: "row", alignItems: "center", paddingLeft: spacing.md },

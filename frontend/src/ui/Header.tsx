@@ -17,7 +17,8 @@ const ICO = require("../../assets/obihub/obihub-ico.png");
 
 // Sekme ekranlarının üst çubuğu: logo ve karşılama solda; bildirim, tema ve çıkış sağda.
 // Altında ekranın büyük başlığı yer alır.
-export function TabHeader({ title, eyebrow, subtitle }: { title: string; eyebrow?: string; subtitle?: string }) {
+// action: büyük başlığın sağındaki tek kısayol (ör. Sipariş sekmesinde "Sipariş Raporu"); sekme yapısını değiştirmez.
+export function TabHeader({ title, eyebrow, subtitle, action }: { title: string; eyebrow?: string; subtitle?: string; action?: React.ReactNode }) {
   const insets = useSafeAreaInsets();
   const { colors, mode, toggle, shadows } = useTheme();
   const { user, logout } = useAuth();
@@ -90,9 +91,12 @@ export function TabHeader({ title, eyebrow, subtitle }: { title: string; eyebrow
             {lead.toLocaleUpperCase("tr-TR")}
           </Text>
         ) : null}
-        <Text accessibilityRole="header" style={[type.largeTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          {title}
-        </Text>
+        <View style={styles.titleRow}>
+          <Text accessibilityRole="header" style={[type.largeTitle, { color: colors.textPrimary, flexShrink: 1 }]} numberOfLines={1}>
+            {title}
+          </Text>
+          {action ? <View style={styles.titleAction}>{action}</View> : null}
+        </View>
       </SafeAnimatedView>
     </View>
   );
@@ -135,6 +139,8 @@ const styles = StyleSheet.create({
   logoTile: { width: 44, height: 44, borderRadius: radius.md, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   logo: { width: 28, height: 28 },
   titleBlock: { marginTop: spacing.md },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  titleAction: { marginLeft: "auto" },
   eyebrow: { fontWeight: "700", letterSpacing: 0.4, marginBottom: 2 },
   stackWrap: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
   iconBtn: { width: 44, height: 44, borderRadius: radius.md, alignItems: "center", justifyContent: "center", borderWidth: 1 },

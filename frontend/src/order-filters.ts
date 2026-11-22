@@ -38,3 +38,9 @@ export function orderQuery(o: { group: string; integrationId?: string; search?: 
     search: q.length >= 2 ? q : undefined,
   };
 }
+
+// Sipariş sekmesi başlığındaki "Sipariş Raporu" düğmesi (kullanıcı kararı 22 Kas 2026); yalnız rapor izni olana (canAccess "reports").
+export type OrderReportLink = { label: string; route: "/reports"; a11y: string };
+export function orderReportLink(canSeeReports: boolean): OrderReportLink | null {
+  return canSeeReports ? { label: "Sipariş Raporu", route: "/reports", a11y: "Sipariş Raporu'nu aç" } : null;
+}

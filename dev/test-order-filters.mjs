@@ -43,4 +43,10 @@ t("arama sunucuda kaçışlanır: istemci metni olduğu gibi gönderir (+90 tele
   assert.equal(m.orderQuery({ group: "all", search: "+90 (555)" }).search, "+90 (555)");
 });
 
+// Kullanıcı kararı (22 Kas 2026, PM aracılığıyla: "Evet, eklensin"): Sipariş sekmesi başlığında Sipariş Raporu düğmesi; yalnız rapor izni olana.
+t("Sipariş Raporu düğmesi: rapor izni varsa /reports, yoksa gösterilmez", () => {
+  assert.deepEqual(m.orderReportLink(true), { label: "Sipariş Raporu", route: "/reports", a11y: "Sipariş Raporu'nu aç" });
+  assert.equal(m.orderReportLink(false), null);
+});
+
 console.log(`\n${n} test geçti`);
