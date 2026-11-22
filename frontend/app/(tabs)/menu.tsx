@@ -176,8 +176,8 @@ export default function MenuScreen() {
               testID="menu-reports"
               divider={canProducts || canPos || hepsijet}
               leading={<IconTile tint={colors.violetSoft}><ChartIcon size={18} color={colors.violet} /></IconTile>}
-              title="Raporlar"
-              subtitle="Satış, kanal ve ürün analizi"
+              title="Sipariş Raporu"
+              subtitle="Ciro, kanal ve ürün performansı"
               chevron
               onPress={() => router.push("/reports")}
             />

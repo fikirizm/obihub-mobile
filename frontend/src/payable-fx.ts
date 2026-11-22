@@ -47,6 +47,28 @@ export function cashSuggestion(amountDot: string, rate: string) {
   const k = expectedKurus(amountDot, rate);
   return k === null ? "" : trText(k);
 }
+// Elle girilmiş TL, döviz tutarı değişince aynı oranla ölçeklenir (kullanıcının fiili kuru korunur): yeniTL = eskiTL × yeni / eski,
+// kuruşa yarım yukarı. Girdiler noktalı ("3700.00"); sonuç TR metni. Ölçeklenemiyorsa "" (alan olduğu gibi kalır). Web: scaleCash.
+export function scaleCash(oldCashDot: string, oldAmountDot: string, newAmountDot: string) {
+  const c = amountMinor(oldCashDot);
+  const a = amountMinor(oldAmountDot);
+  const n = amountMinor(newAmountDot);
+  const zero = BigInt(0);
+  if (c === null || a === null || n === null || c <= zero || a <= zero || n <= zero) return "";
+  return trText((c * n * BigInt(2) + a) / (a * BigInt(2)));
+}
+// TL / döviz tutarı oranı önerilen kurdan %5'ten fazla sapıyor mu? (BigInt; girdi ya da kur geçersizse false). Web: rateDeviates.
+export function rateDeviates(cashDot: string, amountDot: string, rate: string) {
+  const c = amountMinor(cashDot);
+  const a = amountMinor(amountDot);
+  const r = rateMicro(rate);
+  const zero = BigInt(0);
+  if (c === null || a === null || r === null || c <= zero || a <= zero || r <= zero) return false;
+  const actual = c * BigInt(1000000);
+  const expected = a * r;
+  const diff = actual > expected ? actual - expected : expected - actual;
+  return diff * BigInt(100) > expected * BigInt(5);
+}
 // Sunucunun bandı: beklenen (döviz × fatura kuru) × 0,5 ≤ çıkan TL ≤ × 1,5. Kur bilinmiyorsa uyarı yok.
 export function cashOutOfBand(amountDot: string, invoiceRate: string, cashDot: string) {
   const k = expectedKurus(amountDot, invoiceRate);

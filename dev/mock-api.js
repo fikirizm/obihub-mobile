@@ -346,7 +346,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig", "yurtici", "yurticiCancel", "officializer", "ppay"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig", "yurtici", "yurticiCancel", "officializer", "ppay", "counters", "ieFail"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -1349,7 +1349,7 @@ http
       return send(res, 200, { month, carry, period: { from: month + "-01", to: month + "-28" }, previous_month: prevM(month),
         currencies: empty ? [{ currency: "TRY", output: zero, input: zero, result: { kdv1_net: "0.00", status: "zero", payable: "0.00", carry_forward: "0.00" } }] : [TRY, { currency: "USD", output: { ...zero, base: "100.00", vat: "20.00", declared_vat: "20.00", count: 1, by_rate: [{ rate: "20", base: "100.00", vat: "20.00" }] }, input: zero,
           result: { kdv1_net: "20.00", status: "payable", payable: "20.00", carry_forward: "0.00" }, try_equivalent: { output_vat: "650.00", input_vat: "0.00", missing_rate_count: 1 } }],
-        previous: { month: prevM(month), currencies: [{ currency: "TRY", output_vat: "60.00", declared_vat: "60.00", input_vat: "20.00", kdv1_net: "40.00" }] },
+        previous: { month: prevM(month), currencies: [{ currency: "TRY", output_vat: "60.00", declared_vat: "60.00", input_vat: "20.00", kdv1_net: "40.00", vat_unknown_count: 1 }] },
         rows: empty ? [] : [
           { side: "sales", kind: "sales_invoice", id: "S1", number: "FTR-S1", date: month + "-05", party_name: "Elif Kaya", currency: "TRY", is_return: false, origin: "obihub", base: "150.00", vat: "25.00", withholding: "0.00", vat_known: true, rates: [{ rate: "10" }, { rate: "20" }] },
           { side: "sales", kind: "sales_invoice", id: "R1", number: "VKT2", date: month + "-08", party_name: "Can Öztürk", currency: "TRY", is_return: true, origin: "parasut", base: "-50.00", vat: "-10.00", withholding: "0.00", vat_known: true, rates: [{ rate: "20" }] },
@@ -1821,7 +1821,15 @@ http
         send(res, 200, out);
       });
     }
+    // P6.3 pano sayaçları: ?counters=403 | 500 | nosales (unsent null)
+    if (path === "/finance/dashboard-counters") {
+      if (state.counters === "403") return send(res, 403, { detail: "Yetkiniz yok" });
+      if (state.counters === "500") return send(res, 500, { detail: "Sunucu hatası" });
+      return send(res, 200, { as_of: new Date().toISOString().slice(0, 10), recurring: { active: 4, due_today: 1, due_week: 3, failing: 0 },
+        unsent: state.counters === "nosales" ? null : { count: 2, window_days: 90, capped: false } });
+    }
     if (path === "/finance/income-expense-summary") {
+      if (state.ieFail === "1") return send(res, 500, { detail: "Sunucu hatası" });
       const basis = url.searchParams.get("basis") || "accrual";
       const from = url.searchParams.get("date_from"), to = url.searchParams.get("date_to");
       console.log("IE-SUMMARY", from, to, basis);
@@ -1841,9 +1849,15 @@ http
               { kind: "expense", category_id: "malzeme", name: "Ambalaj malzemesi", source: "expense_records", net: "2500.00" },
               { kind: "expense", category_id: "manual:other", name: "Diğer (kasa)", source: "manual", net: "1500.00" },
             ] };
+      if (!cash) tr.tags = [
+        { tag_id: "t1", name: "Kış kampanyası", income: "12500.00", expense: "4200.00", result: "8300.00" },
+        { tag_id: "t2", name: "Toptan", income: "6000.00", expense: "7150.50", result: "-1150.50" },
+        { tag_id: null, name: "Etiketsiz", income: "9750.00", expense: "2547.56", result: "7202.44" },
+      ];
       const usd = { currency: "USD", income: { net: "1000.00", vat: cash ? null : "200.00", gross: cash ? "1000.00" : "1200.00", sources: { sales_invoices: src("1000.00", "200.00", 1) } }, expense: { net: "0.00", vat: cash ? null : "0.00", gross: "0.00", vat_unknown: "0.00", sources: {} }, result: "1000.00", categories: [] };
+      if (!cash) usd.tags = [];
       return send(res, 200, { period: { from, to }, basis, currencies: [tr, usd],
-        scope: { source: "obihub_ledger", as_of: new Date().toISOString().slice(0, 10), parasut_last_import: cash ? null : "2026-11-01T10:00:00+00:00", unsplit_pos_mixed: 1, refund_split_unknown: cash ? 0 : 2,
+        scope: { notes: cash ? {} : { tags: "Etiketli belge her etiketinde sayılır; etiket toplamı rapor toplamını aşabilir. Etiketsiz belgeler ayrı satırdadır (yalnız tahakkuk)." }, source: "obihub_ledger", as_of: new Date().toISOString().slice(0, 10), parasut_last_import: cash ? null : "2026-11-01T10:00:00+00:00", unsplit_pos_mixed: 1, refund_split_unknown: cash ? 0 : 2,
           excluded: cash ? ["internal_transfers", "pos_not_posted_to_cash"] : ["uninvoiced_orders", "purchase_invoices_in_parasut", "draft_quote_cancelled_invoices", "internal_transfers"] } });
     }
     if (path === "/local-invoices/summary") return send(res, 200, { total_remaining: localInvoices.filter((i) => i.currency === "TRY" && i.status !== "taslak").reduce((n, i) => n + i.remaining_amount, 0), overdue_amount: 6200, overdue_count: 1, scalar_currency: "TRY", by_currency: { USD: { total_remaining: localInvoices.filter((i) => i.currency === "USD").reduce((n, i) => n + i.remaining_amount, 0), overdue_amount: 0 } } });
@@ -1914,6 +1928,11 @@ http
       const it = url.searchParams.get("invoice_type") || "satis";
       const qo = url.searchParams.get("quote_outcome");
       const rows = localInvoices.filter((i) => (i.invoice_type || "satis") === it && (!st || i.status === st) && (vw ? VIEW_FILTER[vw](i) : !i.archived) && (!qo || QUOTE_FILTER[qo](i)));
+      if (url.searchParams.get("unsent") === "1") {
+        const un = rows.filter((i) => i.status !== "taslak" && i.status !== "iptal").slice(0, 2);
+        console.log("LOCAL-INVOICES unsent=1", un.length);
+        return send(res, 200, { items: un, total: un.length, page: 1, per_page: 30, total_pages: 1 });
+      }
       return send(res, 200, { items: rows, total: rows.length, page: 1, per_page: 30, total_pages: 1 });
     }
     // C4 eki: Paraşüt tahsilat senkronu

@@ -66,4 +66,20 @@ t("hata metinleri", () => {
   assert.match(m.fxErrorText({ code: "PAYMENT_CASH_AMOUNT_REQUIRED" }), /hesaptan çıkan TL/);
   assert.equal(m.fxErrorText({ code: "OTHER" }), null);
 });
+t("elle TL döviz tutarıyla aynı oranla ölçeklenir (kuruş, BigInt)", () => {
+  assert.equal(m.scaleCash("3700.00", "100.00", "50.00"), "1.850,00");
+  assert.equal(m.scaleCash("3700.00", "100.00", "33.33"), "1.233,21");
+  assert.equal(m.scaleCash("1000.00", "3.00", "1.00"), "333,33");
+  assert.equal(m.scaleCash("", "100.00", "50.00"), "");
+  assert.equal(m.scaleCash("3700.00", "0", "50.00"), "");
+  assert.equal(m.scaleCash("3700.00", "100.00", ""), "");
+});
+t("TL/tutar oranı önerilen kurdan %5'ten fazla saparsa uyarı", () => {
+  assert.equal(m.rateDeviates("3650.00", "100.00", "36.5"), false);
+  assert.equal(m.rateDeviates("3832.50", "100.00", "36.5"), false);
+  assert.equal(m.rateDeviates("3832.51", "100.00", "36.5"), true);
+  assert.equal(m.rateDeviates("3467.49", "100.00", "36,5"), true);
+  assert.equal(m.rateDeviates("3650.00", "100.00", ""), false);
+  assert.equal(m.rateDeviates("", "100.00", "36.5"), false);
+});
 console.log(`${n} test geçti`);

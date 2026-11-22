@@ -907,7 +907,7 @@ export async function collectPartyPayment(token: string, partyId: string, body: 
 
 export async function getLocalInvoices(
   token: string,
-  options: { page?: number; search?: string; status?: string; view?: string; invoiceType?: "satis" | "teklif"; quoteOutcome?: string } = {}
+  options: { page?: number; search?: string; status?: string; view?: string; invoiceType?: "satis" | "teklif"; quoteOutcome?: string; unsent?: boolean } = {}
 ) {
   const page = options.page ?? 1;
   const perPage = 30;
@@ -918,6 +918,8 @@ export async function getLocalInvoices(
   if (options.status) qs.set("status", options.status);
   // Toplu sürüm 1: iki eksenli liste görünümü (taslak|kesildi|resmilesti|tahsil|gecikmis|iptal).
   if (options.view) qs.set("view", options.view);
+  // P6.3: pano "Gönderilmemiş fatura" sayacıyla aynı küme (son 90 gün, sipariş faturaları hariç).
+  if (options.unsent) qs.set("unsent", "1");
   return paged<LocalInvoice>(await request<any>(`/local-invoices?${qs.toString()}`, { method: "GET" }, token), "items", page, perPage);
 }
 

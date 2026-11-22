@@ -136,7 +136,7 @@ export default function DashboardScreen() {
       key: "products", title: "Ürünler", desc: "Stok ve fiyat", fg: colors.primary, bg: colors.primarySoft, Icon: PackageIcon, go: () => router.push("/products"),
     },
     canAccess(user, "reports") && {
-      key: "reports", title: "Raporlar", desc: "Kanal ve ürün analizi", fg: colors.violet, bg: colors.violetSoft, Icon: ChartIcon, go: () => router.push("/reports"),
+      key: "reports", title: "Sipariş Raporu", desc: "Ciro, kanal ve ürün", fg: colors.violet, bg: colors.violetSoft, Icon: ChartIcon, go: () => router.push("/reports"),
     },
     canAccess(user, "customers") && {
       key: "customers", title: "Cari hesaplar", desc: "Bakiye ve tahsilat", fg: colors.emerald, bg: colors.emeraldSoft, Icon: UserIcon, go: () => router.push("/customers"),
@@ -199,10 +199,20 @@ export default function DashboardScreen() {
               </View>
             </View>
 
-            <View accessible accessibilityLabel={`Bugün ${formatTry(todayRevenue)} ciro, ${todayOrders} sipariş`}>
+            {/* P6.3: bugünkü ciro Sipariş Raporu'na geçer (web: /siparisler/performans, rapor izni). */}
+            <PressableScale
+              testID="dash-today-report"
+              disabled={!canAccess(user, "reports")}
+              onPress={() => router.push("/reports")}
+              accessibilityRole={canAccess(user, "reports") ? "button" : undefined}
+              accessibilityLabel={`Bugün ${formatTry(todayRevenue)} ciro, ${todayOrders} sipariş${canAccess(user, "reports") ? ". Sipariş Raporu'nu aç" : ""}`}
+            >
               <AnimatedNumber testID="dash-today-revenue" value={todayRevenue} format={(n) => formatTry(n)} style={[styles.heroValue, tabular]} />
-              <Text testID="dash-today-orders" style={styles.heroSub}>{todayOrders} sipariş</Text>
-            </View>
+              <View style={styles.todayRow}>
+                <Text testID="dash-today-orders" style={styles.heroSub}>{todayOrders} sipariş</Text>
+                {canAccess(user, "reports") ? <Text style={styles.reportLink}>Sipariş Raporu ›</Text> : null}
+              </View>
+            </PressableScale>
 
             <View
               style={styles.chartWrap}
@@ -373,6 +383,8 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },
+  todayRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  reportLink: { color: ON_HERO.soft, fontSize: 13, fontWeight: "600" },
   heroTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
   liveChip: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: ON_HERO.faint, borderRadius: 9999, paddingHorizontal: 12, height: 30 },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: ON_HERO.live },

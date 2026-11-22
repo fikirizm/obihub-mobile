@@ -50,7 +50,8 @@ export function RowCard({
           </Text>
         ) : null}
       </View>
-      <View style={{ alignItems: "flex-end", gap: 4 }}>
+      {/* Sağ sütun en çok yarı genişlik: çok rozetli satırda rozetler alt satıra kayar, başlık ezilmez. */}
+      <View style={{ alignItems: "flex-end", gap: 4, maxWidth: "55%", flexShrink: 1 }}>
         {amount ? <Text style={[type.bodyStrong, tabular, { color: amountColor || colors.textPrimary }]}>{amount}</Text> : null}
         {badge}
       </View>

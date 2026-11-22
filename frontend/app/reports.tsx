@@ -178,7 +178,7 @@ export default function ReportsScreen() {
   if (!canAccess(reportsUser, "reports")) {
     return (
       <View style={{ flex: 1, backgroundColor: guardColors.background }} testID="reports-screen">
-        <StackHeader title="Raporlar" subtitle="Satış ve kanal analizi" />
+        <StackHeader title="Sipariş Raporu" subtitle="Ciro, kanal ve ürün performansı" />
         <EmptyState
           icon={<ChartIcon size={30} color={guardColors.textTertiary} />}
           title="Raporlara yetkiniz yok"
@@ -420,7 +420,7 @@ function ReportsContent() {
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.background }]} testID="reports-screen">
-      <StackHeader title="Raporlar" subtitle="Satış ve kanal analizi" />
+      <StackHeader title="Sipariş Raporu" subtitle="Ciro, kanal ve ürün performansı" />
       <NetworkErrorBanner visible={isOffline && !!reports} offline />
       <ScrollView
         contentContainerStyle={{ paddingBottom: spacing.huge }}

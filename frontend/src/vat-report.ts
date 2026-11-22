@@ -64,6 +64,8 @@ export function vatNotes(cur: any, data: any) {
     notes.push(
       `${monthLabel(data?.previous?.month || shiftMonth(data?.month || currentMonth(), -1))}: ${net > 0 ? "ödenecek" : net < 0 ? "devreden" : "fark yok"} KDV ${money(String(prev.kdv1_net).replace(/^-/, ""), code)} (hesaplanan ${money(prev.output_vat, code)}, indirilecek ${money(prev.input_vat, code)}).`
     );
+    // P6.3: geçen ayda KDV'si bilinmeyen kayıt varsa sonuç eksik olabilir (web GuncelDurum gd-vat-prev-incomplete).
+    if (Number(prev.vat_unknown_count) > 0) notes.push(`Geçen ay ${Number(prev.vat_unknown_count)} kaydın KDV tutarı bilinmiyor; sonuç eksik olabilir.`);
   }
   return notes;
 }

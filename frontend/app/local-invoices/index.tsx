@@ -1,16 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { mirrorBadge } from "../../src/mirror";
 import { StyleSheet, Text, View } from "react-native";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { getLocalInvoices, getLocalInvoiceSummary } from "../../src/api";
 import { getUiCapabilities } from "../../src/api-gider";
 import { invoiceStatusView, SALES_TABS } from "../../src/invoice-status";
+import { isUnsentParam, UNSENT_CHIP } from "../../src/finance-dashboard";
 import { useDebounce } from "../../src/hooks/useDebounce";
 import { usePagedList } from "../../src/hooks/usePagedList";
 import { useTheme } from "../../src/theme/ThemeProvider";
-import { spacing, tabular, type } from "../../src/theme/tokens";
+import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { formatDate, formatMoney, formatTry } from "../../src/utils";
 import { AlertIcon, CheckIcon, FileTextIcon, PlusIcon, ReceiptIcon } from "../../src/components/Icons";
 import { FadeInDown, SafeAnimatedView } from "../../src/components/SafeAnimatedView";
@@ -52,6 +53,10 @@ export default function LocalInvoicesScreen() {
   const [search, setSearch] = useState("");
   const debounced = useDebounce(search.trim(), 350);
   const [view, setView] = useState("");
+  // Finans sekmesindeki "Gönderilmemiş fatura" sayacından gelinirse (?unsent=1) liste sayaçla aynı kümeye süzülür.
+  const params = useLocalSearchParams<{ unsent?: string }>();
+  const [unsentOnly, setUnsentOnly] = useState(isUnsentParam(params.unsent));
+  useEffect(() => setUnsentOnly(isUnsentParam(params.unsent)), [params.unsent]);
   const [parasutConnected, setParasutConnected] = useState(false);
   useEffect(() => {
     if (token) getUiCapabilities(token).then((c) => setParasutConnected(c.parasutConnected));
@@ -59,8 +64,8 @@ export default function LocalInvoicesScreen() {
   const [summary, setSummary] = useState<{ total_remaining?: number; overdue_amount?: number; by_currency?: Record<string, { total_remaining?: number; overdue_amount?: number }> } | null>(null);
 
   const fetchPage = useCallback(
-    (page: number) => getLocalInvoices(token as string, { page, search: debounced || undefined, view: view || undefined }),
-    [token, debounced, view]
+    (page: number) => getLocalInvoices(token as string, { page, search: debounced || undefined, view: view || undefined, unsent: unsentOnly }),
+    [token, debounced, view, unsentOnly]
   );
   const list = usePagedList<LocalInvoice>(token ? fetchPage : null);
 
@@ -103,6 +108,21 @@ export default function LocalInvoicesScreen() {
           />
         </View>
       ) : null}
+      {unsentOnly ? (
+        <View testID="unsent-chip" accessibilityRole="summary" style={[styles.unsent, { backgroundColor: colors.warningBg }]}>
+          <Text style={[type.footnote, { color: colors.textPrimary, flex: 1, fontWeight: "600" }]}>{UNSENT_CHIP}</Text>
+          <Button
+            testID="unsent-chip-clear"
+            size="sm"
+            variant="ghost"
+            label="Temizle"
+            onPress={() => {
+              setUnsentOnly(false);
+              router.setParams({ unsent: undefined });
+            }}
+          />
+        </View>
+      ) : null}
       <SearchField testID="local-invoices-search" value={search} onChangeText={setSearch} placeholder="Müşteri veya fatura no ara" />
       <ChipRow>
         {SALES_TABS.map(([key, label]) => (
@@ -112,8 +132,8 @@ export default function LocalInvoicesScreen() {
       <ListBody
         state={{ ...list, refresh: () => { loadSummary(); list.refresh(); } }}
         icon={<ReceiptIcon size={30} color={colors.emerald} />}
-        emptyTitle="Fatura yok"
-        emptyAction={mayCreate && !debounced && !view ? { label: "Fatura oluştur", onPress: () => router.push("/local-invoices/new") } : null}
+        emptyTitle={unsentOnly ? "Gönderilmemiş fatura yok" : "Fatura yok"}
+        emptyAction={mayCreate && !debounced && !view && !unsentOnly ? { label: "Fatura oluştur", onPress: () => router.push("/local-invoices/new") } : null}
         emptyDescription={mayCreate ? "Bu süzgece uyan satış faturası bulunmuyor. Yukarıdaki düğmeyle yeni fatura oluşturabilirsiniz." : "Bu süzgece uyan satış faturası bulunmuyor."}
         renderItem={(inv) => {
           // İki eksen (web invoiceStatus.js): belge (Taslak/Kesildi/Resmileşti/İptal) + Resmileşmedi (Paraşüt bağlıysa) + tahsilat.
@@ -160,4 +180,5 @@ const styles = StyleSheet.create({
   actions: { marginHorizontal: spacing.lg, marginBottom: spacing.sm },
   badges: { flexDirection: "row", flexWrap: "wrap", gap: 4, justifyContent: "flex-end" },
   stats: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
+  unsent: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginHorizontal: spacing.lg, marginBottom: spacing.sm, paddingLeft: spacing.md, paddingVertical: 4, paddingRight: 4, borderRadius: radius.md },
 });

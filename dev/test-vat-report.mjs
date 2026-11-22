@@ -111,4 +111,12 @@ t("rapor hata metinleri", () => {
   assert.match(m.vatErrorText({ code: "VAT_REPORT_PARAMS_INVALID" }), /ay geçersiz/);
   assert.match(m.vatErrorText({ status: 403 }), /yetkiniz yok/);
 });
+t("geçen ayda KDV'si bilinmeyen kayıt varsa eksik veri notu", () => {
+  const data = { month: "2026-11", previous: { month: "2026-10", currencies: [{ currency: "TRY", kdv1_net: "120.00", output_vat: "200.00", input_vat: "80.00", vat_unknown_count: 2 }] } };
+  const notes = m.vatNotes({ currency: "TRY", output: {}, input: {} }, data);
+  assert.ok(notes.some((x) => /Ekim 2026: ödenecek KDV/.test(x)));
+  assert.ok(notes.some((x) => x === "Geçen ay 2 kaydın KDV tutarı bilinmiyor; sonuç eksik olabilir."));
+  const clean = { ...data, previous: { ...data.previous, currencies: [{ ...data.previous.currencies[0], vat_unknown_count: 0 }] } };
+  assert.ok(!m.vatNotes({ currency: "TRY", output: {}, input: {} }, clean).some((x) => /Geçen ay \d/.test(x)));
+});
 console.log(`${n} test geçti`);

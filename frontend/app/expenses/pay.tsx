@@ -45,7 +45,7 @@ import { StackHeader } from "../../src/ui/Header";
 import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
 import { Card, SectionTitle } from "../../src/ui/ListRow";
 import type { CashAccount } from "../../src/types";
-import { cashOutOfBand, cashSuggestion, fxErrorText, needsCash, payAccounts, payCurrency, paymentBody, paymentLine, payRemaining } from "../../src/payable-fx";
+import { cashOutOfBand, cashSuggestion, fxErrorText, rateDeviates, scaleCash, needsCash, payAccounts, payCurrency, paymentBody, paymentLine, payRemaining } from "../../src/payable-fx";
 
 const curOf = (c: unknown) => {
   const v =
@@ -97,6 +97,10 @@ export default function PayablePayScreen() {
   const [note, setNote] = useState("");
   // P5.3: dövizli borcu TL hesaptan öderken hesaptan çıkan TL (öneri: döviz × fatura kuru; kullanıcı düzeltebilir).
   const [cashText, setCashText] = useState("");
+  // P6.3: TL elle değiştirildiyse tutar değişimi öneriyi ezmez; elle girilen TL ve o anki döviz tutarı taban olur ve TL bu tabandan
+  // aynı oranla ölçeklenir (yuvarlama birikmez, boş ara adım tabanı bozmaz). "Öneriyi kullan" elle girişi sıfırlar. Web: PayablePaymentDialog.
+  const cashTouched = useRef(false);
+  const cashBase = useRef<{ cash: string; amount: string } | null>(null);
   const [tried, setTried] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -179,6 +183,28 @@ export default function PayablePayScreen() {
     cashNeeded && info?.fx && amountStr && cashMinor !== null && cashOutOfBand(fixed2(minor || 0), info.fx.rate, fixed2(cashMinor))
       ? "Bu TL tutarı, döviz tutarının fatura kuruyla karşılığından çok farklı; sunucu kabul etmeyebilir. Tutarı ve kuru kontrol edin."
       : "";
+
+  const cashDeviates = Boolean(cashNeeded && info?.fx && amountStr && cashStr && rateDeviates(cashStr, amountStr, info.fx.rate));
+
+  const onAmountChange = (v: string) => {
+    setAmountText(v);
+    const fx = info?.fx;
+    if (!fx) return;
+    const next = decimalText(v, 2) || "";
+    if (!cashTouched.current) {
+      setCashText(cashSuggestion(next, fx.rate));
+      return;
+    }
+    // Elle girilen TL oranla ölçeklenir; ölçeklenemiyorsa (boş / geçersiz) olduğu gibi kalır.
+    const base = cashBase.current || { cash: cashText, amount: amountText };
+    const scaled = scaleCash(decimalText(base.cash, 2) || "", decimalText(base.amount, 2) || "", next);
+    if (scaled) setCashText(scaled);
+  };
+  const onCashChange = (v: string) => {
+    cashTouched.current = true;
+    cashBase.current = { cash: v, amount: amountText };
+    setCashText(v);
+  };
 
   const submit = async () => {
     setTried(true);
@@ -384,7 +410,7 @@ export default function PayablePayScreen() {
               testID="pay-amount"
               label={`Tutar (${currency})`}
               value={amountText}
-              onChangeText={setAmountText}
+              onChangeText={onAmountChange}
               editable={!uncertain}
               keyboardType="decimal-pad"
               placeholder="0,00"
@@ -457,7 +483,7 @@ export default function PayablePayScreen() {
                 label="Hesaptan çıkan TL"
                 suffix="₺"
                 value={cashText}
-                onChangeText={setCashText}
+                onChangeText={onCashChange}
                 editable={!uncertain}
                 keyboardType="decimal-pad"
                 placeholder="0,00"
@@ -470,11 +496,21 @@ export default function PayablePayScreen() {
                   size="sm"
                   variant="ghost"
                   label="Öneriyi kullan"
-                  onPress={() => !uncertain && setCashText(cashSuggestion(fixed2(minor || 0), info.fx!.rate))}
+                  onPress={() => {
+                    if (uncertain) return;
+                    cashTouched.current = false;
+                    cashBase.current = null;
+                    setCashText(cashSuggestion(fixed2(minor || 0), info.fx!.rate));
+                  }}
                   style={{ alignSelf: "flex-start" }}
                 />
               ) : null}
               {cashWarn ? <Text style={[type.caption, { color: colors.amber }]}>{cashWarn}</Text> : null}
+              {!cashWarn && cashDeviates ? (
+                <Text testID="pay-cash-warning" accessibilityLiveRegion="polite" style={[type.caption, { color: colors.amber }]}>
+                  Girdiğiniz TL tutarı önerilen kurdan %5'ten fazla farklı; kur farkı büyük çıkacak. Tutarı kontrol edin.
+                </Text>
+              ) : null}
             </View>
           ) : null}
 

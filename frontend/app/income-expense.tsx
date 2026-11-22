@@ -6,8 +6,9 @@ import { useAuth } from "../src/auth/AuthProvider";
 import { canAccess } from "../src/auth/permissions";
 import { excludedText, getIncomeExpenseSummary, num, sourceLabel, type CurrencySummary, type IncomeExpenseSummary, type SummaryBasis } from "../src/api-rapor";
 import { EmptyState } from "../src/components/EmptyState";
+import { tagNote, tagRows } from "../src/finance-dashboard";
 import { InlineEmpty } from "../src/components/InlineEmpty";
-import { AlertIcon, ChartIcon, DownloadIcon, TrendUpIcon } from "../src/components/Icons";
+import { AlertIcon, ChartIcon, DownloadIcon, TagIcon, TrendUpIcon } from "../src/components/Icons";
 import { FadeInDown, SafeAnimatedView } from "../src/components/SafeAnimatedView";
 import { Skeleton } from "../src/components/Skeleton";
 import { DateRangeModal } from "../src/components/reports/DateRangeModal";
@@ -66,7 +67,8 @@ function IncomeExpenseContent() {
     } catch (e: any) {
       if (my !== seq.current) return;
       setData(null);
-      setError(e?.message || "Gelir-gider özeti yüklenemedi.");
+      // Doğrulama hatası (ör. tarih aralığı) sunucu metniyle; diğerleri sade metin (ham "Sunucu hatası" gösterilmez).
+      setError(Number(e?.status) === 422 && e?.message ? e.message : "Bu dönemin gelir ve gider özeti şu an okunamadı.");
     } finally {
       if (my === seq.current) {
         setLoading(false);
@@ -133,9 +135,9 @@ function IncomeExpenseContent() {
             <InlineEmpty
               testID="ie-error"
               icon={<AlertIcon size={22} color={colors.error} />}
-              title="Özet yüklenemedi"
+              title="Yüklenemedi"
               description={error}
-              actionLabel="Tekrar dene"
+              actionLabel="Yeniden dene"
               onAction={load}
             />
           </Card>
@@ -151,7 +153,7 @@ function IncomeExpenseContent() {
         ) : data ? (
           <View style={{ opacity: loading ? 0.6 : 1 }}>
             {data.currencies.map((c, i) => (
-              <CurrencyBlock key={c.currency} c={c} basis={data.basis} index={i} />
+              <CurrencyBlock key={c.currency} c={c} basis={data.basis} index={i} note={tagNote(data)} />
             ))}
             <ScopeNotes data={data} />
           </View>
@@ -162,7 +164,7 @@ function IncomeExpenseContent() {
   );
 }
 
-function CurrencyBlock({ c, basis, index }: { c: CurrencySummary; basis: SummaryBasis; index: number }) {
+function CurrencyBlock({ c, basis, index, note }: { c: CurrencySummary; basis: SummaryBasis; index: number; note: string }) {
   const { colors } = useTheme();
   const income = num(c.income.net);
   const expense = num(c.expense.net);
@@ -271,10 +273,52 @@ function CurrencyBlock({ c, basis, index }: { c: CurrencySummary; basis: Summary
         </>
       ) : null}
 
+      {basis === "accrual" && Array.isArray(c.tags) ? <TagProfit c={c} note={note} /> : null}
+
       {vatUnknown > 0 ? (
         <Note testID={`ie-vat-unknown-${c.currency}`} text={`KDV ayrımı yapılamayan ${formatMoney(vatUnknown, c.currency)} gider var; bu tutar gidere KDV dahil girmiştir.`} />
       ) : null}
     </SafeAnimatedView>
+  );
+}
+
+// P6.3: etiket başına gelir / gider / kâr-zarar (yalnız tahakkuk). Çok etiketli belge her etiketinde sayılır; etiketsiz satırı en sonda.
+function TagProfit({ c, note }: { c: CurrencySummary; note: string }) {
+  const { colors } = useTheme();
+  const rows = tagRows(c);
+  return (
+    <View testID={`ie-tags-${c.currency}`}>
+      <SectionTitle title={`Etiket bazında kârlılık${c.currency !== "TRY" ? ` · ${c.currency}` : ""}`} />
+      <Card style={styles.block}>
+        {rows.length === 0 ? (
+          <Text style={[type.footnote, { color: colors.textTertiary, padding: spacing.md }]}>Bu dönemde etiketli ya da etiketsiz gelir/gider kaydı yok.</Text>
+        ) : (
+          rows.map((t, i) => (
+            <ListRow
+              key={t.key}
+              testID={t.untagged ? `ie-tag-${c.currency}-untagged` : `ie-tag-${c.currency}-${t.key}`}
+              divider={i > 0}
+              leading={
+                <IconTile tint={t.untagged ? colors.surfaceMuted : colors.primarySoft}>
+                  <TagIcon size={18} color={t.untagged ? colors.textTertiary : colors.primary} />
+                </IconTile>
+              }
+              title={t.name}
+              subtitle={`Gelir ${formatMoney(t.income, c.currency)}\nGider ${formatMoney(t.expense, c.currency)}`}
+              accessibilityLabel={`${t.name}: gelir ${formatMoney(t.income, c.currency)}, gider ${formatMoney(t.expense, c.currency)}, ${t.loss ? "zarar" : "kâr"} ${formatMoney(Math.abs(t.result), c.currency)}`}
+              trailing={
+                <Text style={[type.bodyStrong, tabular, { color: t.loss ? colors.error : colors.textPrimary }]}>
+                  {`${t.result < 0 ? "−" : ""}${formatMoney(Math.abs(t.result), c.currency)}`}
+                </Text>
+              }
+            />
+          ))
+        )}
+        <Text testID={`ie-tags-note-${c.currency}`} style={[type.caption, { color: colors.textTertiary, paddingHorizontal: spacing.md, paddingBottom: spacing.md, paddingTop: rows.length ? spacing.xs : 0 }]}>
+          {note}
+        </Text>
+      </Card>
+    </View>
   );
 }
 

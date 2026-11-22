@@ -7,7 +7,9 @@ export type SummaryBasis = "accrual" | "cash";
 export type SummarySource = { net: string; vat: string | null; gross: string; count: number; origin?: "obihub" | "parasut"; vat_unknown_count?: number };
 export type SummarySide = { net: string; vat: string | null; gross: string; vat_unknown?: string; sources: Record<string, SummarySource> };
 export type SummaryCategory = { kind: "income" | "expense"; category_id: string; name: string; source: string; net: string };
-export type CurrencySummary = { currency: string; income: SummarySide; expense: SummarySide; result: string; categories: SummaryCategory[] };
+// P6.3: tags yalnız tahakkukta; etiketsiz kova tag_id null, en sonda.
+export type SummaryTag = { tag_id: string | null; name: string; income: string; expense: string; result: string };
+export type CurrencySummary = { currency: string; income: SummarySide; expense: SummarySide; result: string; categories: SummaryCategory[]; tags?: SummaryTag[] };
 export type IncomeExpenseSummary = {
   period: { from: string; to: string };
   basis: SummaryBasis;
@@ -18,6 +20,7 @@ export type IncomeExpenseSummary = {
     unsplit_pos_mixed?: number;
     refund_split_unknown?: number;
     excluded?: string[];
+    notes?: { tags?: string };
   };
 };
 

@@ -19,6 +19,7 @@ import { Skeleton } from "../../src/components/Skeleton";
 import { InlineEmpty } from "../../src/components/InlineEmpty";
 import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
 import { AgingCard } from "../../src/components/AgingCard";
+import { CountersCard } from "../../src/components/finance/CountersCard";
 import type { FinanceOverview } from "../../src/types";
 
 export default function FinanceScreen() {
@@ -170,6 +171,9 @@ export default function FinanceScreen() {
             ) : null}
           </>
         ) : null}
+
+        {/* P6.3: bekleyen işler sayaçları (tekrarlayan planlar, gönderilmemiş faturalar); 403'te kart görünmez. */}
+        {financeRead ? <CountersCard token={token} refreshKey={refreshing ? 1 : 0} style={styles.block} /> : null}
 
         {/* Dalga 2: alacak / borç yaşlandırma (rapor izni yoksa kart görünmez). */}
         {financeRead ? <AgingCard token={token} refreshKey={refreshing ? 1 : 0} /> : null}
