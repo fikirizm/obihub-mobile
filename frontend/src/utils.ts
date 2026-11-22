@@ -5,6 +5,8 @@ export const PLATFORM_LOGOS = {
   trendyol: require("../assets/obihub/platform-trendyol.png"),
   hepsiburada: require("../assets/obihub/platform-hepsiburada.png"),
   n11: require("../assets/obihub/platform-n11.png"),
+  // Web'deki public/integrations/amazon.svg'den üretildi; küçük boyutta okunmayan "seller central Türkiye" yazısı çıkarıldı.
+  amazon: require("../assets/obihub/platform-amazon.png"),
 };
 
 export function formatTry(amount: number | string | undefined | null) {
@@ -163,7 +165,7 @@ export function isNewOrderStatus(order: Order, providerHint?: string): boolean {
   return internal === "pending" || internal === "processing";
 }
 
-export function providerKey(s: unknown): "woo" | "trendyol" | "hepsiburada" | "n11" | "website" | "other" {
+export function providerKey(s: unknown): "woo" | "trendyol" | "hepsiburada" | "n11" | "amazon" | "website" | "other" {
   const v = String(s || "").toLowerCase();
   // Faz A: ObiHub web mağaza siparişi (channel "website").
   if (v === "website" || v.startsWith("website:")) return "website";
@@ -171,6 +173,7 @@ export function providerKey(s: unknown): "woo" | "trendyol" | "hepsiburada" | "n
   if (v.includes("trendyol")) return "trendyol";
   if (v.includes("hepsiburada")) return "hepsiburada";
   if (v.includes("n11")) return "n11";
+  if (v.includes("amazon")) return "amazon";
   return "other";
 }
 
@@ -191,6 +194,8 @@ export function providerLabel(p: string): string {
       return "Hepsiburada";
     case "n11":
       return "n11";
+    case "amazon":
+      return "Amazon";
     case "website":
       return "Web Mağaza";
     default:
@@ -208,6 +213,8 @@ export function providerColor(p: string, fallback: string): string {
       return "#FF6000";
     case "n11":
       return "#4F46E5";
+    case "amazon":
+      return "#FF9900";
     default:
       return fallback;
   }

@@ -672,6 +672,7 @@ export async function getCatalog(
         active: x.active,
         // Kanalın onayını bekleyen, kullanıcının girdiği değer (Trendyol/Hepsiburada); `stock` onaylı değerdir.
         pending: x.pending === true && x.pending_stock != null ? Math.trunc(Number(x.pending_stock)) : null,
+        push: x.push && typeof x.push === "object" ? x.push : null,
       })),
       channelPrices: (Array.isArray(pr?.integration_prices) ? pr.integration_prices : []).map((x: any) => ({
         integration_id: String(x.integration_id),
@@ -685,6 +686,7 @@ export async function getCatalog(
     id: String(i.id),
     name: String(i.name || i.platform || ""),
     platform: String(i.platform || ""),
+    stockPushWarning: i.stock_push_warning ? String(i.stock_push_warning) : null,
   }));
   return { products, channels, total: Number(stock?.total ?? products.length), page, perPage };
 }

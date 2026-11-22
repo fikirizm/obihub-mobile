@@ -9,6 +9,8 @@ import { isUncertainWrite } from "../../src/api-finans";
 import { channelDetails } from "../../src/channel-import";
 import { channelLinkFor, channelPushBadge, getProductLinks, updateProductPricing, type ChannelPush, type ProductLinks, type PushBadge } from "../../src/api-urun-stok";
 import { WebStoreProductCard } from "../../src/components/WebStoreProductCard";
+import { StockPushWarnings } from "../../src/components/StockPushWarnings";
+import { AMAZON_PRICE_NOTE, channelPriceEditable, isFbaStock, pushForPrice, pushForStock, stockPushBadge } from "../../src/amazon-stock-push";
 import { discountView, priceEditPlan, resolveDiscount, type Discount } from "../../src/product-discount";
 import { getCatalog, setChannelPrice, setChannelStock, setProductPrice, setProductStock, SYNC_NONE } from "../../src/api";
 import { recallChannels, recallProduct, rememberCatalog } from "../../src/catalogCache";
@@ -224,7 +226,13 @@ export default function ProductDetailScreen() {
       alive = false;
     };
   }, [token, id, pushKey]);
-  const pushOf = (ch: ChannelRef) => channelPushBadge(pushMap[ch.id] || pushMap[ch.platform.toLowerCase()]);
+  const pushRaw = (ch: ChannelRef) => pushMap[ch.id] || pushMap[ch.platform.toLowerCase()];
+  // Fiyat satırı stok sonucunu göstermez; Amazon'a fiyat gönderilmez (bilgi rozeti).
+  const pricePushOf = (ch: ChannelRef): PushBadge | null =>
+    !channelPriceEditable(ch.platform) ? { label: AMAZON_PRICE_NOTE, tone: "wait" } : channelPushBadge(pushForPrice(pushRaw(ch)));
+  // Stok satırı: ürün-stok listesindeki son STOK sonucu (yoksa ürün kartındaki "stock" türlü kayıt); Amazon durumları bilgi.
+  const stockPushRaw = (ch: ChannelRef, row?: { push?: any } | null) => row?.push || pushForStock(pushRaw(ch) as any);
+  const stockPushOf = (ch: ChannelRef, row?: { push?: any } | null) => stockPushBadge(stockPushRaw(ch, row), channelPushBadge);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   // Bu ekranda ana değer değiştiği hâlde pazaryerine gönderilmemiş kanal satırları (kanal kimlikleri).
   const [unsent, setUnsent] = useState<{ stock: string[]; price: string[] }>({ stock: [], price: [] });
@@ -782,9 +790,12 @@ export default function ProductDetailScreen() {
                   </Text>
                 }
               />
+              <StockPushWarnings channels={channels} style={[styles.block, { marginBottom: spacing.sm }]} />
               <Card style={styles.block}>
                 {channels.map((ch, i) => {
                   const row = product.channelStocks.find((x) => x.integration_id === ch.id);
+                  // FBA ürününde stok Amazon deposunda yönetilir: giriş kapalı.
+                  const fba = Boolean(row) && isFbaStock(stockPushRaw(ch, row));
                   return (
                     <ChannelRow
                       key={ch.id}
@@ -792,12 +803,12 @@ export default function ProductDetailScreen() {
                       channel={ch}
                       divider={i > 0}
                       matched={Boolean(row)}
-                      value={row ? `${row.stock} adet` : "-"}
-                      note={!row ? undefined : row.pending != null ? `İşlem sürüyor: ${row.pending} adet` : unsent.stock.includes(ch.id) ? UNSENT_NOTE : row.stock !== product.stock ? "Ana stoktan farklı" : undefined}
-                      push={row ? pushOf(ch) : null}
+                      value={row ? (fba ? "FBA" : `${row.stock} adet`) : "-"}
+                      note={!row || fba ? undefined : row.pending != null ? `İşlem sürüyor: ${row.pending} adet` : unsent.stock.includes(ch.id) ? UNSENT_NOTE : row.stock !== product.stock ? "Ana stoktan farklı" : undefined}
+                      push={row ? stockPushOf(ch, row) : null}
                       busy={busyKey === `cs-${ch.id}`}
-                      editable={canEdit && Boolean(row)}
-                      onPress={canEdit && row && !busyKey ? () => editChannelStock(ch, row.stock) : !row && canEditInfo ? () => openMatch(ch.id) : undefined}
+                      editable={canEdit && Boolean(row) && !fba}
+                      onPress={canEdit && row && !fba && !busyKey ? () => editChannelStock(ch, row.stock) : !row && canEditInfo ? () => openMatch(ch.id) : undefined}
                     />
                   );
                 })}
@@ -816,6 +827,7 @@ export default function ProductDetailScreen() {
               <Card style={styles.block}>
                 {channels.map((ch, i) => {
                   const row = product.channelPrices.find((x) => x.integration_id === ch.id);
+                  const priceOk = channelPriceEditable(ch.platform);
                   return (
                     <ChannelRow
                       key={ch.id}
@@ -825,10 +837,10 @@ export default function ProductDetailScreen() {
                       matched={Boolean(row)}
                       value={row ? formatTry(row.price) : "-"}
                       note={!row ? undefined : row.pending != null ? `İşlem sürüyor: ${formatTry(row.pending)}` : unsent.price.includes(ch.id) ? UNSENT_NOTE : keptChannel.includes(ch.id) && !samePrice(row.price, product.price) ? CHANNEL_KEPT_NOTE : undefined}
-                      push={row ? pushOf(ch) : null}
+                      push={row ? pricePushOf(ch) : null}
                       busy={busyKey === `cp-${ch.id}`}
-                      editable={canEdit && Boolean(row)}
-                      onPress={canEdit && row && !busyKey ? () => editChannelPrice(ch, row.price) : !row && canEditInfo ? () => openMatch(ch.id) : undefined}
+                      editable={canEdit && Boolean(row) && priceOk}
+                      onPress={canEdit && row && priceOk && !busyKey ? () => editChannelPrice(ch, row.price) : !row && canEditInfo ? () => openMatch(ch.id) : undefined}
                     />
                   );
                 })}

@@ -273,7 +273,8 @@ export type SmartAlert = {
 
 export type OrdersPage = { items: Order[]; total: number; page: number; totalPages: number };
 
-export type ChannelRef = { id: string; name: string; platform: string };
+// stockPushWarning: mağaza düzeyinde duran stok gönderimi (ör. Amazon SP-API Listings yetkisi yok); sunucu stock_push_warning.
+export type ChannelRef = { id: string; name: string; platform: string; stockPushWarning?: string | null };
 
 export type CatalogProduct = {
   id: string;
@@ -288,7 +289,8 @@ export type CatalogProduct = {
   onHand?: number;
   price: number;
   // `pending`: kanalın onayını bekleyen girilen değer (yoksa null); stock/price onaylı değerdir.
-  channelStocks: { integration_id: string; stock: number; active?: boolean; pending?: number | null }[];
+  // `push`: son STOK gönderim sonucu (sunucu yalnız kinds "stock" içerirse verir; Amazon FBM).
+  channelStocks: { integration_id: string; stock: number; active?: boolean; pending?: number | null; push?: { state?: string; code?: string | null; detail?: string | null; at?: string } | null }[];
   channelPrices: { integration_id: string; price: number; active?: boolean; pending?: number | null }[];
 };
 

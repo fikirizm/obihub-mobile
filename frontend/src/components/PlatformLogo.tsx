@@ -77,7 +77,15 @@ export function PlatformLogo({
         style,
       ]}
     >
-      <Image source={logoSrc} style={{ width: dim.logo, height: dim.logo, borderRadius: dim.radius - 2 }} resizeMode="cover" />
+      <Image
+        source={logoSrc}
+        style={[
+          { width: dim.logo, height: dim.logo, borderRadius: dim.radius - 2 },
+          // Amazon logosu beyaz zeminli: açık temada kaybolmaması için ince kenarlık (diğer logolar renkli kutudur).
+          key === "amazon" && { borderWidth: 1, borderColor: colors.border },
+        ]}
+        resizeMode="cover"
+      />
     </View>
   );
 }

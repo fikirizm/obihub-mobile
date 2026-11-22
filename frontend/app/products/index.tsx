@@ -20,6 +20,7 @@ import { formatTry } from "../../src/utils";
 import { PackageIcon, Path, SearchIcon, Svg, PlusIcon, WalletIcon } from "../../src/components/Icons";
 import { AccountingDifferences } from "../../src/components/AccountingDifferences";
 import { StockOverview } from "../../src/components/StockOverview";
+import { StockPushWarnings } from "../../src/components/StockPushWarnings";
 import { EmptyState } from "../../src/components/EmptyState";
 import { PressableScale } from "../../src/components/KPICard";
 import {
@@ -32,7 +33,7 @@ import { Button } from "../../src/ui/Button";
 import { Chip, ChipRow } from "../../src/ui/Chip";
 import { StackHeader } from "../../src/ui/Header";
 import { SearchField } from "../../src/ui/SearchField";
-import type { CatalogProduct } from "../../src/types";
+import type { CatalogProduct, ChannelRef } from "../../src/types";
 
 const PER_PAGE = 30;
 // Düşük stok görünümü: sunucuda stok süzgeci olmadığı için ürünler 100'erli sayfalarla taranır ve burada süzülür.
@@ -109,6 +110,7 @@ export default function ProductsScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [channels, setChannels] = useState<ChannelRef[]>([]);
   // Panel uyarısından gelindiğinde yalnızca düşük stoklu ürünler gösterilir.
   const [lowOnly, setLowOnly] = useState(params.filter === "low");
   const lowIdsRef = useRef<Set<string> | null>(null);
@@ -163,6 +165,7 @@ export default function ProductsScreen() {
             results.forEach((r) => all.push(...r.products));
           }
           rememberCatalog(all, first.channels);
+          setChannels(first.channels);
           const seen = new Set<string>();
           const low = all
             .filter(
@@ -187,6 +190,7 @@ export default function ProductsScreen() {
         });
         if (id !== requestId.current) return;
         rememberCatalog(res.products, res.channels);
+        setChannels(res.channels);
         setProducts((prev) => {
           if (mode !== "more") return res.products;
           const known = new Set(prev.map((p) => p.id));
@@ -369,6 +373,8 @@ export default function ProductsScreen() {
           }
           ListHeaderComponent={
             <>
+              {/* Mağaza düzeyinde duran stok gönderimi (ör. Amazon Listings yetkisi yok). */}
+              <StockPushWarnings channels={channels} style={styles.pushWarn} />
               {/* Muhasebe farkları yalnız tüm ürünler görünümünde; açık fark yoksa hiç görünmez. */}
               {!lowOnly && !debounced ? (
                 <AccountingDifferences
@@ -596,6 +602,7 @@ export default function ProductsScreen() {
 }
 
 const styles = StyleSheet.create({
+  pushWarn: { marginBottom: spacing.sm },
   actionRow: { flexDirection: "row", gap: spacing.sm, marginHorizontal: spacing.lg, marginTop: spacing.sm },
   addBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   wrap: { flex: 1 },

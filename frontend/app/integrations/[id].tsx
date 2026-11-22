@@ -6,6 +6,7 @@ import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { getIntegrations, getOrders, getOrdersPage, getOrderStats } from "../../src/api";
 import { InvoiceSettingsCard } from "../../src/components/integrations/InvoiceSettingsCard";
+import { AmazonStockPushCard } from "../../src/components/integrations/AmazonStockPushCard";
 import { PROVIDERS as IMPORT_PROVIDERS } from "../../src/channel-import";
 import { groupCount, ORDER_GROUPS, orderQuery, type OrderGroupKey } from "../../src/order-filters";
 import { Chip, ChipRow } from "../../src/ui/Chip";
@@ -429,6 +430,7 @@ export default function IntegrationOrders() {
         </View>
       ) : null}
       {integration ? <InvoiceSettingsCard integration={integration} onSaved={() => load(true)} /> : null}
+      {integration ? <AmazonStockPushCard integration={integration} /> : null}
 
       <SafeAnimatedView entering={FadeInDown.delay(140).duration(380)}>
         <SectionTitle title="Siparişler" />

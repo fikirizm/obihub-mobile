@@ -2,6 +2,13 @@
 // Davranış: GET /__mode?session=ok|expired|locked&parasut=1|0
 const http = require("http");
 
+// Amazon stok gönderim bloğu (SP-API Listings yetkisi yok); /__mode?amzBlock=0 kapatır.
+function amazonBlock() {
+  if (state.amzBlock === "0") return null;
+  const at = Date.now();
+  return { code: "AMAZON_LISTINGS_ACCESS_DENIED", message: "Amazon stok gönderimi için SP-API Listings yetkisi gerekiyor. Amazon uygulama yetkilerini güncelleyip yeniden bağlanın.",
+    at: new Date(at).toISOString(), retry_at: new Date(at + 24 * 3600 * 1000).toISOString() };
+}
 const state = { session: "ok", parasut: "1" };
 const now = () => new Date().toISOString();
 
@@ -79,7 +86,7 @@ orders[15].status = "deleted";
 const products = Array.from({ length: 48 }, (_, i) => ({
   id: `p${i + 1}`, name: `Deneme Ürün ${i + 1}`, sku: `SKU-${i + 1}`, barcode: `86900000${String(i + 1).padStart(5, "0")}`,
   stock: (i * 7) % 40, price: 99.9 + i * 12.5,
-  ch: { i1: { stock: (i * 7) % 40, price: 109.9 + i * 12.5 }, i2: { stock: (i * 5) % 30, price: 119.9 + i * 12.5 } },
+  ch: { i1: { stock: (i * 7) % 40, price: 109.9 + i * 12.5 }, i2: { stock: (i * 5) % 30, price: 119.9 + i * 12.5 }, i4: { stock: (i * 3) % 20, price: 129.9 + i * 12.5 } },
   // Dalga 2 / B1: p6 Trendyol'la eşleşmemiş; diğerleri iki mağazaya bağlı.
   links: i === 5 ? { woocommerce: `wc-${i + 1}` } : { woocommerce: `wc-${i + 1}`, trendyol: `ty-${i + 1}` },
   details: i === 5 ? { woocommerce: { integration_id: "i1" } } : { woocommerce: { integration_id: "i1" }, trendyol: { integration_id: "i2", barcode: `86900000${String(i + 1).padStart(5, "0")}` } },
@@ -346,7 +353,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig", "yurtici", "yurticiCancel", "officializer", "ppay", "counters", "ieFail"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig", "yurtici", "yurticiCancel", "officializer", "ppay", "counters", "ieFail", "amzBlock", "amzApproved"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -668,11 +675,16 @@ http
       integInvoice[ism[1]] = { ...(integInvoice[ism[1]] || {}), ...b }; console.log("WRITE integration settings", ism[1], JSON.stringify(b));
       return send(res, 200, { success: true, invoice_settings: integInvoice[ism[1]] });
     }); }
+    // Amazon stok gönderimi durumu ve ilk eşitleme onayı (GET /amazon/{id}/stock-push, POST .../approve-first-sync).
+    if (path === "/amazon/i4/stock-push") return send(res, 200, { integration_id: "i4", enabled: true, block: amazonBlock(), first_sync_approved: Number(state.amzApproved) > 0,
+      first_sync_review_count: Number(state.amzApproved) ? 0 : 3, first_sync_sending_count: Number(state.amzApproved) ? 3 : 0 });
+    if (path === "/amazon/i4/stock-push/approve-first-sync" && req.method === "POST") { state.amzApproved = 1; console.log("WRITE amazon approve-first-sync i4"); return send(res, 200, { pending: 3 }); }
     if (path === "/integrations") return send(res, 200, [
       { id: "i1", name: "Deneme Mağaza", provider: "woocommerce", kind: "store", status: "success", last_sync_error: "WooCommerce geçici olarak yanıt vermedi", last_sync_error_kind: "transient" },
       { id: "i2", name: "Trendyol", provider: "trendyol", kind: "marketplace", status: "success", sync_running: Boolean(state.job && state.job.state === "running"),
         credentials: { api_key: "••••1234", invoice_settings: integInvoice.i2 } },
       { id: "i3", name: "Hepsiburada", provider: "hepsiburada", kind: "marketplace", status: "success", auto_sync_status: "auth_failed", last_sync_error_kind: "auth" },
+      { id: "i4", name: "Amazon TR", provider: "amazon", kind: "marketplace", status: "success", stock_push_block: amazonBlock() },
     ]);
     if (path === "/parasut/invoices")
       return send(res, 200, { invoices: Array.from({ length: 6 }, (_, i) => ({
@@ -719,10 +731,18 @@ http
       const per = Number(url.searchParams.get("per_page") || 25);
       const rows = products.filter((p) => !q || [p.name, p.sku, p.barcode].some((v) => v.toLowerCase().includes(q)));
       const slice = rows.slice((page - 1) * per, page * per);
-      const integrations = [{ id: "i1", name: "Deneme Mağaza", platform: "woocommerce" }, { id: "i2", name: "Trendyol", platform: "trendyol" }];
+      const integrations = [{ id: "i1", name: "Deneme Mağaza", platform: "woocommerce", stock_push_warning: null }, { id: "i2", name: "Trendyol", platform: "trendyol", stock_push_warning: null },
+        { id: "i4", name: "Amazon TR", platform: "amazon", stock_push_warning: amazonBlock() ? amazonBlock().message : null }];
+      // Amazon FBM stok gönderimi (Dalga 5b): p1 başarısız, p2 sipariş senkronu bekleniyor, p3 FBA, p4 ilk eşitleme onayı, p5 Amazon'da değişmiş.
+      const AMZ = { p1: { state: "failed", code: "AMAZON_LISTING_NOT_FOUND", detail: "Bu SKU Amazon'da bulunamadı; ürün eşleşmesini (Amazon SKU) kontrol edin." },
+        p2: { state: "pending", code: "AMAZON_QUANTITY_UNKNOWN", detail: "" },
+        p3: { state: "skipped", code: "AMAZON_FBA_SKIPPED", detail: "Bu ürün Amazon'da FBA (Amazon gönderimli): stoğu Amazon deposunda yönetilir, ObiHub stok göndermez." },
+        p4: { state: "skipped", code: "AMAZON_FIRST_SYNC_REVIEW", detail: "İlk eşitleme onayı bekliyor: ObiHub'da 0, Amazon'da stok var." },
+        p5: { state: "pending", code: "AMAZON_STOCK_CHANGED_ON_AMAZON", detail: "Amazon'daki stok son gönderimden sonra değişmiş; sipariş senkronu tamamlanınca yeniden gönderilecek." } };
+      const amz = (p) => (Number(p.id.slice(1)) <= 6 ? p : null);
       if (path.endsWith("stock"))
-        return send(res, 200, { products: slice.map((p) => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, reserved: p.id === "p2" ? 2 : 0, on_hand: p.stock + (p.id === "p2" ? 2 : 0), image_url: "", integration_stocks: [{ integration_id: "i1", stock: p.ch.i1.stock, active: true, ...(p.id === "p3" ? { pending: true, pending_stock: p.ch.i1.stock + 4, pending_at: new Date().toISOString() } : {}) }, { integration_id: "i2", stock: p.ch.i2.stock, active: true }].filter((r) => r.integration_id !== "i2" || p.links.trendyol) })), integrations, total: rows.length, page, per_page: per });
-      return send(res, 200, { products: slice.map((p) => ({ id: p.id, price: p.price.toFixed(2), integration_prices: [{ integration_id: "i1", price: p.ch.i1.price.toFixed(2), active: true, ...(p.id === "p3" ? { pending: true, pending_price: (p.ch.i1.price + 10).toFixed(2), pending_at: new Date().toISOString() } : {}) }, { integration_id: "i2", price: p.ch.i2.price.toFixed(2), active: true }].filter((r) => r.integration_id !== "i2" || p.links.trendyol) })), integrations, total: rows.length, page, per_page: per });
+        return send(res, 200, { products: slice.map((p) => ({ id: p.id, name: p.name, sku: p.sku, barcode: p.barcode, stock: p.stock, reserved: p.id === "p2" ? 2 : 0, on_hand: p.stock + (p.id === "p2" ? 2 : 0), image_url: "", integration_stocks: [{ integration_id: "i1", stock: p.ch.i1.stock, active: true, ...(p.id === "p3" ? { pending: true, pending_stock: p.ch.i1.stock + 4, pending_at: new Date().toISOString() } : {}) }, { integration_id: "i2", stock: p.ch.i2.stock, active: true }, ...(amz(p) ? [{ integration_id: "i4", stock: p.ch.i4.stock, active: p.ch.i4.stock > 0, ...(AMZ[p.id] ? { push: { ...AMZ[p.id], at: new Date().toISOString() } } : {}) }] : [])].filter((r) => r.integration_id !== "i2" || p.links.trendyol) })), integrations, total: rows.length, page, per_page: per });
+      return send(res, 200, { products: slice.map((p) => ({ id: p.id, price: p.price.toFixed(2), integration_prices: [{ integration_id: "i1", price: p.ch.i1.price.toFixed(2), active: true, ...(p.id === "p3" ? { pending: true, pending_price: (p.ch.i1.price + 10).toFixed(2), pending_at: new Date().toISOString() } : {}) }, { integration_id: "i2", price: p.ch.i2.price.toFixed(2), active: true }, ...(amz(p) ? [{ integration_id: "i4", price: p.ch.i4.price.toFixed(2), active: true }] : [])].filter((r) => r.integration_id !== "i2" || p.links.trendyol) })), integrations, total: rows.length, page, per_page: per });
     }
     // Ürün kimliği (ad / SKU / barkod) ve stok hareketleri — gerçek uçlar: GET|PATCH /products/{id}, GET /stock/movements.
     // --- F2 / F3 / B5
@@ -918,7 +938,7 @@ http
         console.log("WRITE", path, raw);
         const b = JSON.parse(raw || "{}");
         const id = "p" + (products.length + 1);
-        products.unshift({ id, name: b.name, sku: b.sku, barcode: b.barcode || "", stock: b.stock || 0, price: b.price || 0, ch: { i1: { stock: 0, price: b.price || 0 }, i2: { stock: 0, price: b.price || 0 } }, links: {}, details: {} });
+        products.unshift({ id, name: b.name, sku: b.sku, barcode: b.barcode || "", stock: b.stock || 0, price: b.price || 0, ch: { i1: { stock: 0, price: b.price || 0 }, i2: { stock: 0, price: b.price || 0 }, i4: { stock: 0, price: b.price || 0 } }, links: {}, details: {} });
         send(res, 200, { id, name: b.name, sku: b.sku, barcode: b.barcode, stock: b.stock, price: b.price });
       });
       return;
@@ -1053,6 +1073,7 @@ http
         }
         if (path === "/price/adjust") p.price = b.price;
         if (path === "/stock/channel-set") p.ch[b.integration_id].stock = b.stock;
+        if (path === "/price/channel-set" && b.integration_id === "i4") return send(res, 400, { detail: "Amazon'a fiyat gönderilmez." });
         if (path === "/price/channel-set") p.ch[b.integration_id].price = b.price;
         console.log("WRITE", path, raw);
         send(res, 200, { message: "ok" });
