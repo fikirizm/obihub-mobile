@@ -178,6 +178,8 @@ const employees = [
       { id: "x2", date: "2026-11-18", label: "Fatura OK-77 cebinden", side: "credit", amount: "1250.50", currency: "TRY", kind: "accrual", reversed: false, transaction_id: null, can_void: false, pocket: true }] },
   { id: "emp-2", name: "Can Demir", title: "Depo", phone: "", email: "", iban: "", notes: "", archived: false, entries: [] },
 ];
+// Kanal sipariş faturası ayarı (mock): eski Paraşüt ödeme ayarı açık, kasa seçilmemiş → uyarı.
+const integInvoice = { i2: { auto_create_invoice: true, mark_as_paid: true, payment_account_id: "prs-1", auto_create_e_document: true } };
 // KDV açılış devri (mock).
 const vatCarry = { opening: null };
 // Netgsm SMS durumu (mock; gerçek şifre tutulmaz).
@@ -588,9 +590,19 @@ http
         { type: "low_stock", severity: "warning", title: `${products.filter((p) => p.stock >= 0 && p.stock <= 5).length} ürün düşük stokta`, desc: "Stok seviyesi 5 adedin altına düşen ürünler var.", action_path: "/stok" },
         { type: "stale_orders", severity: "warning", title: "2 sipariş 3 gündür bekliyor", desc: "Beklemede olan siparişleri kontrol edin.", action_path: "/siparisler" },
       ]);
+    // Faz C4 WP4: PUT /integrations/{id}/settings — yalnız gönderilen invoice_settings alanları birleşir.
+    let ism;
+    if (req.method === "PUT" && (ism = path.match(/^\/integrations\/([^/]+)\/settings$/))) { let raw0 = ""; req.on("data", (c) => (raw0 += c)); return req.on("end", () => { const b = JSON.parse(raw0 || "{}");
+      const kasa = b.obihub_kasa_id;
+      if (kasa) { const a = accounts.find((x) => x.id === kasa); if (!a) return send(res, 404, { code: "ACCOUNT_NOT_FOUND", detail: "Hesap bulunamadı." });
+        if (a.currency !== "TRY") return send(res, 422, { code: "CURRENCY_MISMATCH", detail: "TL hesap seçin." }); if (a.is_active === false) return send(res, 409, { code: "ACCOUNT_INACTIVE", detail: "Hesap pasif." }); }
+      integInvoice[ism[1]] = { ...(integInvoice[ism[1]] || {}), ...b }; console.log("WRITE integration settings", ism[1], JSON.stringify(b));
+      return send(res, 200, { success: true, invoice_settings: integInvoice[ism[1]] });
+    }); }
     if (path === "/integrations") return send(res, 200, [
       { id: "i1", name: "Deneme Mağaza", provider: "woocommerce", kind: "store", status: "success", last_sync_error: "WooCommerce geçici olarak yanıt vermedi", last_sync_error_kind: "transient" },
-      { id: "i2", name: "Trendyol", provider: "trendyol", kind: "marketplace", status: "success", sync_running: Boolean(state.job && state.job.state === "running") },
+      { id: "i2", name: "Trendyol", provider: "trendyol", kind: "marketplace", status: "success", sync_running: Boolean(state.job && state.job.state === "running"),
+        credentials: { api_key: "••••1234", invoice_settings: integInvoice.i2 } },
       { id: "i3", name: "Hepsiburada", provider: "hepsiburada", kind: "marketplace", status: "success", auto_sync_status: "auth_failed", last_sync_error_kind: "auth" },
     ]);
     if (path === "/parasut/invoices")

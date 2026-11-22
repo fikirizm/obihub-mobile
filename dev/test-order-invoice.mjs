@@ -86,4 +86,25 @@ t("hata kodları Türkçe", () => {
   assert.match(m.shareErrorText({ code: "PROVIDER_NO_PDF" }), /BizimHesap/);
   assert.match(m.shareErrorText({ code: "PROVIDER_SHARE_NOT_SUPPORTED" }), /Turkcell/);
 });
+t("kanal fatura ayarı: okuma, yük (auto_officialize yalnız dokunulduysa), etkin değer", () => {
+  assert.deepEqual(m.readInvoiceSettings({ obihub_kasa_id: "a1" }), { obihub_kasa_id: "a1", auto_officialize: undefined });
+  assert.deepEqual(m.readInvoiceSettings(null), { obihub_kasa_id: "", auto_officialize: undefined });
+  assert.deepEqual(m.invoiceSettingsPayload({ obihub_kasa_id: "", auto_officialize: undefined }), { obihub_kasa_id: "" });
+  assert.deepEqual(m.invoiceSettingsPayload({ obihub_kasa_id: "a1", auto_officialize: false }), { obihub_kasa_id: "a1", auto_officialize: false });
+  assert.equal(m.effectiveAutoOfficialize({ auto_officialize: undefined }, null, {}), false);
+  assert.equal(m.effectiveAutoOfficialize({ auto_officialize: undefined }, "parasut", { auto_create_e_document: true }), true);
+  assert.equal(m.effectiveAutoOfficialize({ auto_officialize: undefined }, "bizimhesap", {}), true);
+  assert.equal(m.effectiveAutoOfficialize({ auto_officialize: undefined }, "turkcell_efatura", {}), false);
+  assert.equal(m.effectiveAutoOfficialize({ auto_officialize: false }, "bizimhesap", {}), false);
+});
+t("tahsilat kasası: yalnız TL, aktif, Paraşüt aynası değil; eski Paraşüt ödeme ayarında uyarı", () => {
+  const acc = [{ id: "a", currency: "TRY" }, { id: "b", currency: "USD" }, { id: "c", currency: "TRY", is_active: false }, { id: "d", currency: "TRY", read_only: true }, { id: "e", currency: "TRY", archived: true }];
+  assert.deepEqual(m.kasaAccounts(acc).map((a) => a.id), ["a"]);
+  assert.equal(m.kasaWarning({ mark_as_paid: true, payment_account_id: "p1", obihub_kasa_id: "" }), "Eski ayarda faturalar Paraşüt hesabına ödendi işaretleniyordu. ObiHub'da tahsil edildi kesilmesi için bir kasa seçin.");
+  assert.equal(m.kasaWarning({ mark_as_paid: true, payment_account_id: "p1", obihub_kasa_id: "a" }), "");
+  assert.equal(m.kasaErrorText({ code: "CURRENCY_MISMATCH" }), "Tahsilat kasası TL olmalı.");
+  assert.equal(m.kasaErrorText({ code: "MIRROR_ACCOUNT_READ_ONLY" }), "Paraşüt'ten gelen hesap seçilemez; ObiHub hesabı seçin.");
+  assert.equal(m.kasaErrorText({ code: "ACCOUNT_INACTIVE" }), "Seçilen hesap pasif.");
+  assert.equal(m.kasaErrorText({ code: "ACCOUNT_NOT_FOUND" }), "Hesap bulunamadı.");
+});
 console.log(`${n} test geçti`);

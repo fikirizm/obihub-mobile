@@ -83,3 +83,40 @@ const SHARE: Record<string, string> = {
   PROVIDER_SHARE_NOT_SUPPORTED: "Turkcell ile resmileşen fatura mağazaya buradan iletilemez.",
 };
 export const shareErrorText = (e: any) => SHARE[String(e?.code || "")] || msg(e) || "Fatura mağazaya iletilemedi.";
+
+// --- Kanal fatura ayarı (WP4): PUT /integrations/{id}/settings yalnız gönderilen invoice_settings alanlarını birleştirir
+// (API anahtarlarına dokunmaz). obihub_kasa_id doluysa sipariş faturası "Tahsil edildi" kesilir (tahsilat bu hesaba); boşsa açık alacak.
+// auto_officialize kullanıcı dokunmadıysa GÖNDERİLMEZ (sunucu okuma anında varsayılanı uygular). Web: OrderInvoiceObiHubCard.jsx.
+export type InvoiceSettingsState = { obihub_kasa_id: string; auto_officialize: boolean | undefined };
+export function readInvoiceSettings(inv: any): InvoiceSettingsState {
+  const s = inv || {};
+  return { obihub_kasa_id: String(s.obihub_kasa_id || ""), auto_officialize: typeof s.auto_officialize === "boolean" ? s.auto_officialize : undefined };
+}
+export function invoiceSettingsPayload(s: InvoiceSettingsState) {
+  const out: { obihub_kasa_id: string; auto_officialize?: boolean } = { obihub_kasa_id: String(s?.obihub_kasa_id || "") };
+  if (typeof s?.auto_officialize === "boolean") out.auto_officialize = s.auto_officialize;
+  return out;
+}
+// Anahtarın gösterdiği etkin değer (sunucu officialize_mode ile aynı). Sağlayıcı yoksa her zaman kapalı.
+export function effectiveAutoOfficialize(s: { auto_officialize?: boolean }, provider: string | null | undefined, legacy: any) {
+  if (!provider) return false;
+  if (typeof s?.auto_officialize === "boolean") return s.auto_officialize;
+  if (provider === "parasut") return Boolean(legacy?.auto_create_e_document);
+  return provider === "bizimhesap";
+}
+export const kasaAccounts = <A extends Record<string, any>>(list: A[]) =>
+  (Array.isArray(list) ? list : []).filter(
+    (a) => String(a?.currency || "TRY").toUpperCase() === "TRY" && a?.is_active !== false && a?.archived !== true && a?.read_only !== true
+  );
+export function kasaWarning(inv: any) {
+  return inv?.mark_as_paid && inv?.payment_account_id && !inv?.obihub_kasa_id
+    ? "Eski ayarda faturalar Paraşüt hesabına ödendi işaretleniyordu. ObiHub'da tahsil edildi kesilmesi için bir kasa seçin."
+    : "";
+}
+const KASA: Record<string, string> = {
+  ACCOUNT_NOT_FOUND: "Hesap bulunamadı.",
+  CURRENCY_MISMATCH: "Tahsilat kasası TL olmalı.",
+  ACCOUNT_INACTIVE: "Seçilen hesap pasif.",
+  MIRROR_ACCOUNT_READ_ONLY: "Paraşüt'ten gelen hesap seçilemez; ObiHub hesabı seçin.",
+};
+export const kasaErrorText = (e: any) => KASA[String(e?.code || "")] || msg(e) || "Ayar kaydedilemedi.";

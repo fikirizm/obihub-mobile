@@ -5,6 +5,7 @@ import { useAuth } from "../../src/auth/AuthProvider";
 import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { getIntegrations, getOrders, getOrdersPage, getOrderStats } from "../../src/api";
+import { InvoiceSettingsCard } from "../../src/components/integrations/InvoiceSettingsCard";
 import { groupCount, ORDER_GROUPS, orderQuery, type OrderGroupKey } from "../../src/order-filters";
 import { Chip, ChipRow } from "../../src/ui/Chip";
 import { syncErrorView } from "../../src/sync-error";
@@ -416,6 +417,8 @@ export default function IntegrationOrders() {
           <Button testID="lookup-open" size="sm" variant="ghost" label="Sipariş no ile getir" onPress={() => setLookupOpen(true)} />
         )}
       </SafeAnimatedView>
+
+      {integration ? <InvoiceSettingsCard integration={integration} onSaved={() => load(true)} /> : null}
 
       <SafeAnimatedView entering={FadeInDown.delay(140).duration(380)}>
         <SectionTitle title="Siparişler" />
