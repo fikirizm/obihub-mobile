@@ -6,6 +6,7 @@ import { useTheme } from "../../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../src/theme/tokens";
 import { getIntegrations, getOrders, getOrdersPage, getOrderStats } from "../../src/api";
 import { InvoiceSettingsCard } from "../../src/components/integrations/InvoiceSettingsCard";
+import { PROVIDERS as IMPORT_PROVIDERS } from "../../src/channel-import";
 import { groupCount, ORDER_GROUPS, orderQuery, type OrderGroupKey } from "../../src/order-filters";
 import { Chip, ChipRow } from "../../src/ui/Chip";
 import { syncErrorView } from "../../src/sync-error";
@@ -33,6 +34,7 @@ import { NetworkErrorBanner } from "../../src/components/NetworkErrorBanner";
 import { FadeInDown, SafeAnimatedView } from "../../src/components/SafeAnimatedView";
 import { Skeleton } from "../../src/components/Skeleton";
 import { Button } from "../../src/ui/Button";
+import { canManage } from "../../src/auth/permissions";
 import { DetailHero } from "../../src/ui/DetailHero";
 import { useFeedback } from "../../src/ui/Feedback";
 import { StackHeader } from "../../src/ui/Header";
@@ -88,7 +90,7 @@ export default function IntegrationOrders() {
   const params = useLocalSearchParams<{ id: string; provider?: string }>();
   const integrationId = String(params.id || "");
   const providerHint = String(params.provider || "");
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { colors } = useTheme();
   const { toast } = useFeedback();
 
@@ -156,6 +158,8 @@ export default function IntegrationOrders() {
 
   const cacheKey = `integration_detail_${integrationId}`;
 
+  // Faz C5: ürünleri kanaldan çekme yalnız desteklenen kanallarda ve Katalog düzenleme yetkisinde.
+  const canImportProducts = canManage(user, "catalog") && IMPORT_PROVIDERS.includes(String((integration as any)?.provider || "").toLowerCase());
   const load = async (silent = false) => {
     if (!token || !integrationId) return;
     if (!silent) {
@@ -418,6 +422,12 @@ export default function IntegrationOrders() {
         )}
       </SafeAnimatedView>
 
+      {integration && canImportProducts ? (
+        <View style={{ marginHorizontal: spacing.lg, marginTop: spacing.sm, flexDirection: "row", gap: spacing.sm }}>
+          <Button testID="integration-channel-import" size="sm" variant="secondary" label="Ürünleri çek" onPress={() => router.push({ pathname: "/channel-import", params: { integrationId } } as any)} />
+          <Button testID="integration-channel-queue" size="sm" variant="ghost" label="Onay bekleyenler" onPress={() => router.push({ pathname: "/channel-import/queue", params: { integrationId } } as any)} />
+        </View>
+      ) : null}
       {integration ? <InvoiceSettingsCard integration={integration} onSaved={() => load(true)} /> : null}
 
       <SafeAnimatedView entering={FadeInDown.delay(140).duration(380)}>

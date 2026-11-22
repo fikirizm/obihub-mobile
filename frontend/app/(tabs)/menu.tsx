@@ -138,6 +138,17 @@ export default function MenuScreen() {
               onPress={() => router.push("/products")}
             />
           ) : null}
+          {canManage(user, "catalog") ? (
+            <ListRow
+              testID="menu-channel-import"
+              divider
+              leading={<IconTile tint={colors.primarySoft}><RefreshIcon size={18} color={colors.primary} /></IconTile>}
+              title="Ürünleri kanaldan çek"
+              subtitle="Pazaryeri ve mağaza ürünlerini önizle, eşleştir, aktar"
+              chevron
+              onPress={() => router.push("/channel-import" as Href)}
+            />
+          ) : null}
           {canAccess(user, "inventory") ? (
             <ListRow
               testID="menu-dispatch"

@@ -180,6 +180,8 @@ const employees = [
 ];
 // Kanal sipariş faturası ayarı (mock): eski Paraşüt ödeme ayarı açık, kasa seçilmemiş → uyarı.
 const integInvoice = { i2: { auto_create_invoice: true, mark_as_paid: true, payment_account_id: "prs-1", auto_create_e_document: true } };
+// Faz C5 kanaldan ürün çekme (mock).
+const ciRuns = {}; const ciJobs = {}; const ciQueue = [];
 // KDV açılış devri (mock).
 const vatCarry = { opening: null };
 // Netgsm SMS durumu (mock; gerçek şifre tutulmaz).
@@ -544,6 +546,63 @@ http
     if (req.method === "POST" && path.startsWith("/print-jobs/enqueue/"))
       return send(res, 200, state.autoprint === "0" ? { success: false, message: "Auto print kapalı veya kullanıcı yetkili değil." } : { success: true, job_id: "j1", status: "pending" });
     // İlk kullanım dalgası: 15 günü aşan çekim arka plan işi (202 + job_id); sürerken 409 + X-Job-Id.
+    // Faz C5: ürünleri kanaldan çek (mock). İş /integration-jobs/ci-* üç sorguda biter.
+    if (path.startsWith("/integration-jobs/ci-")) {
+      const j = ciJobs[path.split("/").pop()]; if (!j) return send(res, 404, { detail: "İşlem bulunamadı." });
+      j.polls += 1; const done = j.polls >= 3;
+      if (done && !j.finished) { j.finished = true; j.onDone(); }
+      return send(res, 200, { job_id: j.id, state: done ? "done" : "running", progress: { done: Math.min(j.polls * 40, 120), total: 120, label: j.label }, error_tr: null });
+    }
+    if (path.startsWith("/products/channel-import")) {
+      let cm;
+      const runView = (r) => ({ id: r.id, state: r.state, counts: r.counts, stock_mode: r.stock_mode, inventory_owner_label: "Paraşüt", warnings: r.warnings, no_stock_info: false, applied: r.applied, message: r.message });
+      if (req.method === "POST" && (cm = path.match(/^\/products\/channel-import\/([^/]+)\/scan$/))) {
+        const busy = Object.values(ciJobs).find((j) => !j.finished);
+        if (busy) { res.writeHead(409, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "X-Job-Id", "X-Job-Id": busy.id }); return res.end(JSON.stringify({ detail: "Bu mağazada başka bir eşitleme sürüyor." })); }
+        const runId = "run-" + Date.now(), jobId = "ci-" + Date.now();
+        const mk = (i, decision, extra = {}) => ({ id: `${runId}-r${i}`, name: `Kanal Ürünü ${i}`, barcode: `86912${String(i).padStart(5, "0")}`, sku: `TY-${i}`, stock: i * 3, decision, ...extra });
+        const rows = [mk(1, "new"), mk(2, "new", { variant: "Kırmızı / M" }), mk(3, "match", { match_by: "barcode" }), mk(4, "linked", { match_by: "link" }),
+          mk(5, "ambiguous", { reason: "MULTI", reason_text: "Aynı barkod iki ürün kartında var." }), mk(6, "ambiguous", { reason: "OTHER_STORE", reason_text: "Kart başka mağazadaki kanal ürününe bağlı." }), mk(7, "skip", { reason_text: "Barkod ve stok kodu yok." })];
+        ciRuns[runId] = { id: runId, integration_id: cm[1], state: "scanning", rows, counts: { total: 7, new: 2, match: 1, linked: 1, ambiguous: 2, skip: 1 }, stock_mode: state.parasut === "1" ? "none" : "with_stock", warnings: ["2 üründe kanal stok bilgisi gelmedi; stok 0 kabul edildi."] };
+        ciJobs[jobId] = { id: jobId, polls: 0, label: "Ürünler alınıyor", onDone: () => { ciRuns[runId].state = "ready"; } };
+        console.log("WRITE channel-import scan", cm[1]);
+        return send(res, 202, { job_id: jobId, run_id: runId });
+      }
+      if (req.method === "GET" && (cm = path.match(/^\/products\/channel-import\/latest$/))) {
+        const r = Object.values(ciRuns).reverse().find((x) => x.integration_id === url.searchParams.get("integration_id"));
+        return send(res, 200, { run: r ? runView(r) : null });
+      }
+      if (req.method === "GET" && (cm = path.match(/^\/products\/channel-import\/runs\/([^/]+)$/))) { const r = ciRuns[cm[1]]; return r ? send(res, 200, runView(r)) : send(res, 404, { detail: "Bulunamadı" }); }
+      if (req.method === "GET" && (cm = path.match(/^\/products\/channel-import\/runs\/([^/]+)\/rows$/))) {
+        const r = ciRuns[cm[1]]; if (!r) return send(res, 404, { detail: "Bulunamadı" });
+        const d = url.searchParams.get("decision"); const items = r.rows.filter((x) => !d || x.decision === d);
+        return send(res, 200, { items, total: items.length, page: 1 });
+      }
+      if (req.method === "POST" && (cm = path.match(/^\/products\/channel-import\/runs\/([^/]+)\/apply$/))) {
+        const r = ciRuns[cm[1]]; if (!r) return send(res, 404, { detail: "Bulunamadı" });
+        const jobId = "ci-" + Date.now(); r.state = "applying"; console.log("WRITE channel-import apply", r.id);
+        ciJobs[jobId] = { id: jobId, polls: 0, label: "Ürünler aktarılıyor", onDone: () => {
+          r.state = "applied"; r.applied = { created: 2, linked: 2, queued: 2, failed: 0, limit_skipped: 0 }; r.message = "2 yeni ürün açıldı, 2 ürün bağlandı; 2 ürün onay bekliyor.";
+          r.rows.filter((x) => x.decision === "ambiguous").forEach((x) => ciQueue.push({ ...x, provider: "trendyol", candidates: x.reason === "OTHER_STORE" ? [] : [{ product_id: "p1", name: "Deneme Ürün 1", sku: "SKU-1", barcode: x.barcode, by: "barcode" }, { product_id: "p2", name: "Deneme Ürün 2", sku: "SKU-2", by: "name" }] }));
+        } };
+        return send(res, 202, { job_id: jobId, run_id: r.id });
+      }
+      if (req.method === "GET" && path === "/products/channel-import/queue") {
+        const iid = url.searchParams.get("integration_id"); const items = ciQueue.filter((x) => !x.resolved);
+        return send(res, 200, { items, total: items.length, page: 1 });
+      }
+      if (req.method === "POST" && (cm = path.match(/^\/products\/channel-import\/queue\/([^/]+)\/resolve$/))) {
+        let raw = ""; req.on("data", (c) => (raw += c)); return req.on("end", () => {
+          const b = JSON.parse(raw || "{}"); const row = ciQueue.find((x) => x.id === decodeURIComponent(cm[1]));
+          if (!row) return send(res, 404, { detail: "Bulunamadı" });
+          if (row.resolved) return send(res, 409, { code: "ROW_ALREADY_RESOLVED", detail: "Bu ürün için zaten karar verilmiş." });
+          if (row.reason === "OTHER_STORE" && b.action !== "skip") return send(res, 409, { code: "CHANNEL_LINK_OTHER_STORE", detail: "Kart başka mağazada bağlı." });
+          row.resolved = true; console.log("WRITE channel-import resolve", row.id, JSON.stringify(b));
+          return send(res, 200, { result: b.action === "new" ? "created" : b.action === "link" ? "linked" : "skipped" });
+        });
+      }
+      return send(res, 404, { detail: "Bulunamadı" });
+    }
     if (path.startsWith("/integration-jobs/")) {
       const j = state.job; if (!j) return send(res, 404, { detail: "İşlem bulunamadı ya da süresi doldu." });
       j.done = Math.min(j.total, j.done + 40);

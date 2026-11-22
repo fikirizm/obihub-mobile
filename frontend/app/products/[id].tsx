@@ -6,6 +6,7 @@ import { FadeInDown } from "react-native-reanimated";
 import { useAuth } from "../../src/auth/AuthProvider";
 import { canManage } from "../../src/auth/permissions";
 import { isUncertainWrite } from "../../src/api-finans";
+import { channelDetails } from "../../src/channel-import";
 import { channelLinkFor, channelPushBadge, getProductLinks, updateProductPricing, type ChannelPush, type ProductLinks, type PushBadge } from "../../src/api-urun-stok";
 import { WebStoreProductCard } from "../../src/components/WebStoreProductCard";
 import { discountView, priceEditPlan, resolveDiscount, type Discount } from "../../src/product-discount";
@@ -874,6 +875,14 @@ export default function ProductDetailScreen() {
                   </PressableScale>
                 ))}
               </Card>
+              {/* Faz C5: kanaldan çekilen ürünün kanal kimlikleri (channel_details.<kanal>.{barcode, channel_sku, model_code, variant}). */}
+              {links && channelDetails(links.channelDetails).length ? (
+                <View style={[styles.block, { marginTop: spacing.xs, gap: 2 }]} testID="product-channel-details">
+                  {channelDetails(links.channelDetails).map((d) => (
+                    <Text key={d.channel} style={[type.caption, { color: colors.textTertiary }]}>{`${d.channel}: ${d.text}`}</Text>
+                  ))}
+                </View>
+              ) : null}
             </SafeAnimatedView>
 
             {token ? (

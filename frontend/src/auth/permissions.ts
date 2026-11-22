@@ -48,6 +48,7 @@ export const canSeeReceipts = (user: User | null | undefined) => canAccess(user,
 // Rota → gereken alanlardan herhangi biri. Listede olmayan rotalar herkese açıktır.
 const ROUTE_AREAS: Record<string, Area[]> = {
   products: ["catalog", "inventory"],
+  "channel-import": ["catalog"],
   jobs: ["catalog"],
   integrations: ["integrations"],
   "local-invoices": ["billing"],
