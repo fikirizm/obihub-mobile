@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from "react";
 import { StyleSheet, Switch, Text, View } from "react-native";
 import { useAuth } from "../../auth/AuthProvider";
-import { canManage } from "../../auth/permissions";
+import { canAccess, canManage } from "../../auth/permissions";
 import { getPickableAccounts, request } from "../../api";
 import { effectiveAutoOfficialize, invoiceSettingsPayload, kasaAccounts, kasaErrorText, kasaWarning, readInvoiceSettings, type InvoiceSettingsState } from "../../order-invoice";
 import { useTheme } from "../../theme/ThemeProvider";
@@ -29,7 +29,9 @@ export function InvoiceSettingsCard({ integration, onSaved }: { integration: any
   const [error, setError] = useState("");
   const [dirty, setDirty] = useState(false);
   const channel = String(integration?.provider || "").toLowerCase();
-  const visible = CHANNELS.includes(channel) && canManage(user, "integrations");
+  // Görüntüleme entegrasyon görme izniyle; kayıt yalnız integrations.manage (yetkisizde salt okuma).
+  const visible = CHANNELS.includes(channel) && canAccess(user, "integrations");
+  const canEdit = canManage(user, "integrations");
 
   useEffect(() => {
     setState(readInvoiceSettings(integration?.credentials?.invoice_settings));
@@ -46,7 +48,12 @@ export function InvoiceSettingsCard({ integration, onSaved }: { integration: any
   }, [token, visible]);
   if (!visible) return null;
 
-  const patch = (p: Partial<InvoiceSettingsState>) => (setState((s) => ({ ...s, ...p })), setDirty(true), setError(""));
+  const patch = (p: Partial<InvoiceSettingsState>) => {
+    if (!canEdit) return;
+    setState((s) => ({ ...s, ...p }));
+    setDirty(true);
+    setError("");
+  };
   const save = async () => {
     if (!token || busy) return;
     setBusy(true);
@@ -89,14 +96,15 @@ export function InvoiceSettingsCard({ integration, onSaved }: { integration: any
                 {provider ? `Otomatik kesilen faturayı ${providerLabel || "bağlı sağlayıcı"} ile resmileştirir.` : "Resmileştirme için muhasebe ya da e-belge bağlantısı yok."}
               </Text>
             </View>
-            <Switch testID="inv-auto-officialize" value={auto} disabled={!provider} onValueChange={(v) => patch({ auto_officialize: v })} trackColor={{ true: colors.primary, false: colors.border }} />
+            <Switch testID="inv-auto-officialize" value={auto} disabled={!provider || !canEdit} onValueChange={(v) => patch({ auto_officialize: v })} trackColor={{ true: colors.primary, false: colors.border }} />
           </View>
           {error ? (
             <View style={[styles.err, { backgroundColor: colors.errorBg }]} accessibilityRole="alert">
               <Text style={[type.footnote, { color: colors.error }]}>{error}</Text>
             </View>
           ) : null}
-          {dirty ? <Button testID="inv-settings-save" size="sm" label={busy ? "Kaydediliyor…" : "Kaydet"} busy={busy} disabled={busy} onPress={save} style={{ alignSelf: "flex-start" }} /> : null}
+          {!canEdit ? <Text style={[type.caption, { color: colors.textTertiary }]}>Bu ayarı değiştirmek için entegrasyon yönetim izni gerekir.</Text> : null}
+          {dirty && canEdit ? <Button testID="inv-settings-save" size="sm" label={busy ? "Kaydediliyor…" : "Kaydet"} busy={busy} disabled={busy} onPress={save} style={{ alignSelf: "flex-start" }} /> : null}
         </View>
       </Card>
     </View>
