@@ -30,7 +30,7 @@ import {
 } from "../../src/api-siparis";
 import { canManage, isOwner } from "../../src/auth/permissions";
 import { YurticiCard } from "../../src/components/orders/YurticiCard";
-import { attentionText, createResult, displayNumber, invoiceBadge, invoiceErrorText, openTarget, shareErrorText } from "../../src/order-invoice";
+import { attentionText, canRetryParasutPayment, parasutPaymentPath, parasutPaymentResult, createResult, displayNumber, invoiceBadge, invoiceErrorText, openTarget, shareErrorText } from "../../src/order-invoice";
 import { request } from "../../src/api";
 import { canConfirmTransfer, CONFIRM_TEXT, confirmPath, invoiceRows, isWebOrder, paymentMethodText, paymentStatusText, shipWarning, transferErrorText } from "../../src/web-order";
 import {
@@ -464,6 +464,22 @@ export default function OrderDetail() {
     }
   };
 
+  // C4 eki: sipariş tahsilatı Paraşüt'e işlenemediyse yeniden dene (sonuç belirsizse yeniden gönderme önerilmez).
+  const [parasutPayBusy, setParasutPayBusy] = useState(false);
+  const handleParasutPayment = async () => {
+    if (!token || !order?.local_invoice_id || parasutPayBusy) return;
+    setParasutPayBusy(true);
+    try {
+      const r = parasutPaymentResult(await request<any>(parasutPaymentPath(String(order.local_invoice_id)), { method: "POST", body: "{}" }, token));
+      toast(r.text, r.kind);
+      await load(true);
+    } catch (e: any) {
+      toast(parasutPaymentResult({ ok: false, state: "failed", code: e?.code, message: e?.message }).text, "error");
+    } finally {
+      setParasutPayBusy(false);
+    }
+  };
+
   const handleShareInvoice = async () => {
     if (!token || !order || shareBusy) return;
     setShareBusy(true);
@@ -721,7 +737,7 @@ export default function OrderDetail() {
             {primary === "invoice" ? (
               <Button
                 testID="invoice-create-btn"
-                label="Fatura kes"
+                label={invoiceBadge(order).action === "retry" ? "Faturayı tekrar dene" : "Faturalandır"}
                 icon={<FileTextIcon size={18} color="#FFFFFF" />}
                 busy={invoiceBusy}
                 onPress={handleCreateInvoice}
@@ -1058,6 +1074,11 @@ export default function OrderDetail() {
               <View style={[styles.cardNotice, { backgroundColor: colors.warningBg }]} testID="invoice-attention">
                 <AlertIcon size={16} color={colors.amber} />
                 <Text style={[type.footnote, styles.flexText, { color: colors.textPrimary }]}>{attention}</Text>
+              </View>
+            ) : null}
+            {canWriteOrder && canRetryParasutPayment(order) ? (
+              <View style={styles.cardActions}>
+                <Button testID="order-parasut-payment-btn" size="sm" variant="secondary" label="Tahsilatı Paraşüt'e işle" busy={parasutPayBusy} disabled={parasutPayBusy} onPress={handleParasutPayment} style={styles.gridBtn} />
               </View>
             ) : null}
           </Card>

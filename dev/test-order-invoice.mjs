@@ -107,4 +107,19 @@ t("tahsilat kasası: yalnız TL, aktif, Paraşüt aynası değil; eski Paraşüt
   assert.equal(m.kasaErrorText({ code: "ACCOUNT_INACTIVE" }), "Seçilen hesap pasif.");
   assert.equal(m.kasaErrorText({ code: "ACCOUNT_NOT_FOUND" }), "Hesap bulunamadı.");
 });
+t("Paraşüt tahsilatı: uyarı, düğme ve yeniden deneme sonucu", () => {
+  assert.match(m.attentionText({ invoice_attention: "parasut_payment_failed" }), /Paraşüt'e işlenemedi/);
+  assert.equal(m.canRetryParasutPayment({ invoice_attention: "parasut_payment_failed", local_invoice_id: "l1" }), true);
+  assert.equal(m.canRetryParasutPayment({ invoice_attention: "parasut_payment_failed" }), false);
+  assert.equal(m.canRetryParasutPayment({ invoice_attention: "officialize_failed", local_invoice_id: "l1" }), false);
+  assert.equal(m.parasutPaymentPath("l 1"), "/local-invoices/l%201/order-parasut-payment");
+  assert.deepEqual(m.parasutPaymentResult({ ok: true, state: "synced" }), { kind: "success", text: "Tahsilat Paraşüt'e işlendi." });
+  assert.deepEqual(m.parasutPaymentResult({ ok: true, state: "not_applicable", message: "Bu faturada Paraşüt tahsilatı yok." }), { kind: "info", text: "Bu faturada Paraşüt tahsilatı yok." });
+  assert.equal(m.parasutPaymentResult({ ok: false, state: "uncertain", message: "Yanıt alınamadı." }).kind, "info");
+  assert.match(m.parasutPaymentResult({ ok: false, state: "uncertain" }).text, /Paraşüt'te kontrol/);
+  assert.match(m.parasutPaymentResult({ ok: false, state: "busy", code: "BUSY" }).text, /sürüyor/);
+  assert.match(m.parasutPaymentResult({ ok: false, state: "failed", code: "PARASUT_ALREADY_PAID" }).text, /zaten ödenmiş/);
+  assert.equal(m.parasutPaymentResult({ ok: false, state: "failed", message: "Hesap kapalı." }).text, "Hesap kapalı.");
+  assert.equal(m.parasutPaymentResult({ ok: false, state: "failed" }).kind, "error");
+});
 console.log(`${n} test geçti`);

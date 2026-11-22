@@ -346,7 +346,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig", "yurtici", "yurticiCancel", "officializer"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig", "yurtici", "yurticiCancel", "officializer", "ppay"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -502,11 +502,21 @@ http
       if (o.local_invoice_id && o.invoice_state !== "cancelled") return send(res, 200, { success: true, replayed: true, local_invoice_id: o.local_invoice_id, state: o.invoice_state, message: "Bu sipariş zaten faturalandırılmış." });
       const lid = "li-ord-" + o.id, no = "OBI2026" + String(500 + localInvoices.length);
       localInvoices.unshift({ ...localInvoices[0], id: lid, invoice_number: no, status: "taslak", display_status: "gonderildi", customer_name: o.customer_name || "Müşteri", total: Number(o.total_amount || 0), remaining_amount: Number(o.total_amount || 0), paid_amount: 0, payments: [], parasut_invoice_id: null });
-      Object.assign(o, { local_invoice_id: lid, invoice_state: "issued", obihub_invoice_number: no, invoice_error: null });
+      Object.assign(o, { local_invoice_id: lid, invoice_state: "issued", obihub_invoice_number: no, invoice_error: null, invoice_attention: state.ppay ? "parasut_payment_failed" : null });
       console.log("WRITE create-invoice", o.id);
       const none = state.officializer === "none";
       return send(res, 200, { success: true, message: `Fatura kesildi: ${no}`, local_invoice_id: lid, invoice_number: no, state: "issued",
         officialize: none ? { provider: null, status: "not_available", error: { code: "NO_OFFICIALIZER", message: "Fatura ObiHub'da kesildi. Resmileştirmek için Paraşüt, BizimHesap ya da Turkcell e-Fatura bağlantısı kurun.", action: { label: "Bağlantı kur", href: "/panel/entegrasyonlar" } } } : null });
+    }
+    // C4 eki: sipariş tahsilatını Paraşüt'e yeniden işleme. /__mode?ppay=uncertain|na → belirsiz / uygulanamaz.
+    let opm;
+    if (req.method === "POST" && (opm = path.match(/^\/local-invoices\/([^/]+)\/order-parasut-payment$/))) {
+      const o = orders.find((x) => x.local_invoice_id === decodeURIComponent(opm[1]));
+      console.log("WRITE order-parasut-payment", opm[1]);
+      if (state.ppay === "uncertain") return send(res, 200, { ok: false, state: "uncertain", message: "Paraşüt yanıt vermedi." });
+      if (state.ppay === "na") { if (o) o.invoice_attention = null; return send(res, 200, { ok: true, state: "not_applicable", code: "NOT_APPLICABLE", message: "Bu sipariş tahsil edilmeden kesildi; Paraşüt'e işlenecek tahsilat yok." }); }
+      if (o) o.invoice_attention = null;
+      return send(res, 200, { ok: true, state: "synced", parasut_payment_id: "pp-1" });
     }
     if (req.method === "GET" && path === "/invoicing/officializer")
       return send(res, 200, state.officializer === "none" ? { provider: null, label: "", action_label: "Resmileştir", connect_href: "/panel/entegrasyonlar", message: "Bağlantı yok." } : { provider: "parasut", label: "Paraşüt", produces_edoc: true, action_label: "Paraşüt'te resmileştir", needs_choice: false });

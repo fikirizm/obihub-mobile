@@ -56,6 +56,7 @@ export function attentionText(o: Order) {
   if (a === "order_cancelled") return "Sipariş iptal edildi; kesilen faturayı iptal etmeyi düşünün.";
   if (a === "order_cancelled_official") return "Sipariş iptal edildi ama fatura resmileşmiş; iade faturası ya da e-belge iptali gerekebilir.";
   if (a === "officialize_failed") return "Resmileştirme başarısız oldu; faturayı açıp yeniden deneyin.";
+  if (a === "parasut_payment_failed") return "Siparişin tahsilatı Paraşüt'e işlenemedi; Paraşüt'te fatura açık görünebilir.";
   return "";
 }
 
@@ -120,3 +121,18 @@ const KASA: Record<string, string> = {
   MIRROR_ACCOUNT_READ_ONLY: "Paraşüt'ten gelen hesap seçilemez; ObiHub hesabı seçin.",
 };
 export const kasaErrorText = (e: any) => KASA[String(e?.code || "")] || msg(e) || "Ayar kaydedilemedi.";
+
+// --- C4 eki: sipariş tahsilatını Paraşüt'e yeniden işleme. POST /local-invoices/{id}/order-parasut-payment →
+// {ok, state: synced|failed|uncertain|busy|not_applicable, code?, message?}. not_applicable'da "işlendi" denmez, sunucu metni gösterilir.
+// Belirsiz sonuçta yeniden gönderme önerilmez (Paraşüt'te kontrol). Fatura tahsilat satırı uncertain|syncing iken "Paraşüt'e işle" yoktur (parasut-pay.ts).
+export const canRetryParasutPayment = (o: Order) => o?.invoice_attention === "parasut_payment_failed" && Boolean(o?.local_invoice_id);
+export const parasutPaymentPath = (localInvoiceId: string) => `/local-invoices/${encodeURIComponent(localInvoiceId)}/order-parasut-payment`;
+export function parasutPaymentResult(r: any): { kind: "success" | "info" | "error"; text: string } {
+  const m = typeof r?.message === "string" && r.message.trim() ? r.message.trim() : "";
+  if (r?.state === "synced") return { kind: "success", text: m || "Tahsilat Paraşüt'e işlendi." };
+  if (r?.state === "not_applicable" || r?.code === "NOT_APPLICABLE") return { kind: "info", text: m || "Bu sipariş için Paraşüt'e işlenecek tahsilat yok." };
+  if (r?.state === "uncertain") return { kind: "info", text: `${m ? `${m} ` : ""}Sonuç belirsiz; yeniden göndermeden önce Paraşüt'te kontrol edin.` };
+  if (r?.state === "busy" || r?.code === "BUSY") return { kind: "info", text: m || "Bu tahsilat için Paraşüt işlemi sürüyor; biraz sonra yenileyin." };
+  if (r?.code === "PARASUT_ALREADY_PAID") return { kind: "info", text: m || "Fatura Paraşüt'te zaten ödenmiş görünüyor; ikinci tahsilat yazılmadı." };
+  return { kind: "error", text: m || "Tahsilat Paraşüt'e işlenemedi." };
+}
