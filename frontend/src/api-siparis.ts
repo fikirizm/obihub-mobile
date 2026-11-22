@@ -6,6 +6,14 @@ import type { Integration, Order } from "./types";
 
 // Liste ucunun verdiği, ancak detay ucunun (response_model=Order) attığı alanlar.
 export type OrderFull = Order & {
+  // Faz C4 sipariş faturalandırma (sözleşme: docs/pm/tasarim/siparis-faturalandirma-mobil-sozlesme.md).
+  local_invoice_id?: string | null;
+  invoice_state?: string | null;
+  invoice_error?: { code?: string; message?: string; at?: string; attempts?: number } | null;
+  invoice_attention?: string | null;
+  official_number?: string | null;
+  edoc_provider?: string | null;
+  obihub_invoice_number?: string | null;
   idefix_cargo_tracking?: string;
   idefix_status?: string;
   pazarama_cargo_tracking?: string;
@@ -269,29 +277,19 @@ export async function getOrderDetailFull(token: string, orderId: string, fresh =
 
 // Web hasRealInvoice: fatura numarası, Paraşüt faturası ya da BizimHesap belgesi varsa sipariş faturalıdır.
 // Hepsiburada'da ayrıca pazaryerinin "fatura eksik" bayrağı kapalıysa faturalı sayılır.
-export function orderInvoiceState(o: OrderFull, channel: ChannelKey) {
-  const real = Boolean(o.invoice_number || o.parasut_invoice_id || o.bizimhesap_invoice_guid);
-  const closed = ["cancelled", "deleted"].includes(String(o.status || "").toLowerCase());
-  const invoiced = real || (channel === "hepsiburada" && o.hb_invoice_missing !== true);
-  return {
-    hasInvoice: real,
-    invoiced,
-    // Web "Fatura Oluştur": gerçek fatura yoksa ve sipariş iptal/silinmiş değilse.
-    canCreate: !real && !closed,
-    canOpen: Boolean(o.parasut_invoice_id || o.parasut_invoice_url),
-    // Web "Faturayı Mağazaya İlet": yalnız bu pazaryerleri ve Paraşüt faturası varken.
-    canShare: ["trendyol", "hepsiburada", "pazarama", "idefix"].includes(channel) && Boolean(o.parasut_invoice_id),
-    sharedToTrendyol: channel === "trendyol" && Boolean(o.trendyol_invoice_shared),
-  };
-}
+// Faz C4: fatura durumu src/order-invoice.ts'te (local_invoice_id faturalı sayılır; rozet/eylem web ile aynı).
+export { orderInvoiceState } from "./order-invoice";
 
 // HTTP 200 + success:false olabilir; eşzamanlı ikinci istekte {success:false, in_progress:true}.
+// Faz C4 yanıtı: {success, message, local_invoice_id, parasut_invoice_id, invoice_number, official_number, state, officialize, replayed};
+// `invoice_id` OKUNMAZ (anlamı duruma göre değişir). Gövde boş: bağlı sağlayıcı varsa sunucu resmileştirir.
 export async function createOrderInvoice(token: string, orderId: string) {
-  return request<{ success?: boolean; in_progress?: boolean; message?: string }>(
-    `/orders/${encodeURIComponent(orderId)}/create-invoice`,
-    { method: "POST" },
-    token
-  );
+  return request<any>(`/orders/${encodeURIComponent(orderId)}/create-invoice`, { method: "POST", body: "{}" }, token);
+}
+
+// GET /invoicing/officializer → {provider|null, label, action_label, connect_href, message, …}.
+export async function getOfficializer(token: string) {
+  return request<{ provider?: string | null; action_label?: string; connect_href?: string; message?: string }>("/invoicing/officializer", { method: "GET" }, token);
 }
 
 export async function shareOrderInvoiceToStore(token: string, orderId: string) {

@@ -18,6 +18,7 @@ import {
   enqueueCloudPrint,
   needsTakeInProcessing,
   orderInvoiceState,
+  getOfficializer,
   shareOrderInvoiceToStore,
   takeOrderInProcessing,
   getOrderDetailFull,
@@ -29,6 +30,7 @@ import {
 } from "../../src/api-siparis";
 import { canManage, isOwner } from "../../src/auth/permissions";
 import { YurticiCard } from "../../src/components/orders/YurticiCard";
+import { attentionText, createResult, displayNumber, invoiceBadge, invoiceErrorText, openTarget, shareErrorText } from "../../src/order-invoice";
 import { request } from "../../src/api";
 import { canConfirmTransfer, CONFIRM_TEXT, confirmPath, invoiceRows, isWebOrder, paymentMethodText, paymentStatusText, shipWarning, transferErrorText } from "../../src/web-order";
 import {
@@ -409,30 +411,33 @@ export default function OrderDetail() {
   };
 
   const canWriteOrder = canManage(user, "orders");
+  // GET /invoicing/officializer: "Resmileştir" düğmesinin metni (ör. "Paraşüt'te resmileştir", "BizimHesap'a aktar").
+  const [officializerLabel, setOfficializerLabel] = useState("Resmileştir");
+  useEffect(() => {
+    if (!token || !order?.local_invoice_id || order?.invoice_state !== "issued") return;
+    getOfficializer(token)
+      .then((r) => r?.action_label && setOfficializerLabel(String(r.action_label)))
+      .catch(() => undefined);
+  }, [token, order?.local_invoice_id, order?.invoice_state]);
 
   // Web handleInvoice: faturası olan siparişte fatura açılır, yoksa kesilir.
   const handleCreateInvoice = async () => {
     if (!token || !order || invoiceBusy) return;
     const ok = await confirm({
       title: "Fatura kesilsin mi?",
-      message: "Sipariş için muhasebe programınızda satış faturası oluşturulur.",
-      confirmLabel: "Fatura kes",
+      message:
+        "Satış faturası önce ObiHub'da kesilir. Muhasebe ya da e-belge bağlantınız varsa ardından resmileştirilir.",
+      confirmLabel: "Faturalandır",
     });
     if (!ok) return;
     setInvoiceBusy(true);
     try {
-      const r = await createOrderInvoice(token, order.id);
-      if (r?.success) {
-        toast(r.message || "Fatura oluşturuldu.", "success");
-      } else if (r?.in_progress) {
-        // Aynı sipariş için başka bir istek (web ya da ikinci dokunuş) faturayı zaten kesiyor.
-        toast(r.message || "Bu sipariş için fatura kesimi sürüyor.", "info");
-      } else {
-        toast(r?.message || "Fatura oluşturulamadı.", "error");
-      }
+      // Faz C4: sonuç ve resmileştirme durumu createResult ile (sağlayıcı yoksa "bağlantı kurun" notu).
+      const r = createResult(await createOrderInvoice(token, order.id));
+      toast(r.text, r.kind);
       await load(true);
     } catch (e: any) {
-      toast(e?.message || "Fatura oluşturulamadı.", "error");
+      toast(invoiceErrorText(e), "error");
       await load(true);
     } finally {
       setInvoiceBusy(false);
@@ -442,6 +447,11 @@ export default function OrderDetail() {
   // Web handleOpenInvoice: Paraşüt faturası uygulama içinde, diğerleri bağlantıyla açılır.
   const handleOpenInvoice = () => {
     if (!order) return;
+    const target = openTarget(order);
+    if (target?.kind === "local") {
+      router.push({ pathname: "/local-invoices/[id]", params: { id: target.id } } as any);
+      return;
+    }
     if (order.parasut_invoice_id) {
       router.push({
         pathname: "/invoices/[id]",
@@ -463,7 +473,7 @@ export default function OrderDetail() {
       else toast(r?.message || "Fatura mağazaya iletilemedi.", "error");
       await load(true);
     } catch (e: any) {
-      toast(e?.message || "Fatura mağazaya iletilemedi.", "error");
+      toast(shareErrorText(e), "error");
     } finally {
       setShareBusy(false);
     }
@@ -551,6 +561,9 @@ export default function OrderDetail() {
     : "-";
   const cargoError = Boolean(order.cargo_error_message) && String(order.cargo_status || "") === "error";
   const inv = orderInvoiceState(order, channel);
+  const badge = invoiceBadge(order);
+  const invNo = displayNumber(order);
+  const attention = attentionText(order);
   const closedOrder = ["cancelled", "deleted"].includes(String(order.status || "").toLowerCase());
   const takeNeeded = canWriteOrder && needsTakeInProcessing(order, channel);
   // HepsiJet barkodları yalnız kendi kargosu olmayan kanallarda açılır (pazaryeri etiketleri iptal edilemez).
@@ -1018,19 +1031,19 @@ export default function OrderDetail() {
             <ListRow
               testID="invoice-row"
               leading={
-                <IconTile tint={inv.invoiced ? colors.successBg : colors.warningBg}>
-                  {inv.invoiced ? <CheckIcon size={18} color={colors.success} /> : <FileTextIcon size={18} color={colors.amber} />}
+                <IconTile tint={badge.tone === "success" ? colors.successBg : badge.tone === "error" ? colors.errorBg : badge.tone === "info" ? colors.infoBg : colors.warningBg}>
+                  {badge.tone === "success" ? (
+                    <CheckIcon size={18} color={colors.success} />
+                  ) : (
+                    <FileTextIcon size={18} color={badge.tone === "error" ? colors.error : badge.tone === "info" ? colors.info : colors.amber} />
+                  )}
                 </IconTile>
               }
-              title={inv.invoiced ? "Faturalandı" : closedOrder ? "Fatura yok" : "Fatura kesilmedi"}
+              title={badge.label}
               subtitle={
-                inv.invoiced
-                  ? [order.invoice_number ? `No ${order.invoice_number}` : null, inv.sharedToTrendyol ? "Trendyol'a iletildi" : null]
-                      .filter(Boolean)
-                      .join(" · ") || "Muhasebe programında kayıtlı"
-                  : closedOrder
-                    ? "İptal ya da silinmiş siparişe fatura kesilmez."
-                    : "Muhasebe programınızda satış faturası oluşturun."
+                badge.detail ||
+                [invNo ? `No ${invNo}` : null, inv.sharedToTrendyol ? "Trendyol'a iletildi" : null].filter(Boolean).join(" · ") ||
+                (closedOrder ? "İptal ya da silinmiş siparişe fatura kesilmez." : badge.action === "create" ? "Satış faturası önce ObiHub'da kesilir." : "")
               }
               onPress={inv.canOpen ? handleOpenInvoice : undefined}
               trailing={
@@ -1041,13 +1054,29 @@ export default function OrderDetail() {
                 ) : undefined
               }
             />
+            {attention ? (
+              <View style={[styles.cardNotice, { backgroundColor: colors.warningBg }]} testID="invoice-attention">
+                <AlertIcon size={16} color={colors.amber} />
+                <Text style={[type.footnote, styles.flexText, { color: colors.textPrimary }]}>{attention}</Text>
+              </View>
+            ) : null}
           </Card>
-          {canWriteOrder && ((inv.canCreate && primary !== "invoice") || inv.canShare) ? (
+          {canWriteOrder && ((inv.canCreate && primary !== "invoice") || inv.canShare || badge.action === "officialize") ? (
             <View style={styles.actions}>
+              {badge.action === "officialize" ? (
+                <Button
+                  testID="invoice-officialize-btn"
+                  label={officializerLabel}
+                  variant="secondary"
+                  icon={<FileTextIcon size={16} color={colors.textPrimary} />}
+                  onPress={handleOpenInvoice}
+                  style={styles.flexBtn}
+                />
+              ) : null}
               {inv.canCreate && primary !== "invoice" ? (
                 <Button
                   testID="invoice-create-btn"
-                  label="Fatura kes"
+                  label={badge.action === "retry" ? "Tekrar dene" : "Faturalandır"}
                   variant="secondary"
                   icon={<FileTextIcon size={16} color={colors.textPrimary} />}
                   busy={invoiceBusy}

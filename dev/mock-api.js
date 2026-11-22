@@ -342,7 +342,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig", "yurtici", "yurticiCancel"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig", "yurtici", "yurticiCancel", "officializer"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -494,11 +494,21 @@ http
     if (req.method === "POST" && (m = path.match(/^\/orders\/([^/]+)\/create-invoice$/))) {
       const o = orders.find((x) => x.id === m[1]);
       if (state.invoiceBusy === "1") return send(res, 200, { success: false, in_progress: true, message: "Bu sipariş için fatura kesimi sürüyor" });
-      Object.assign(o, { parasut_invoice_id: "inv-" + o.id, invoice_number: "OBI2026" + o.id.slice(1).padStart(6, "0") });
-      return send(res, 200, { success: true, message: "Fatura oluşturuldu: " + o.invoice_number });
+      // Faz C4: fatura önce ObiHub'da kesilir (local_invoice_id, invoice_state=issued). /__mode?officializer=none → NO_OFFICIALIZER.
+      if (o.local_invoice_id && o.invoice_state !== "cancelled") return send(res, 200, { success: true, replayed: true, local_invoice_id: o.local_invoice_id, state: o.invoice_state, message: "Bu sipariş zaten faturalandırılmış." });
+      const lid = "li-ord-" + o.id, no = "OBI2026" + String(500 + localInvoices.length);
+      localInvoices.unshift({ ...localInvoices[0], id: lid, invoice_number: no, status: "taslak", display_status: "gonderildi", customer_name: o.customer_name || "Müşteri", total: Number(o.total_amount || 0), remaining_amount: Number(o.total_amount || 0), paid_amount: 0, payments: [], parasut_invoice_id: null });
+      Object.assign(o, { local_invoice_id: lid, invoice_state: "issued", obihub_invoice_number: no, invoice_error: null });
+      console.log("WRITE create-invoice", o.id);
+      const none = state.officializer === "none";
+      return send(res, 200, { success: true, message: `Fatura kesildi: ${no}`, local_invoice_id: lid, invoice_number: no, state: "issued",
+        officialize: none ? { provider: null, status: "not_available", error: { code: "NO_OFFICIALIZER", message: "Fatura ObiHub'da kesildi. Resmileştirmek için Paraşüt, BizimHesap ya da Turkcell e-Fatura bağlantısı kurun.", action: { label: "Bağlantı kur", href: "/panel/entegrasyonlar" } } } : null });
     }
+    if (req.method === "GET" && path === "/invoicing/officializer")
+      return send(res, 200, state.officializer === "none" ? { provider: null, label: "", action_label: "Resmileştir", connect_href: "/panel/entegrasyonlar", message: "Bağlantı yok." } : { provider: "parasut", label: "Paraşüt", produces_edoc: true, action_label: "Paraşüt'te resmileştir", needs_choice: false });
     if (req.method === "POST" && (m = path.match(/^\/orders\/([^/]+)\/share-invoice-to-store$/))) {
       const o = orders.find((x) => x.id === m[1]);
+      if (o.local_invoice_id && o.invoice_state !== "official") return send(res, 409, { code: "INVOICE_NOT_OFFICIAL", detail: "Fatura henüz resmileşmedi.", action: "Resmileştir" });
       o.trendyol_invoice_shared = true;
       return send(res, 200, { success: true, message: "Fatura mağazaya iletildi" });
     }
