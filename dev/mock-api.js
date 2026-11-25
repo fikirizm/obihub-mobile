@@ -240,6 +240,12 @@ localInvoices.push({ id: "li10", doc_schema: 1, invoice_number: "OBI2026160", in
   edoc_state: "failed", edoc_error: "Alıcı il, ilçe ve VKN/TCKN bilgisi eksik.", parasut_invoice_id: "prs-inv-10", category_id: "sc1", tag_ids: ["tg1"],
   customer_id: "c2", customer_name: "Can Öztürk", issue_date: "2026-11-24", due_date: "2026-12-24", currency: "TRY", subtotal: 500, discount_amount: 0, vat_amount: 100, total: 600, paid_amount: 0, remaining_amount: 600,
   payments: [], items: [{ line_key: "l-10", product_name: "Deneme Ürün 2", quantity: 1, unit_price: 500, vat_rate: 20, total: 600 }] });
+// 25 Kas EDM e-Fatura: test ortamında kesilmiş, gönderimi başarısız (yeniden gönderilebilir), bir kez yeniden gönderilmiş fatura.
+localInvoices.push({ id: "li11", doc_schema: 1, invoice_number: "OBI2026170", invoice_type: "satis", status: "resmilesti", display_status: "resmilesti", money_state: "pending",
+  edoc_state: "done", edoc_provider: "edm_efatura", edoc_kind: "e_arsiv", edoc_remote_state: "failed", edoc_remote_code: "SEND - FAILED", official_number: "EDM2026000000012",
+  edoc_ettn: "5f1c2a90-3b7e-4c1d-9a2e-0c4b7d1e8a33", edoc_previous_ettns: ["0a9e4d1c-77b2-4f5a-8c31-2e6f9b0d4c11"], edoc_test_mode: true, edoc_internet_sale: true,
+  customer_id: "c1", customer_name: "Elif Kaya", issue_date: "2026-11-25", due_date: "2026-12-25", currency: "TRY", subtotal: 250, discount_amount: 0, vat_amount: 50, total: 300, paid_amount: 0, remaining_amount: 300,
+  payments: [], items: [{ line_key: "l-11", product_name: "Deneme Ürün 4", quantity: 1, unit_price: 250, vat_rate: 20, total: 300 }] });
 // Dalga 1: resmileşmiş e-Arşiv fatura (e-belge iptali, resmi PDF).
 localInvoices.push({ id: "li7", doc_schema: 1, invoice_number: "OBI2026140", invoice_type: "satis", status: "resmilesti", display_status: "resmilesti", money_state: "pending", edoc_state: "done", edoc_type: "e_archive", parasut_invoice_id: "prs-inv-7",
   customer_id: "c1", customer_name: "Elif Kaya", issue_date: "2026-11-15", due_date: "2026-11-30", currency: "TRY", subtotal: 1000, discount_amount: 0, vat_amount: 200, total: 1200, paid_amount: 0, remaining_amount: 1200,
@@ -2023,6 +2029,16 @@ http
     }
     // D-12 yaşam döngüsü: iptal (gerekçe, e-belge adımı), iade, kopya, arşiv, geçmiş, PDF.
     let lcm;
+    // 25 Kas EDM: başarısız gönderimin yeniden gönderimi (aynı resmî numara, yeni ETTN; sonuç sorgulanana kadar edoc_resend_ettn).
+    let rsm;
+    if (req.method === "POST" && (rsm = path.match(/^\/local-invoices\/([^/]+)\/edoc-resend$/))) {
+      const inv = localInvoices.find((x) => x.id === rsm[1]);
+      if (!inv || inv.edoc_provider !== "edm_efatura") return send(res, 404, { detail: "Fatura bulunamadı" });
+      if (inv.edoc_resend_ettn) return send(res, 409, { code: "EDOC_RESEND_IN_PROGRESS", detail: "Bu faturanın yeniden gönderimi sürüyor; durumu yenileyerek sonucu alın." });
+      inv.edoc_resend_ettn = "c3d4e5f6-0000-4000-8000-000000000099"; inv.edoc_remote_state = "pending"; inv.edoc_remote_code = "SEND - PROCESSING";
+      console.log("WRITE edoc-resend", inv.id);
+      return send(res, 200, { ok: true, edoc_state: "done", resent: true });
+    }
     // 24 Kas: e-belgeyi yeniden dene. Gövdesiz ilk istek 422 RECIPIENT_INCOMPLETE; il+ilçe+geçerli numara gelince e-belge düzenlenir.
     let erm;
     if (req.method === "POST" && (erm = path.match(/^\/local-invoices\/([^/]+)\/edoc-retry$/))) {

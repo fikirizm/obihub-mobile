@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { EdocProviderCard } from "../../src/components/EdocProviderCard";
+import { edocErrorText, edocProviderView } from "../../src/edoc-provider";
 import { ClassChips } from "../../src/components/ClassChips";
 import { useClassNames } from "../../src/classification-store";
 import { hasClass } from "../../src/classification";
@@ -103,7 +105,7 @@ export default function LocalInvoiceDetailScreen() {
   const invCls = useClassNames(token, "sales", invClassOn ? [inv] : [], invClassOn);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [busy, setBusy] = useState<"official" | "payment" | "edoc" | "delete" | "void" | "copy" | "archive" | "pdf" | null>(null);
+  const [busy, setBusy] = useState<"official" | "payment" | "edoc" | "resend" | "delete" | "void" | "copy" | "archive" | "pdf" | null>(null);
   const [voidingId, setVoidingId] = useState<string | null>(null);
   // C4 eki: firmada tahsilatı Paraşüt'e yazma açık mı (okunamazsa kapalı).
   const [caps, setCaps] = useState<{ payment_sync: boolean }>({ payment_sync: false });
@@ -396,6 +398,27 @@ export default function LocalInvoiceDetailScreen() {
     }
   };
 
+  // 25 Kas EDM: başarısız gönderimi aynı resmî numarayla yeniden ilet (POST edoc-resend; yeni numara oluşmaz).
+  const onResendEdoc = async () => {
+    if (!token || busy) return;
+    const ok = await confirm({
+      title: "Fatura yeniden gönderilsin mi?",
+      message: `${(inv as any).official_number || inv.invoice_number || "Fatura"} · ${inv.customer_name || "—"}\nEDM'de gönderimi başarısız olan fatura aynı resmî fatura numarasıyla yeniden iletilir; yeni bir numara oluşmaz.`,
+      confirmLabel: "Yeniden gönder",
+    });
+    if (!ok) return;
+    setBusy("resend");
+    try {
+      await request<any>(`/local-invoices/${encodeURIComponent(inv.id)}/edoc-resend`, { method: "POST", body: "{}" }, token);
+      toast("Fatura EDM'ye yeniden gönderildi; sonucu birkaç dakika sonra durumu yenileyerek görün.", "success");
+      await load();
+    } catch (e: any) {
+      toast(edocErrorText(e, "Fatura yeniden gönderilemedi."), "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   // Aşama 4 / P11: tahsilatı düzenle / sil (web SalesInvoiceFormOS.payRowActions).
   type Pay = NonNullable<LocalInvoice["payments"]>[number];
   const onEditPayment = (p: Pay) => {
@@ -586,6 +609,12 @@ export default function LocalInvoiceDetailScreen() {
                 {inv.edoc_error || "Fatura tutarı Paraşüt'teki tutarla uyuşmuyor. Uyuşmazlık giderilene kadar tahsilat eklenemez; web panelinden kontrol edin."}
               </Text>
             </View>
+          </SafeAnimatedView>
+        ) : null}
+
+        {edocProviderView(inv) ? (
+          <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)}>
+            <EdocProviderCard view={edocProviderView(inv)!} busy={busy} onRefresh={onCheckEdoc} onResend={onResendEdoc} />
           </SafeAnimatedView>
         ) : null}
 

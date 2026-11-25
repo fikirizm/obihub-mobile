@@ -122,4 +122,8 @@ t("Paraşüt tahsilatı: uyarı, düğme ve yeniden deneme sonucu", () => {
   assert.equal(m.parasutPaymentResult({ ok: false, state: "failed", message: "Hesap kapalı." }).text, "Hesap kapalı.");
   assert.equal(m.parasutPaymentResult({ ok: false, state: "failed" }).kind, "error");
 });
+t("25 Kas EDM: test ortamı faturası pazaryerine gönderilmez (409 EDOC_TEST_MODE) — sunucu metni gösterilir", () => {
+  const text = "Test ortamında kesilen fatura pazaryerine gönderilmez. Bu belge sağlayıcının test hesabında oluştu ve resmî değildir; canlı bağlantıyla kesilen faturalar iletilir.";
+  assert.equal(m.shareErrorText({ status: 409, code: "EDOC_TEST_MODE", message: text }), text);
+});
 console.log(`${n} test geçti`);
