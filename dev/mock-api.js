@@ -754,6 +754,11 @@ http
     // Ürün kimliği (ad / SKU / barkod) ve stok hareketleri — gerçek uçlar: GET|PATCH /products/{id}, GET /stock/movements.
     // --- F2 / F3 / B5
     if (path === "/dashboard/recent-orders") return send(res, 200, orders.slice(0, Number(url.searchParams.get("limit") || 5)));
+    // Destek yanıtları (bildirim merkezi): dün ve 9 gün önce.
+    if (path === "/support/notifications" && req.method === "GET") return send(res, 200, { items: [
+      { ticket_id: "t-1", ticket_code: "D-1042", subject: "Trendyol fatura bağlantısı", preview: "Merhaba, bağlantıyı yeniledik; tekrar dener misiniz?", last_super_message_at: new Date(Date.now() - 26 * 3600000).toISOString() },
+      { ticket_id: "t-2", ticket_code: "D-0990", subject: "Etiket yazdırma", preview: "Yazdırma programının yeni sürümü yayında.", last_super_message_at: new Date(Date.now() - 9 * 86400000).toISOString() },
+    ] });
     if (path === "/support/notifications/mark-read" && req.method === "POST") { console.log("WRITE mark-read"); return send(res, 200, { success: true, updated: 1 }); }
     if (/^\/products\/[^/]+\/insights$/.test(path)) {
       const r = url.searchParams.get("range") || "month"; const k = r === "week" ? 1 : r === "year" ? 12 : 3;

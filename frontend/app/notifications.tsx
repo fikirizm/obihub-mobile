@@ -1,10 +1,12 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { setAppBadge } from "../src/notifications/badge";
-import { FlatList, StyleSheet, Text, View } from "react-native";
+import { SectionList, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { useAuth } from "../src/auth/AuthProvider";
 import { markSupportNotificationsRead } from "../src/api";
 import { markAllNotificationsRead, markNotificationRead, useNotifications } from "../src/notifications/store";
+import { groupNotifications, notificationChips, relativeTime } from "../src/notifications/view";
+import { Chip, ChipRow } from "../src/ui/Chip";
 import { useTheme } from "../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../src/theme/tokens";
 import { FadeInDown } from "react-native-reanimated";
@@ -17,17 +19,17 @@ import { Button } from "../src/ui/Button";
 import { StackHeader } from "../src/ui/Header";
 import { IconTile } from "../src/ui/ListRow";
 
-function timeLabel(ts: number) {
-  const diffMin = Math.max(0, Math.round((Date.now() - ts) / 60000));
-  if (diffMin < 1) return "Şimdi";
-  if (diffMin < 60) return `${diffMin} dk önce`;
-  if (diffMin < 24 * 60) return `${Math.round(diffMin / 60)} sa önce`;
-  return new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(ts));
-}
+// Web KABUK-1 ile aynı kısa zaman: şimdi · 12 dk · 3 sa · dün 16:20 · 12 Kas (gün sınırı İstanbul).
+const timeLabel = (ts: number) => relativeTime(ts);
 
 export default function NotificationsScreen() {
   const { colors } = useTheme();
   const { list, unread } = useNotifications();
+  const [filter, setFilter] = useState("all");
+  const chips = notificationChips(list);
+  // Seçili tür boşaldıysa (ör. temizlendi) Tümü'ne dönülür.
+  const active = chips.some((c) => c.key === filter) ? filter : "all";
+  const sections = useMemo(() => groupNotifications(list, active), [list, active]);
 
   const { token } = useAuth();
   const markAll = () => {
@@ -51,10 +53,30 @@ export default function NotificationsScreen() {
           <Button testID="notifications-mark-all" label="Tümünü okundu say" variant="ghost" size="sm" onPress={markAll} />
         </SafeAnimatedView>
       ) : null}
-      <FlatList
-        data={list}
+      {chips.length > 2 ? (
+        <View style={styles.chips} testID="notification-chips">
+          <ChipRow>
+            {chips.map((c) => (
+              <Chip key={c.key} testID={`notification-chip-${c.key}`} label={c.label} count={c.count} selected={active === c.key} onPress={() => setFilter(c.key)} />
+            ))}
+          </ChipRow>
+        </View>
+      ) : null}
+      <SectionList
+        sections={sections}
         keyExtractor={(n) => n.id}
         contentContainerStyle={styles.list}
+        stickySectionHeadersEnabled={false}
+        ListFooterComponent={
+          list.length > 0 ? (
+            <Text style={[type.caption, { color: colors.textTertiary, textAlign: "center", marginTop: spacing.lg }]}>Bildirim geçmişi bu cihazda saklanır.</Text>
+          ) : null
+        }
+        renderSectionHeader={({ section }) => (
+          <Text style={[type.caption, styles.sectionTitle, { color: colors.textSecondary }]} accessibilityRole="header">
+            {section.title}
+          </Text>
+        )}
         ListEmptyComponent={
           <EmptyState
             icon={<BellIcon size={30} color={colors.primary} />}
@@ -62,7 +84,7 @@ export default function NotificationsScreen() {
             description="Yeni siparişler ve destek yanıtları burada görünür."
           />
         }
-        renderItem={({ item, index }) => {
+        renderItem={({ item, index, section }) => {
           const unreadRow = !item.read;
           const canOpen = Boolean(item.orderId || item.ticketId);
           return (
@@ -71,7 +93,7 @@ export default function NotificationsScreen() {
                 styles.item,
                 { backgroundColor: unreadRow ? colors.primarySoft : colors.surface, borderColor: colors.borderSubtle },
                 index === 0 && styles.first,
-                index === list.length - 1 && styles.last,
+                index === section.data.length - 1 && styles.last,
               ]}
             >
               <PressableScale
@@ -118,11 +140,6 @@ export default function NotificationsScreen() {
           );
         }}
       />
-      {list.length > 0 ? (
-        <Text style={[type.caption, { color: colors.textTertiary, textAlign: "center", paddingBottom: spacing.lg }]}>
-          Bildirim geçmişi bu cihazda saklanır.
-        </Text>
-      ) : null}
     </View>
   );
 }
@@ -133,6 +150,8 @@ const styles = StyleSheet.create({
   item: { borderLeftWidth: 1, borderRightWidth: 1 },
   first: { borderTopWidth: 1, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, overflow: "hidden" },
   last: { borderBottomWidth: 1, borderBottomLeftRadius: radius.lg, borderBottomRightRadius: radius.lg, overflow: "hidden" },
+  chips: { marginBottom: spacing.xs },
+  sectionTitle: { fontWeight: "700", letterSpacing: 0.3, marginTop: spacing.md, marginBottom: spacing.xs, marginLeft: 4 },
   toolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm, paddingHorizontal: spacing.lg, marginBottom: spacing.xxs },
   unreadPill: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: radius.pill, paddingHorizontal: spacing.sm, paddingVertical: 6 },
   row: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 64, paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
