@@ -42,7 +42,7 @@ t("16 Kas: resmileşmemiş kesilmiş fatura Paraşüt gibi düzenlenir ve silini
   assert.equal(issued.edit_amounts, true); assert.equal(issued.delete, true);
   assert.equal(m.lifecycleActions({ status: "taslak" }).delete, true);
   const paid = m.lifecycleActions({ status: "gonderildi", paid_amount: 10 });
-  assert.equal(paid.edit_amounts, false); assert.equal(paid.delete, true); // tahsilatlıyı sunucu INVOICE_HAS_PAYMENTS ile reddeder
+  assert.equal(paid.edit_amounts, false); assert.equal(paid.delete, false); // 25 Kas PM: tahsilatlıda sil gizli (sunucu HAS_PAYMENTS ile reddeder)
   for (const inv of [{ status: "resmilesti" }, { status: "gonderildi", parasut_invoice_id: "9" }, { status: "gonderildi", edoc_state: "done" }, { status: "gonderildi", edoc_state: "pending" },
     { status: "gonderildi", officialize_lock: { at: "x" } }, { status: "gonderildi", source: "parasut_import" }, { status: "gonderildi", read_only: true }, { status: "iptal" }]) {
     const a = m.lifecycleActions(inv);
@@ -159,4 +159,10 @@ t("E-belgeyi yeniden dene: Paraşüt'te faturası olan, e-belgesi düşmüş, ki
   assert.equal(m.canRetryEdoc({ ...ok, source: "parasut_import" }), false);
 });
 
+t("25 Kas: tahsilatı olan faturada 'Faturayı sil' gizli (sunucu HAS_PAYMENTS ile reddeder); sunucu actions'ı izin verse de", () => {
+  assert.equal(m.lifecycleActions({ status: "gonderildi", paid_amount: 50 }).delete, false);
+  assert.equal(m.lifecycleActions({ status: "gonderildi", paid_amount: 0, payments: [{ id: "p1", amount: 10 }] }).delete, false);
+  assert.equal(m.lifecycleActions({ status: "gonderildi", paid_amount: 50, actions: { delete: true } }).delete, false);
+  assert.equal(m.lifecycleActions({ status: "gonderildi", paid_amount: 0 }).delete, true);
+});
 console.log(`\n${n} test geçti`);

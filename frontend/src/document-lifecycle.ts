@@ -79,6 +79,9 @@ export function lifecycleActions(inv: Inv): LifecycleActions {
   const server = inv?.actions && typeof inv.actions === "object" ? inv.actions : {};
   const out: any = { ...derived };
   for (const k of Object.keys(derived)) if (typeof server[k] === "boolean") out[k] = server[k];
+  // PM kararı 25 Kas: tahsilatı olan fatura silinemez (sunucu HAS_PAYMENTS); "Faturayı sil" sunucu izin verse de gizlenir.
+  const live = (Array.isArray(inv?.payments) ? inv.payments : []).filter((p: any) => !p?.voided);
+  if (Number(inv?.paid_amount) > 0.004 || live.length > 0) out.delete = false;
   return out;
 }
 
