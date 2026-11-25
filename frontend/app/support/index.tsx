@@ -97,7 +97,7 @@ export default function SupportScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }} testID="support-screen">
-      <StackHeader title="Destek" subtitle={list.loading ? undefined : `${list.total} talep`} />
+      <StackHeader title="Destek Taleplerim" subtitle={list.loading ? undefined : `${list.total} talep`} />
       <SafeAnimatedView entering={FadeInDown.duration(380)}>
         <Button
           testID="support-new"

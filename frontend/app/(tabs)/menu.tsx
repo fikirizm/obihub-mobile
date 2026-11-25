@@ -208,27 +208,18 @@ export default function MenuScreen() {
           </>
         ) : null}
 
+        {/* PM kararı 25 Kas (web hesap menüsüyle uyum): Ayarlar · Abonelik · Destek Taleplerim · Bildirimler · Çıkış yap.
+            Görünüm ayrı satır değil (tema düğmesi üst çubukta); mobilde ödeme olmadığı için ad "Abonelik". */}
         <SectionTitle title="Hesap" />
         <Card style={styles.block}>
           <ListRow
-            testID="menu-notifications"
-            leading={<IconTile tint={colors.amberSoft}><BellIcon size={18} color={colors.amber} /></IconTile>}
-            title="Bildirimler"
-            subtitle={unread > 0 ? `${unread} okunmamış` : "Okunmamış bildirim yok"}
+            testID="menu-settings"
+            leading={<IconTile><SettingsIcon size={18} color={colors.primary} /></IconTile>}
+            title="Ayarlar"
+            subtitle="Profil ve görünüm"
             chevron
-            onPress={() => router.push("/notifications")}
+            onPress={() => router.push("/settings")}
           />
-          {supportEnabled ? (
-            <ListRow
-              testID="menu-support"
-              divider
-              leading={<IconTile tint={colors.emeraldSoft}><MailIcon size={18} color={colors.emerald} /></IconTile>}
-              title="Destek"
-              subtitle="Talepleriniz ve yanıtlar"
-              chevron
-              onPress={() => router.push("/support")}
-            />
-          ) : null}
           <ListRow
             testID="menu-subscription"
             divider
@@ -238,14 +229,25 @@ export default function MenuScreen() {
             chevron
             onPress={() => router.push("/subscription")}
           />
+          {supportEnabled ? (
+            <ListRow
+              testID="menu-support"
+              divider
+              leading={<IconTile tint={colors.emeraldSoft}><MailIcon size={18} color={colors.emerald} /></IconTile>}
+              title="Destek Taleplerim"
+              subtitle="Talepleriniz ve yanıtlar"
+              chevron
+              onPress={() => router.push("/support")}
+            />
+          ) : null}
           <ListRow
-            testID="menu-settings"
+            testID="menu-notifications"
             divider
-            leading={<IconTile><SettingsIcon size={18} color={colors.primary} /></IconTile>}
-            title="Ayarlar"
-            subtitle="Profil ve görünüm"
+            leading={<IconTile tint={colors.amberSoft}><BellIcon size={18} color={colors.amber} /></IconTile>}
+            title="Bildirimler"
+            subtitle={unread > 0 ? `${unread} okunmamış` : "Okunmamış bildirim yok"}
             chevron
-            onPress={() => router.push("/settings")}
+            onPress={() => router.push("/notifications")}
           />
         </Card>
 
@@ -260,7 +262,7 @@ export default function MenuScreen() {
         </Card>
 
         <Text style={[type.caption, { color: colors.textTertiary, textAlign: "center", marginTop: spacing.xl, paddingHorizontal: spacing.xl }]}>
-          Entegrasyon kurulumu, ürün ekleme ve paket işlemleri web panelinden yapılır.
+          Entegrasyon kurulumu ve paket işlemleri web panelinden yapılır.
         </Text>
       </ScrollView>
     </View>
