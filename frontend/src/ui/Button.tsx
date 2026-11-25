@@ -65,7 +65,8 @@ export function Button({
       ) : (
         <View style={styles.row}>
           {icon}
-          <Text style={[size === "sm" ? type.callout : type.bodyStrong, { color: fg, fontWeight: "600" }]} numberOfLines={1}>
+          {/* Dar düğmede uzun etiket taşmaz: daralır ve en çok iki satıra ortalı sarılır (düğme uzar). */}
+          <Text style={[size === "sm" ? type.callout : type.bodyStrong, { color: fg, fontWeight: "600", flexShrink: 1, textAlign: "center" }]} numberOfLines={2}>
             {label}
           </Text>
         </View>
@@ -76,5 +77,5 @@ export function Button({
 
 const styles = StyleSheet.create({
   base: { borderRadius: radius.md, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.md },
-  row: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.xs, maxWidth: "100%" },
 });

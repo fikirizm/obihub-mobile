@@ -530,7 +530,7 @@ http
       // Faz C4: fatura önce ObiHub'da kesilir (local_invoice_id, invoice_state=issued). /__mode?officializer=none → NO_OFFICIALIZER.
       if (o.local_invoice_id && o.invoice_state !== "cancelled") return send(res, 200, { success: true, replayed: true, local_invoice_id: o.local_invoice_id, state: o.invoice_state, message: "Bu sipariş zaten faturalandırılmış." });
       const lid = "li-ord-" + o.id, no = "OBI2026" + String(500 + localInvoices.length);
-      localInvoices.unshift({ ...localInvoices[0], id: lid, invoice_number: no, status: "taslak", display_status: "gonderildi", customer_name: o.customer_name || "Müşteri", total: Number(o.total_amount || 0), remaining_amount: Number(o.total_amount || 0), paid_amount: 0, payments: [], parasut_invoice_id: null });
+      localInvoices.unshift({ ...localInvoices[0], id: lid, invoice_number: no, status: "gonderildi", display_status: "gonderildi", customer_name: o.customer_name || "Müşteri", total: Number(o.total_amount || 0), remaining_amount: Number(o.total_amount || 0), paid_amount: 0, payments: [], parasut_invoice_id: null });
       Object.assign(o, { local_invoice_id: lid, invoice_state: "issued", obihub_invoice_number: no, invoice_error: null, invoice_attention: state.ppay ? "parasut_payment_failed" : null });
       console.log("WRITE create-invoice", o.id);
       const none = state.officializer === "none";

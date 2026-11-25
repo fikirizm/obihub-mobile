@@ -261,6 +261,8 @@ export default function ExpenseDetailScreen() {
               .filter(Boolean)
               .join(" · ") || undefined
           }
+          // Rozet başlık altında: uzun tedarikçi adı ve tarih sağdaki rozet yüzünden bölünmesin (fatura detayıyla aynı düzen).
+          badgeBelow
           badge={<StatusBadge label={st.label} kind={st.kind} size="sm" />}
           value={money(d.totals.payable)}
           valueLabel="Genel toplam"

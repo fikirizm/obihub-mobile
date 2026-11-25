@@ -260,7 +260,8 @@ export default function LocalInvoiceDetailScreen() {
   const canOfficialize = (officializeCandidate && inv.invoice_type !== "iade") || (mayWrite && parasutConnected === true && canOfficializeReturn(inv));
   // Aşama 4 P6: e-belge tutarı Paraşüt'le uyuşmadığında (blocked_mismatch) sunucu tahsilatı 409 ile reddeder; düğme gizlenir.
   // İade faturasına tahsilat alınmaz (sunucu 409 INVOICE_IS_REFUND).
-  const canCollect = mayWrite && !readOnly && !isCancelled && inv?.money_state !== "refund" && remaining > 0.004 && inv?.edoc_state !== "blocked_mismatch" && !posPrepaid(inv);
+  // Web SalesInvoiceFormOS.canCollect: taslağa tahsilat alınmaz (sunucu reddeder) ve işlem kilidi (resmileştirme sürerken) yokken.
+  const canCollect = mayWrite && !readOnly && !isCancelled && inv.status !== "taslak" && !(inv as any).officialize_lock && inv?.money_state !== "refund" && remaining > 0.004 && inv?.edoc_state !== "blocked_mismatch" && !posPrepaid(inv);
 
   // Dalga 2: resmileştirme ayrı onay sayfasında (internet satışı, iade e-belgesi).
   const onOfficialize = () =>
@@ -636,8 +637,8 @@ export default function LocalInvoiceDetailScreen() {
           <Text testID="invoice-pos-prepaid" style={[type.caption, { color: colors.textTertiary, marginHorizontal: spacing.lg }]}>{POS_PREPAID_NOTE}</Text>
         ) : null}
         {canOfficialize || canCollect ? (
-          <SafeAnimatedView entering={FadeInDown.delay(80).duration(380)} style={styles.actions}>
-            {canCollect ? <Button testID="invoice-collect" label="Tahsilat ekle" busy={busy === "payment"} disabled={Boolean(busy)} onPress={onCollect} style={{ flex: 1 }} /> : null}
+          <SafeAnimatedView entering={FadeInDown.delay(80).duration(380)} style={[styles.actions, styles.actionsWrap]}>
+            {canCollect ? <Button testID="invoice-collect" label="Tahsilat ekle" busy={busy === "payment"} disabled={Boolean(busy)} onPress={onCollect} style={styles.wrapBtn} /> : null}
             {canCollect && cur === "TRY" ? (
               <Button
                 testID="invoice-cheque"
@@ -645,11 +646,11 @@ export default function LocalInvoiceDetailScreen() {
                 variant="secondary"
                 disabled={Boolean(busy)}
                 onPress={() => router.push({ pathname: "/cheques/receive", params: { invoiceId: inv.id, amount: String(remaining.toFixed(2)), title: [inv.invoice_number, inv.customer_name].filter(Boolean).join(" · "), drawer: inv.customer_name || "" } } as any)}
-                style={{ flex: 1 }}
+                style={styles.wrapBtn}
               />
             ) : null}
             {canOfficialize ? (
-              <Button testID="invoice-officialize" label="Resmileştir" variant="secondary" busy={busy === "official"} disabled={Boolean(busy)} onPress={onOfficialize} style={{ flex: 1 }} />
+              <Button testID="invoice-officialize" label="Resmileştir" variant="secondary" busy={busy === "official"} disabled={Boolean(busy)} onPress={onOfficialize} style={styles.wrapBtn} />
             ) : null}
           </SafeAnimatedView>
         ) : null}
@@ -893,6 +894,9 @@ const styles = StyleSheet.create({
   psRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, marginTop: -spacing.xs },
   rowActs: { flexDirection: "row", justifyContent: "flex-end", gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, marginTop: -spacing.xs },
   actions: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginTop: spacing.md },
+  // Üç eylem bir satıra sığmaz ("Resmileştir" kelime ortasından bölünüyordu): ikişerli sarılır, tek kalan tam genişlik.
+  actionsWrap: { flexWrap: "wrap" },
+  wrapBtn: { flexGrow: 1, flexBasis: "40%" },
   skeleton: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, gap: spacing.md },
   skeletonHero: { borderRadius: radius.xxl, borderWidth: 1, padding: spacing.lg, gap: spacing.lg },
   skeletonHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
