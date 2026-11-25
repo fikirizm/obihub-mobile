@@ -872,11 +872,13 @@ export async function createCashEntry(
 
 export async function getParties(
   token: string,
-  options: { page?: number; search?: string; balanceStatus?: "receivable" | "payable" | "open"; role?: "customer" | "supplier" } = {}
+  options: { page?: number; search?: string; balanceStatus?: "receivable" | "payable" | "open"; role?: "customer" | "supplier"; classQuery?: Record<string, string> } = {}
 ) {
   const page = options.page ?? 1;
   const perPage = 30;
   const qs = new URLSearchParams({ page: String(page), per_page: String(perPage), sort: "balance_desc" });
+  // B: kategori/etiket filtresi (category_id, tags, tag_mode) yalnız bu uçta vardır.
+  Object.entries(options.classQuery || {}).forEach(([k, v]) => qs.set(k, v));
   if (options.role) qs.set("role", options.role);
   if (options.search) qs.set("search", escapeSearch(options.search));
   if (options.balanceStatus) qs.set("balance_status", options.balanceStatus);
@@ -909,7 +911,7 @@ export async function collectPartyPayment(token: string, partyId: string, body: 
 
 export async function getLocalInvoices(
   token: string,
-  options: { page?: number; search?: string; status?: string; view?: string; invoiceType?: "satis" | "teklif"; quoteOutcome?: string; unsent?: boolean } = {}
+  options: { page?: number; search?: string; status?: string; view?: string; invoiceType?: "satis" | "teklif"; quoteOutcome?: string; unsent?: boolean; classQuery?: Record<string, string> } = {}
 ) {
   const page = options.page ?? 1;
   const perPage = 30;
@@ -922,6 +924,8 @@ export async function getLocalInvoices(
   if (options.view) qs.set("view", options.view);
   // P6.3: pano "Gönderilmemiş fatura" sayacıyla aynı küme (son 90 gün, sipariş faturaları hariç).
   if (options.unsent) qs.set("unsent", "1");
+  // B: kategori/etiket filtresi (category_id, tags, tag_mode=any|all|untagged).
+  Object.entries(options.classQuery || {}).forEach(([k, v]) => qs.set(k, v));
   return paged<LocalInvoice>(await request<any>(`/local-invoices?${qs.toString()}`, { method: "GET" }, token), "items", page, perPage);
 }
 

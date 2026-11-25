@@ -188,8 +188,10 @@ export type PartiesPage = Paged<PartyView> & {
 
 export async function getPartiesCompat(
   token: string,
-  options: { page?: number; search?: string; balanceStatus?: "receivable" | "payable"; role?: "customer" | "supplier" } = {}
+  options: { page?: number; search?: string; balanceStatus?: "receivable" | "payable"; role?: "customer" | "supplier"; classQuery?: Record<string, string> } = {}
 ): Promise<PartiesPage> {
+  // B (web CustomersPage): kategori/etiket filtresi yalnız /customers ucunda; okuma modeli atlanır.
+  const byClass = Object.keys(options.classQuery || {}).length > 0;
   const page = options.page ?? 1;
   const perPage = 30;
   // Web ile aynı: role=all, bakiyeye göre sıralamada ve bakiye süzgecinde TL.
@@ -198,6 +200,7 @@ export async function getPartiesCompat(
   if (options.search) rm.set("q", options.search.slice(0, 100));
   if (options.balanceStatus) rm.set("balance", options.balanceStatus);
   try {
+    if (byClass) throw Object.assign(new Error("classification"), { status: 404 });
     const d = await request<any>(`/accounting/read-model/parties?${rm.toString()}`, { method: "GET" }, token);
     const items = (Array.isArray(d?.items) ? d.items : []).map(partyFromReadModel).filter((p: PartyView) => p.id);
     const total = Number(d?.total || 0);
@@ -206,7 +209,7 @@ export async function getPartiesCompat(
   } catch (e) {
     if (statusOf(e) !== 404) throw e;
   }
-  const res = await getParties(token, { page, search: options.search, balanceStatus: options.balanceStatus, role: options.role });
+  const res = await getParties(token, { page, search: options.search, balanceStatus: options.balanceStatus, role: options.role, classQuery: options.classQuery });
   const items: PartyView[] = res.items.map((p) => {
     const raw = p as typeof p & { actions?: Partial<PartyActions>; balance_available?: boolean; balance_currency?: string };
     const actions = raw.actions

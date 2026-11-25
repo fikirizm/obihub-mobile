@@ -119,6 +119,15 @@ const kasaMoves = Array.from({ length: 62 }, (_, i) => {
   const inc = i % 3 !== 0;
   return { ...(i === 1 ? { tag_ids: ["tg1", "tg3"] } : {}), id: `mv-${i}`, entry_date: `2026-${day > 31 ? "10" : "11"}-${String(((day - 1) % 31) + 1).padStart(2, "0")}`, entry_type: i % 7 === 0 ? "transfer_out" : inc ? "income" : "expense", direction: i % 7 === 0 ? "out" : inc ? "in" : "out", amount: 100 + i * 5, description: i % 7 === 0 ? "Bankaya aktarım" : inc ? `Satış tahsilatı ${i}` : "Kırtasiye", related_account_name: i % 7 === 0 ? "Garanti Ticari" : "", counterparty_name: inc && i % 2 ? "Deniz Ltd" : "", source: { type: "manual", label: "Elle girilen hareket" }, running_balance: i >= 58 ? null : 12450.75 - i * 40, before_opening: i >= 58 };
 });
+// B: ortak sınıflandırma süzgeci (category_id, tags virgüllü, tag_mode any|all|untagged) — sunucu parse_classification_filter.
+function classMatch(row, sp) {
+  const cat = sp.get("category_id"); const tags = (sp.get("tags") || "").split(",").filter(Boolean); const mode = sp.get("tag_mode") || "any";
+  const rc = row.classification || row; const rt = Array.isArray(rc.tag_ids) ? rc.tag_ids : [];
+  if (cat && rc.category_id !== cat) return false;
+  if (mode === "untagged") return rt.length === 0;
+  if (tags.length) return mode === "all" ? tags.every((t) => rt.includes(t)) : tags.some((t) => rt.includes(t));
+  return true;
+}
 const accounts = [
   { id: "a1", name: "Nakit Kasa", account_type: "cash", currency: "TRY", balance: 12450.75, is_default: true },
   { id: "a2", name: "Garanti Ticari", account_type: "bank", currency: "TRY", balance: 86320.1, bank_name: "Garanti BBVA", iban: "TR330006100519786457841326" },
@@ -1619,7 +1628,7 @@ http
     if (path === "/customers" && state.custFail === "1" && url.searchParams.get("per_page") !== "100") return send(res, 500, { detail: "Sunucu hatası" });
     if (path === "/customers" && state.probeFail === "1" && url.searchParams.get("per_page") === "100") return send(res, 500, { detail: "Sunucu hatası" });
     if (path === "/customers")
-      return send(res, 200, { items: parties.filter((p) => { const q = (url.searchParams.get("search") || ""); let re; try { re = new RegExp(q, "i"); } catch { re = /$^/; } const bs = url.searchParams.get("balance_status"); const rl = url.searchParams.get("role"); return (!q || re.test(p.name)) && (!bs || (bs === "receivable" ? p.balance > 0 : p.balance < 0)) && (!rl || (rl === "supplier" ? p.balance < 0 : p.balance >= 0)); }), total: parties.length, page: 1, per_page: 30, total_pages: 1, summary: { total_receivable: 19050.5, total_payable: 9400, by_currency: { TRY: { total_receivable: 19050.5, total_payable: 9400 }, USD: { total_receivable: 1200, total_payable: 0 } } } });
+      return send(res, 200, { items: parties.filter((p) => classMatch(p, url.searchParams)).filter((p) => { const q = (url.searchParams.get("search") || ""); let re; try { re = new RegExp(q, "i"); } catch { re = /$^/; } const bs = url.searchParams.get("balance_status"); const rl = url.searchParams.get("role"); return (!q || re.test(p.name)) && (!bs || (bs === "receivable" ? p.balance > 0 : p.balance < 0)) && (!rl || (rl === "supplier" ? p.balance < 0 : p.balance >= 0)); }), total: parties.length, page: 1, per_page: 30, total_pages: 1, summary: { total_receivable: 19050.5, total_payable: 9400, by_currency: { TRY: { total_receivable: 19050.5, total_payable: 9400 }, USD: { total_receivable: 1200, total_payable: 0 } } } });
     // C5: cari oku / düzenle / sil / siparişleri
     let ca; // Dalga 1: cari arşivle
     if ((ca = path.match(/^\/customers\/([^/]+)\/(archive|unarchive)$/)) && req.method === "POST") {
@@ -1988,7 +1997,7 @@ http
       if (vw && !VIEW_FILTER[vw]) return send(res, 422, { code: "FILTER_INVALID", detail: "Görünüm geçersiz." });
       const it = url.searchParams.get("invoice_type") || "satis";
       const qo = url.searchParams.get("quote_outcome");
-      const rows = localInvoices.filter((i) => (i.invoice_type || "satis") === it && (!st || i.status === st) && (vw ? VIEW_FILTER[vw](i) : !i.archived) && (!qo || QUOTE_FILTER[qo](i)));
+      const rows = localInvoices.filter((i) => (i.invoice_type || "satis") === it && (!st || i.status === st) && (vw ? VIEW_FILTER[vw](i) : !i.archived) && (!qo || QUOTE_FILTER[qo](i)) && classMatch(i, url.searchParams));
       if (url.searchParams.get("unsent") === "1") {
         const un = rows.filter((i) => i.status !== "taslak" && i.status !== "iptal").slice(0, 2);
         console.log("LOCAL-INVOICES unsent=1", un.length);

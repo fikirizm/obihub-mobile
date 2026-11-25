@@ -25,6 +25,9 @@ import { IconTile } from "../../src/ui/ListRow";
 import { RowCard, StatCard } from "../../src/ui/RowCard";
 import { SearchField } from "../../src/ui/SearchField";
 import type { LocalInvoice } from "../../src/types";
+import { useClassLists } from "../../src/classification-store";
+import { ClassFilterBar, ClassFilterSheet } from "../../src/components/ClassFilterSheet";
+import { EMPTY_FILTER, classificationQuery, filterCount, filterLabel, nameIndex, type ClassFilter } from "../../src/classification";
 
 
 // Aşama 4 P5a: tekil özet yalnız TRY; dövizli faturalar `by_currency`'den ayrı satırda (toplanmaz).
@@ -63,9 +66,15 @@ export default function LocalInvoicesScreen() {
   }, [token]);
   const [summary, setSummary] = useState<{ total_remaining?: number; overdue_amount?: number; by_currency?: Record<string, { total_remaining?: number; overdue_amount?: number }> } | null>(null);
 
+  // B: kategori/etiket filtresi (sunucu: category_id, tags, tag_mode). 403 ya da tanım yoksa çip gösterilmez.
+  const [classFilter, setClassFilter] = useState<ClassFilter>(EMPTY_FILTER);
+  const [classSheet, setClassSheet] = useState(false);
+  const classLists = useClassLists(token, "sales", true);
+  const classQueryKey = JSON.stringify(classificationQuery(classFilter));
+  const nClass = filterCount(classFilter);
   const fetchPage = useCallback(
-    (page: number) => getLocalInvoices(token as string, { page, search: debounced || undefined, view: view || undefined, unsent: unsentOnly }),
-    [token, debounced, view, unsentOnly]
+    (page: number) => getLocalInvoices(token as string, { page, search: debounced || undefined, view: view || undefined, unsent: unsentOnly, classQuery: JSON.parse(classQueryKey) }),
+    [token, debounced, view, unsentOnly, classQueryKey]
   );
   const list = usePagedList<LocalInvoice>(token ? fetchPage : null);
 
@@ -129,11 +138,21 @@ export default function LocalInvoicesScreen() {
           <Chip key={key || "all"} testID={`local-invoices-tab-${key || "all"}`} label={label} selected={view === key} onPress={() => setView(key)} />
         ))}
       </ChipRow>
+      {!classLists.hidden && (classLists.categories.length || classLists.tags.length || nClass) ? (
+        <ClassFilterBar
+          testID="local-invoices-class-filter"
+          active={nClass > 0}
+          label={filterLabel(nameIndex(classLists.categories, classLists.tags), classFilter)}
+          onOpen={() => setClassSheet(true)}
+          onClear={() => setClassFilter(EMPTY_FILTER)}
+        />
+      ) : null}
+      <ClassFilterSheet open={classSheet} value={classFilter} categories={classLists.categories} tags={classLists.tags} onApply={setClassFilter} onClose={() => setClassSheet(false)} />
       <ListBody
         state={{ ...list, refresh: () => { loadSummary(); list.refresh(); } }}
         icon={<ReceiptIcon size={30} color={colors.emerald} />}
         emptyTitle={unsentOnly ? "Gönderilmemiş fatura yok" : "Fatura yok"}
-        emptyAction={mayCreate && !debounced && !view && !unsentOnly ? { label: "Fatura oluştur", onPress: () => router.push("/local-invoices/new") } : null}
+        emptyAction={mayCreate && !debounced && !view && !unsentOnly && !nClass ? { label: "Fatura oluştur", onPress: () => router.push("/local-invoices/new") } : null}
         emptyDescription={mayCreate ? "Bu süzgece uyan satış faturası bulunmuyor. Yukarıdaki düğmeyle yeni fatura oluşturabilirsiniz." : "Bu süzgece uyan satış faturası bulunmuyor."}
         renderItem={(inv) => {
           // İki eksen (web invoiceStatus.js): belge (Taslak/Kesildi/Resmileşti/İptal) + Resmileşmedi (Paraşüt bağlıysa) + tahsilat.

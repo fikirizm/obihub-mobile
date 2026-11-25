@@ -19,8 +19,9 @@ import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
 import { ListBody } from "../../src/ui/ListBody";
 import { RowCard } from "../../src/ui/RowCard";
 import { ClassChips } from "../../src/components/ClassChips";
-import { useClassNames } from "../../src/classification-store";
-import { hasClass } from "../../src/classification";
+import { useClassLists, useClassNames } from "../../src/classification-store";
+import { ClassFilterBar, ClassFilterSheet } from "../../src/components/ClassFilterSheet";
+import { EMPTY_FILTER, classificationQuery, filterCount, filterLabel, hasClass, nameIndex, type ClassFilter } from "../../src/classification";
 import { SearchField } from "../../src/ui/SearchField";
 import type { Party, PartyView } from "../../src/types";
 
@@ -127,13 +128,19 @@ export default function CustomersScreen() {
   const summarySeq = useRef(0);
   // Eldeki satırların süzgeçsiz ve aramasız sorgudan gelip gelmediği (dövizli cari notu için).
   const itemsUnfiltered = useRef(false);
+  // B: kategori/etiket filtresi (yalnız /customers ucunda; okuma modeli atlanır). 403 ya da tanım yoksa çip gösterilmez.
+  const [classFilter, setClassFilter] = useState<ClassFilter>(EMPTY_FILTER);
+  const [classSheet, setClassSheet] = useState(false);
+  const classLists = useClassLists(token, "party", true);
+  const classQueryKey = JSON.stringify(classificationQuery(classFilter));
+  const nClass = filterCount(classFilter);
   const fetchPage = useCallback(
     async (page: number) => {
-      const unfiltered = page === 1 && !debounced && !filter && !role;
+      const unfiltered = page === 1 && !debounced && !filter && !role && classQueryKey === "{}";
       const my = unfiltered ? ++summarySeq.current : 0;
       try {
         // Web CustomersPage.js gibi önce okuma modeli, 404'te eski /customers ucu (src/api-gider.ts).
-        const res = await getPartiesCompat(token as string, { page, search: debounced || undefined, balanceStatus: filter || undefined, role: role || undefined });
+        const res = await getPartiesCompat(token as string, { page, search: debounced || undefined, balanceStatus: filter || undefined, role: role || undefined, classQuery: JSON.parse(classQueryKey) });
         // Özet ilk sayfayla birlikte gelir; ek istek yapılmaz.
         if (unfiltered && my === summarySeq.current) setSummary(res.summary ?? null);
         if (page === 1) itemsUnfiltered.current = unfiltered;
@@ -144,7 +151,7 @@ export default function CustomersScreen() {
         throw e;
       }
     },
-    [token, debounced, filter, role]
+    [token, debounced, filter, role, classQueryKey]
   );
   const list = usePagedList<PartyView>(token ? fetchPage : null);
   // A: kategori/etiket çipleri (salt okuma); adlar yalnız sınıflandırması olan satır varsa yüklenir.
@@ -205,11 +212,21 @@ export default function CustomersScreen() {
         <Chip testID="customers-role-customer" label="Müşteriler" selected={role === "customer"} onPress={() => setRole("customer")} />
         <Chip testID="customers-role-supplier" label="Tedarikçiler" selected={role === "supplier"} onPress={() => setRole("supplier")} />
       </ChipRow>
+      {!classLists.hidden && (classLists.categories.length || classLists.tags.length || nClass) ? (
+        <ClassFilterBar
+          testID="customers-class-filter"
+          active={nClass > 0}
+          label={filterLabel(nameIndex(classLists.categories, classLists.tags), classFilter)}
+          onOpen={() => setClassSheet(true)}
+          onClear={() => setClassFilter(EMPTY_FILTER)}
+        />
+      ) : null}
+      <ClassFilterSheet open={classSheet} value={classFilter} categories={classLists.categories} tags={classLists.tags} onApply={setClassFilter} onClose={() => setClassSheet(false)} />
       <ListBody
         state={list}
         icon={<UserIcon size={30} color={colors.emerald} />}
-        emptyTitle={debounced || filter || role ? "Cari yok" : "Henüz cari yok"}
-        emptyDescription={debounced || filter || role ? "Bu süzgece uyan cari hesap bulunmuyor." : "Müşteri ve tedarikçilerinizi ekleyin; fatura, tahsilat ve ekstre buradan izlenir."}
+        emptyTitle={debounced || filter || role || nClass ? "Cari yok" : "Henüz cari yok"}
+        emptyDescription={debounced || filter || role || nClass ? "Bu süzgece uyan cari hesap bulunmuyor." : "Müşteri ve tedarikçilerinizi ekleyin; fatura, tahsilat ve ekstre buradan izlenir."}
         emptyAction={mayAdd && !debounced && !filter && !role ? { label: "Cari ekle", onPress: () => router.push("/customers/new") } : null}
         renderItem={(p) => {
           const bal = p.balanceAvailable ? Number(p.balance || 0) : 0;

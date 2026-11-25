@@ -73,3 +73,19 @@ export function useClassNames(token: string | null, kind: Kind, rows: any[], ena
   }, [missKey, token]);
   return { names, hidden: forbidden, ready: state.ready };
 }
+
+// B: filtre penceresi için seçilebilir listeler (aktif olanlar; arşivliler seçilemez). 403'te hidden.
+export function useClassLists(token: string | null, kind: Kind, enabled: boolean): { categories: ClassItem[]; tags: ClassItem[]; hidden: boolean; ready: boolean } {
+  const [state, setState] = useState<{ categories: ClassItem[]; tags: ClassItem[]; ready: boolean }>({ categories: [], tags: [], ready: false });
+  useEffect(() => {
+    if (!enabled || !token) return;
+    let live = true;
+    Promise.all([kind ? loadCategories(token, kind) : Promise.resolve([] as ClassItem[]), loadTags(token)]).then(
+      ([c, t]) => live && setState({ categories: c.filter((x) => x.active !== false), tags: t.filter((x) => x.active !== false), ready: true }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [enabled, token, kind, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  return { ...state, hidden: forbidden };
+}
