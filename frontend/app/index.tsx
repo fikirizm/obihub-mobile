@@ -33,7 +33,7 @@ export default function Index() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Şifre süresi doldu / çok fazla deneme: hata kutusunda "Yeni şifre belirle" düğmesi.
+  // Şifre süresi doldu / çok fazla deneme: hata kutusunda "Şifremi unuttum" düğmesi (e-postayla dolu sıfırlama).
   const [errorReset, setErrorReset] = useState(false);
   const openReset = () => router.push({ pathname: "/forgot-password", params: email.trim() ? { email: email.trim().toLowerCase() } : {} });
   const [emailFocused, setEmailFocused] = useState(false);
@@ -189,7 +189,7 @@ export default function Index() {
               >
                 <Text style={[type.footnote, styles.errorText, { color: colors.error }]}>{error}</Text>
                 {errorReset ? (
-                  <Button testID="login-reset-password" size="sm" variant="secondary" label="Yeni şifre belirle" onPress={openReset} style={styles.resetBtn} />
+                  <Button testID="login-reset-password" size="sm" variant="secondary" label="Şifremi unuttum" onPress={openReset} style={styles.resetBtn} />
                 ) : null}
               </View>
             ) : null}
@@ -202,13 +202,12 @@ export default function Index() {
               style={[styles.submitBtn, shadows.primary]}
             />
 
-            <PressableScale
-              onPress={openReset}
-              accessibilityRole="link"
-              style={styles.forgotBtn}
-            >
-              <Text style={[type.callout, styles.forgotText, { color: colors.primary }]}>Şifremi unuttum</Text>
-            </PressableScale>
+            {/* Hata kutusunda aynı düğme varken ikinci kez gösterilmez. */}
+            {!errorReset ? (
+              <PressableScale onPress={openReset} accessibilityRole="link" style={styles.forgotBtn}>
+                <Text style={[type.callout, styles.forgotText, { color: colors.primary }]}>Şifremi unuttum</Text>
+              </PressableScale>
+            ) : null}
 
             <Text style={[type.caption, styles.legal, { color: colors.textTertiary }]}>
               Devam ederek ObiHub Hizmet Şartlarını kabul etmiş olursunuz.

@@ -34,6 +34,7 @@ t("çok fazla deneme: Retry-After'dan dakika, yoksa 15 dk; şifre sıfırlama ö
   assert.match(m.loginErrorText(err(429, "LOGIN_LOCKED", "x", 30)).text, /1 dakika/);
   assert.match(m.loginErrorText(err(429, "LOGIN_LOCKED", "x")).text, /15 dakika/);
   assert.match(m.loginErrorText(err(429, "LOGIN_LOCKED", "x")).text, /Şifremi unuttum/);
+  assert.match(m.loginErrorText(err(429, "LOGIN_LOCKED", "x")).text, /destek/);
 });
 t("kodsuz hata: sunucu metni; o da yoksa genel metin; eski 403 davranışı korunur", () => {
   assert.equal(m.loginErrorText(err(500, undefined, "Sunucuda bir hata oluştu.")).text, "Sunucuda bir hata oluştu.");
@@ -45,7 +46,10 @@ t("24 Kas DPP: şifre süresi doldu (403 PASSWORD_EXPIRED) abonelik değil; şif
   const v = m.loginErrorText({ status: 403, code: "PASSWORD_EXPIRED", message: "Şifrenizin süresi doldu (365 gün)." });
   assert.equal(v.subscription, false);
   assert.equal(v.reset, true);
-  assert.equal(v.text, "Şifrenizin süresi doldu (365 gün). \"Yeni şifre belirle\" ile e-postanıza gelen kodla yeni şifre belirleyin.");
+  // PM sözleşmesi 25 Kas: sunucunun detail metni gösterilir; yoksa yedek metin.
+  assert.equal(v.text, "Şifrenizin süresi doldu (365 gün).");
+  assert.equal(m.loginErrorText({ status: 403, code: "PASSWORD_EXPIRED", message: "Sunucu hatası (403)" }).text,
+    "Şifrenizin süresi doldu (365 gün). Lütfen 'Şifremi unuttum' ile yeni şifre belirleyin.");
   assert.equal(m.loginErrorText({ status: 429, code: "LOGIN_LOCKED", retryAfter: 60 }).reset, true);
   assert.equal(m.loginErrorText({ status: 401, code: "INVALID_CREDENTIALS" }).reset, false);
 });

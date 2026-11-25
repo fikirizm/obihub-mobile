@@ -22,12 +22,13 @@ export function loginErrorText(e: any): LoginErrorView {
     case "SUBSCRIPTION_EXPIRED":
       return { text: `Aboneliğinizin süresi doldu. ${WEB_RENEW}`, subscription: true, reset: false };
     case "PASSWORD_EXPIRED":
-      return { text: 'Şifrenizin süresi doldu (365 gün). "Yeni şifre belirle" ile e-postanıza gelen kodla yeni şifre belirleyin.', subscription: false, reset: true };
+      // PM sözleşmesi (25 Kas): sunucunun detail metni gösterilir, kullanıcı doğrudan "Şifremi unuttum" akışına yönlenir.
+      return { text: detail && !/^Sunucu hatası/.test(detail) ? detail : "Şifrenizin süresi doldu (365 gün). Lütfen 'Şifremi unuttum' ile yeni şifre belirleyin.", subscription: false, reset: true };
     case "LOGIN_LOCKED": {
       const sec = Number(e?.retryAfter);
       const min = Number.isFinite(sec) && sec > 0 ? Math.max(1, Math.ceil(sec / 60)) : 15;
       return {
-        text: `Çok fazla hatalı deneme yapıldı. ${min} dakika sonra yeniden deneyin ya da "Şifremi unuttum" ile şifrenizi sıfırlayın.`,
+        text: `Çok fazla hatalı deneme yapıldı. ${min} dakika sonra yeniden deneyin ya da "Şifremi unuttum" ile şifrenizi sıfırlayın. Sorun sürerse ObiHub destekle iletişime geçin.`,
         subscription: false,
         reset: true,
       };
