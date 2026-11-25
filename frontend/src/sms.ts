@@ -20,12 +20,6 @@ export const EVENT_LABEL: Record<string, string> = {
   cancelled: "İptal",
   admin_created: "Yetkili bildirimi",
 };
-export const SOURCES: [string, string][] = [
-  ["customers", "Cariler"],
-  ["website_members", "Web mağaza üyeleri"],
-  ["store_orders", "Web mağaza sipariş müşterileri"],
-  ["woocommerce_orders", "WooCommerce sipariş müşterileri"],
-];
 export const IYS_OPTIONS: [string, string][] = [
   ["BRAND", "Marka izinlerine göre"],
   ["RETAILER", "Bayi izinlerine göre"],

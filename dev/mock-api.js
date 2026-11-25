@@ -358,7 +358,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig", "yurtici", "yurticiCancel", "officializer", "ppay", "counters", "ieFail", "amzBlock", "amzApproved", "nextPlan"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig", "yurtici", "yurticiCancel", "officializer", "ppay", "counters", "ieFail", "amzBlock", "amzApproved", "nextPlan", "smsOn"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -1517,6 +1517,8 @@ http
     // Netgsm SMS (backend/routers/netgsm.py). /__mode?smsUnknown=1 → toplu gönderim 503 UNKNOWN_OUTCOME; smsOwner=0 → ekip üyesi.
     if (path.startsWith("/netgsm")) {
       const g = sms;
+      // /__mode?smsOn=1: bağlı ve gönderici seçili Netgsm (toplu SMS denemesi).
+      if (state.smsOn === "1" && !g.connected) Object.assign(g, { connected: true, username: "850xxxxxxx", enabled: true, sender: "OBIHUB" });
       const view = () => ({ connected: g.connected, auth_failed: false, username: g.connected ? g.username : "", enabled: g.enabled, sender: g.sender, encoding: g.encoding, store_name: g.store_name,
         channels: g.channels, rules: g.rules, senders: g.connected ? g.senders : [], revision: g.revision, last_error: "", verified_at: g.connected ? "2026-11-22T09:15:00Z" : null,
         variables: { order: ["ad", "siparis_no", "tutar", "kargo_firmasi", "takip_no", "magaza"], bulk: ["ad", "magaza"] }, max_recipients: 5000, can_manage_credentials: state.smsOwner !== "0" });
@@ -1549,6 +1551,22 @@ http
       });
       if (path === "/netgsm/recipients") {
         const src = url.searchParams.get("source");
+        // 24 Kas: parametresiz → birleşik liste (cari + tüm kanal sipariş müşterileri + web üyeleri) ve filtre özetleri.
+        if (!src) {
+          const day = (d) => new Date(Date.now() - d * 86400000).toISOString();
+          const items = [
+            { phone: "+905301112233", name: "Mehmet Demir", sources: ["website_member", "order"], customer_id: null, role: null, city: "İstanbul", class_ids: [], channels: ["website"], order_count: 2, last_order_at: day(12) },
+            { phone: "+905321234567", name: "Can Öztürk", sources: ["customer", "order"], customer_id: "c2", role: "customer", city: "Ankara", class_ids: ["k-vip"], channels: ["trendyol"], order_count: 5, last_order_at: day(3) },
+            { phone: "+905431112233", name: "Ayşe Yılmaz", sources: ["customer"], customer_id: "c3", role: "customer", city: "İzmir", class_ids: [], channels: [], order_count: 0, last_order_at: null },
+            { phone: "+905441239876", name: "Kaya Tedarik", sources: ["customer"], customer_id: "c9", role: "supplier", city: "Bursa", class_ids: [], channels: [], order_count: 0, last_order_at: null },
+            { phone: "+905551112233", name: "Elif Kaya", sources: ["customer", "order", "website_member"], customer_id: "c1", role: "both", city: "İzmir", class_ids: ["k-vip"], channels: ["hepsiburada", "website"], order_count: 9, last_order_at: day(40) },
+            { phone: "+905061112244", name: "Şükrü Çelik", sources: ["order"], customer_id: null, role: null, city: "Iğdır", class_ids: [], channels: ["n11"], order_count: 1, last_order_at: day(200) },
+          ];
+          return send(res, 200, { items, without_phone: 3, truncated: false, facets: {
+            channels: [{ key: "website", label: "Web mağaza", count: 2 }, { key: "trendyol", label: "Trendyol", count: 1 }, { key: "hepsiburada", label: "Hepsiburada", count: 1 }, { key: "n11", label: "n11", count: 1 }],
+            cities: [{ name: "Ankara", count: 1 }, { name: "Bursa", count: 1 }, { name: "Iğdır", count: 1 }, { name: "İstanbul", count: 1 }, { name: "İzmir", count: 2 }],
+            classes: [{ id: "k-vip", name: "VIP", kind: "category", count: 2 }] } });
+        }
         const items = src === "customers" ? [{ name: "Elif Kaya", phone: "+905551112233" }, { name: "Can Öztürk", phone: "+905321234567" }, { name: "Ayşe Yılmaz", phone: "+905431112233" }]
           : src === "website_members" ? [{ name: "Mehmet Demir", phone: "+905301112233" }, { name: "Elif Kaya", phone: "+905551112233" }] : [];
         return send(res, 200, { items, without_phone: src === "customers" ? 2 : 0, truncated: false });

@@ -1,8 +1,9 @@
-// Toplu SMS: alıcı kaynağı ya da elle numara → metin → ileti türü (Bilgilendirme / Ticari + İYS) → Gönder (onaylı).
+// Toplu SMS: birleşik alıcı listesi (cari + tüm kanal sipariş müşterileri + web üyeleri; arama + filtre) ya da elle numara → metin →
+// ileti türü (Bilgilendirme / Ticari + İYS) → Gönder (onaylı). Alıcı kuralları: src/sms-recipients.ts (web recipientsModel.js, 24 Kas 2026).
 // request_id her gönderim denemesi için bir kez üretilir; içerik değişince yenilenir, aynı içerikle yinelemede aynısı gider.
 // UNKNOWN_OUTCOME: sonuç "belirsiz" ekranına geçer, yeniden gönderme düğmesi yok.
-import React, { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, StyleSheet, Switch, Text, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { request } from "../../api";
 import {
   addRecipients,
@@ -15,9 +16,25 @@ import {
   normalizePhone,
   resultView,
   sendBlockReason,
-  SOURCES,
   type Selection,
 } from "../../sms";
+import {
+  activeFilterCount,
+  applyAll,
+  countFacets,
+  EMPTY_FILTERS,
+  filterChips,
+  indexRows,
+  LAST_ORDER_OPTIONS,
+  MIN_ORDER_OPTIONS,
+  normalizeResponse,
+  ROLE_OPTIONS,
+  rowSub,
+  SOURCE_LABEL,
+  SOURCE_ORDER,
+  type Filters,
+} from "../../sms-recipients";
+import { Chip } from "../../ui/Chip";
 import { useTheme } from "../../theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../../theme/tokens";
 import { useFeedback } from "../../ui/Feedback";
@@ -31,7 +48,7 @@ import { Note, SmsEditor } from "./SmsParts";
 
 const PAGE = 50;
 const nf = (n: number) => n.toLocaleString("tr-TR");
-type ListState = { status: "loading" } | { status: "error"; msg: string; forbidden: boolean } | { status: "ready"; data: any };
+type ListState = { status: "loading" } | { status: "error"; msg: string; forbidden: boolean } | { status: "ready"; data: ReturnType<typeof normalizeResponse> };
 
 function ResultCard({ result, onNew }: { result: any; onNew?: () => void }) {
   const { colors } = useTheme();
@@ -64,9 +81,10 @@ export function BulkSection({ token, view, goConnection }: { token: string | nul
   const touch = () => {
     rid.current = makeRequestId();
   };
-  const [source, setSource] = useState<string | null>(null);
-  const [lists, setLists] = useState<Record<string, ListState>>({});
+  const [list, setList] = useState<ListState>({ status: "loading" });
   const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [shown, setShown] = useState(PAGE);
   const [sel, setSel] = useState<Selection>({});
   const [limitMsg, setLimitMsg] = useState("");
@@ -84,33 +102,33 @@ export function BulkSection({ token, view, goConnection }: { token: string | nul
 
   const commercial = kind === "commercial";
   const count = Object.keys(sel).length;
-  const current = source ? lists[source] : undefined;
 
-  const loadSource = (key: string) => {
-    setSource(key);
-    setQuery("");
-    setShown(PAGE);
-    if (lists[key]?.status === "ready" || !token) return;
-    setLists((l) => ({ ...l, [key]: { status: "loading" } }));
-    request<any>(`/netgsm/recipients?source=${encodeURIComponent(key)}`, { method: "GET" }, token)
-      .then((data) => setLists((l) => ({ ...l, [key]: { status: "ready", data } })))
+  // Web: sekme açılınca parametresiz /netgsm/recipients bir kez yüklenir; arama ve filtre istemcide.
+  const load = useCallback(() => {
+    if (!token) return;
+    setList({ status: "loading" });
+    request<any>("/netgsm/recipients", { method: "GET" }, token)
+      .then((data) => setList({ status: "ready", data: normalizeResponse(data) }))
       .catch((e: any) =>
-        setLists((l) => ({
-          ...l,
-          [key]: {
-            status: "error",
-            forbidden: Number(e?.status) === 403,
-            msg: Number(e?.status) === 403 ? "Alıcı listesini görme yetkiniz yok (Satış ya da Ayarlar yetkisi gerekir)." : e?.message || "Alıcılar yüklenemedi.",
-          },
-        }))
+        setList({
+          status: "error",
+          forbidden: Number(e?.status) === 403,
+          msg: Number(e?.status) === 403 ? "Alıcı listesini görme yetkiniz yok (Satış ya da Ayarlar yetkisi gerekir)." : e?.message || "Alıcılar yüklenemedi.",
+        }),
       );
-  };
+  }, [token]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const items: { name: string; phone: string }[] = useMemo(() => {
-    const all = current?.status === "ready" && Array.isArray(current.data?.items) ? current.data.items : [];
-    const q = query.trim().toLocaleLowerCase("tr-TR");
-    return q ? all.filter((r: any) => `${r.name} ${r.phone}`.toLocaleLowerCase("tr-TR").includes(q)) : all;
-  }, [current, query]);
+  const data = list.status === "ready" ? list.data : null;
+  const entries = useMemo(() => indexRows(data?.items || []), [data]);
+  const items = useMemo(() => applyAll(entries, query, filters), [entries, query, filters]);
+  const counts = useMemo(() => countFacets(data?.items || [], filters.role), [data, filters.role]);
+  const chips = data ? filterChips(filters, data.facets) : [];
+  const nFilters = activeFilterCount(filters);
+  const setF = (patch: Partial<Filters>) => (setFilters((f) => ({ ...f, ...patch })), setShown(PAGE));
+  const toggleIn = (key: "sources" | "channels", v: string) => setF({ [key]: filters[key].includes(v) ? filters[key].filter((x) => x !== v) : [...filters[key], v] } as Partial<Filters>);
   const allOn = items.length > 0 && items.every((r) => sel[r.phone] !== undefined);
 
   const addMany = (rows: { name?: string; phone: string }[]) => {
@@ -194,31 +212,110 @@ export function BulkSection({ token, view, goConnection }: { token: string | nul
 
       <SectionTitle title="1. Alıcılar" action={<Text style={[type.caption, tabular, { color: colors.textTertiary }]}>{`${nf(count)} seçildi`}</Text>} />
       <View style={[styles.block, { gap: spacing.sm }]}>
-        <OptionChips options={SOURCES.map(([value, label]) => ({ value, label }))} value={source || ""} onChange={loadSource} testIDPrefix="sms-source" />
-        {!source ? <Text style={[type.caption, { color: colors.textTertiary }]}>Bir kaynak seçin. Birden çok kaynaktan seçebilirsiniz; aynı numara bir kez sayılır.</Text> : null}
-        {current?.status === "loading" ? <ActivityIndicator color={colors.primary} /> : null}
-        {current?.status === "error" ? (
+        {list.status === "loading" ? <ActivityIndicator color={colors.primary} testID="sms-recipients-loading" /> : null}
+        {list.status === "error" ? (
           <Note tone="error">
-            <Text style={[type.footnote, { color: colors.error }]}>{current.msg}</Text>
-            {!current.forbidden ? <Button variant="ghost" size="sm" label="Tekrar dene" onPress={() => source && loadSource(source)} style={{ alignSelf: "flex-start" }} /> : null}
+            <Text style={[type.footnote, { color: colors.error }]}>{list.msg}</Text>
+            {!list.forbidden ? <Button variant="ghost" size="sm" label="Tekrar dene" onPress={load} style={{ alignSelf: "flex-start" }} /> : null}
           </Note>
         ) : null}
-        {current?.status === "ready" ? (
+        {data ? (
           <>
-            {Number(current.data?.without_phone) > 0 ? <Note>{`${nf(Number(current.data.without_phone))} kayıtta geçerli cep numarası yok; bu kayıtlar listelenmedi.`}</Note> : null}
-            {current.data?.truncated ? <Note tone="warning">Liste çok uzun olduğu için tamamı gösterilmiyor. Aramayla daraltabilirsiniz.</Note> : null}
-            <SearchField inset={false} value={query} onChangeText={(v) => (setQuery(v), setShown(PAGE))} placeholder="Ad veya numara ara" />
+            {data.without_phone > 0 ? <Note>{`${nf(data.without_phone)} kayıtta geçerli cep numarası yok; bu kayıtlar listelenmedi.`}</Note> : null}
+            {data.truncated ? <Note tone="warning">Liste çok uzun olduğu için tamamı gösterilmiyor. Aramayla ya da filtreyle daraltabilirsiniz.</Note> : null}
+            <SearchField inset={false} testID="sms-recipient-search" value={query} onChangeText={(v) => (setQuery(v), setShown(PAGE))} placeholder="Ad, numara ya da şehir ara" />
+            <View style={styles.filterBar}>
+              <Button
+                testID="sms-filter-toggle"
+                variant={nFilters ? "primary" : "secondary"}
+                size="sm"
+                label={nFilters ? `Filtrele (${nFilters})` : "Filtrele"}
+                onPress={() => setFilterOpen((o) => !o)}
+              />
+              {nFilters ? <Button variant="ghost" size="sm" label="Temizle" onPress={() => setF(EMPTY_FILTERS)} /> : null}
+            </View>
+            {chips.length && !filterOpen ? (
+              <View style={styles.wrapRow} testID="sms-filter-chips">
+                {chips.map((c) => (
+                  <Chip key={c.key} label={`${c.label}  ✕`} selected onPress={() => setF(c.patch)} />
+                ))}
+              </View>
+            ) : null}
+            {filterOpen ? (
+              <Card padded style={{ marginHorizontal: 0, gap: spacing.sm }}>
+                <View testID="sms-filter-panel" style={{ gap: spacing.sm }}>
+                  <FilterGroup title="Kaynak">
+                    {SOURCE_ORDER.filter((k) => counts.sources[k] || filters.sources.includes(k)).map((k) => (
+                      <Chip key={k} testID={`sms-f-src-${k}`} label={SOURCE_LABEL[k]} count={counts.sources[k] || 0} selected={filters.sources.includes(k)} onPress={() => toggleIn("sources", k)} />
+                    ))}
+                  </FilterGroup>
+                  {data.facets.channels.length ? (
+                    <FilterGroup title="Sipariş kanalı">
+                      {data.facets.channels.filter((c) => counts.channels[c.key] || filters.channels.includes(c.key)).map((c) => (
+                        <Chip key={c.key} testID={`sms-f-ch-${c.key}`} label={c.label} count={counts.channels[c.key] || 0} selected={filters.channels.includes(c.key)} onPress={() => toggleIn("channels", c.key)} />
+                      ))}
+                    </FilterGroup>
+                  ) : null}
+                  {data.facets.cities.length ? (
+                    <FilterGroup title="Şehir" scroll>
+                      <Chip label="Tümü" selected={!filters.city} onPress={() => setF({ city: "" })} />
+                      {data.facets.cities.filter((c) => counts.cities[c.name] || filters.city === c.name).map((c) => (
+                        <Chip key={c.name} label={c.name} count={counts.cities[c.name] || 0} selected={filters.city === c.name} onPress={() => setF({ city: filters.city === c.name ? "" : c.name })} />
+                      ))}
+                    </FilterGroup>
+                  ) : null}
+                  {data.facets.classes.length ? (
+                    <FilterGroup title="Kategori / etiket" scroll>
+                      <Chip label="Tümü" selected={!filters.classId} onPress={() => setF({ classId: "" })} />
+                      {data.facets.classes.filter((c) => counts.classes[c.id] || filters.classId === c.id).map((c) => (
+                        <Chip key={c.id} label={c.name} count={counts.classes[c.id] || 0} selected={filters.classId === c.id} onPress={() => setF({ classId: filters.classId === c.id ? "" : c.id })} />
+                      ))}
+                    </FilterGroup>
+                  ) : null}
+                  <FilterGroup title="Cari türü">
+                    {ROLE_OPTIONS.map(([value, label]) => (
+                      <Chip key={value || "any"} testID={`sms-f-role-${value || "any"}`} label={label} selected={filters.role === value} onPress={() => setF({ role: value })} />
+                    ))}
+                  </FilterGroup>
+                  <FilterGroup title="Sipariş sayısı">
+                    {MIN_ORDER_OPTIONS.map(([value, label]) => (
+                      <Chip key={value || "any"} testID={`sms-f-min-${value || "any"}`} label={label} selected={filters.minOrders === value} onPress={() => setF({ minOrders: value })} />
+                    ))}
+                  </FilterGroup>
+                  <FilterGroup title="Son sipariş">
+                    {LAST_ORDER_OPTIONS.map(([value, label]) => (
+                      <Chip key={value || "any"} testID={`sms-f-last-${value || "any"}`} label={label} selected={filters.lastOrder === value} onPress={() => setF({ lastOrder: value })} />
+                    ))}
+                  </FilterGroup>
+                  <Button testID="sms-filter-apply" size="sm" label={`Sonuçları göster (${nf(items.length)})`} onPress={() => setFilterOpen(false)} />
+                </View>
+              </Card>
+            ) : null}
             <Card style={{ marginHorizontal: 0 }}>
               {items.length ? (
                 <>
-                  <CheckRow testID="sms-select-all" label={`Tümünü seç${query.trim() ? " (aranan)" : ""}`} on={allOn} onPress={() => (allOn ? removeMany(items) : addMany(items))} strong />
+                  <CheckRow
+                    testID="sms-select-all"
+                    label={query.trim() || nFilters ? `Filtreye uyan ${nf(items.length)} kişinin tümünü seç` : `Tümünü seç (${nf(items.length)})`}
+                    on={allOn}
+                    onPress={() => (allOn ? removeMany(items) : addMany(items.map((r) => ({ name: r.name || "", phone: r.phone }))))}
+                    strong
+                  />
                   {items.slice(0, shown).map((r) => (
-                    <CheckRow key={r.phone} label={r.name || "İsimsiz"} sub={r.phone} on={sel[r.phone] !== undefined} onPress={() => (sel[r.phone] !== undefined ? removeMany([r]) : addMany([r]))} divider />
+                    <CheckRow
+                      key={r.phone}
+                      label={r.name || "İsimsiz"}
+                      sub={rowSub(r)}
+                      stacked
+                      on={sel[r.phone] !== undefined}
+                      onPress={() => (sel[r.phone] !== undefined ? removeMany([r]) : addMany([{ name: r.name || "", phone: r.phone }]))}
+                      divider
+                    />
                   ))}
                 </>
               ) : (
                 <Text style={[type.footnote, { color: colors.textTertiary, padding: spacing.md }]}>
-                  {Array.isArray(current.data?.items) && current.data.items.length ? "Aramanıza uyan kayıt yok." : "Bu kaynakta cep numarası olan kayıt bulunamadı."}
+                  {data.items.length ? "Aramanıza ya da filtrenize uyan kişi yok." : "Cep numarası olan cari, sipariş müşterisi ya da web üyesi bulunamadı."}
                 </Text>
               )}
             </Card>
@@ -287,7 +384,24 @@ export function BulkSection({ token, view, goConnection }: { token: string | nul
   );
 }
 
-function CheckRow({ label, sub, on, onPress, divider, strong, testID }: { label: string; sub?: string; on: boolean; onPress: () => void; divider?: boolean; strong?: boolean; testID?: string }) {
+// scroll: yatay kayan çip satırı (şehir, sınıf); diğerleri alt satıra sarar.
+function FilterGroup({ title, children, scroll }: { title: string; children: React.ReactNode; scroll?: boolean }) {
+  const { colors } = useTheme();
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={[type.caption, { color: colors.textSecondary, fontWeight: "700" }]}>{title}</Text>
+      {scroll ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scrollRow}>
+          {children}
+        </ScrollView>
+      ) : (
+        <View style={styles.wrapRow}>{children}</View>
+      )}
+    </View>
+  );
+}
+
+function CheckRow({ label, sub, on, onPress, divider, strong, stacked, testID }: { label: string; sub?: string; on: boolean; onPress: () => void; divider?: boolean; strong?: boolean; stacked?: boolean; testID?: string }) {
   const { colors } = useTheme();
   return (
     <PressableScale
@@ -299,8 +413,17 @@ function CheckRow({ label, sub, on, onPress, divider, strong, testID }: { label:
       style={[styles.check, divider && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}
     >
       <View style={[styles.box, { borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primary : "transparent" }]}>{on ? <CheckIcon size={14} color="#fff" /> : null}</View>
-      <Text style={[strong ? type.bodyStrong : type.body, { color: colors.textPrimary, flex: 1 }]} numberOfLines={1}>{label}</Text>
-      {sub ? <Text style={[type.caption, tabular, { color: colors.textTertiary }]}>{sub}</Text> : null}
+      {stacked ? (
+        <View style={{ flex: 1, minWidth: 0, paddingVertical: 6 }}>
+          <Text style={[type.body, { color: colors.textPrimary }]} numberOfLines={1}>{label}</Text>
+          {sub ? <Text style={[type.caption, tabular, { color: colors.textTertiary }]} numberOfLines={1}>{sub}</Text> : null}
+        </View>
+      ) : (
+        <>
+          <Text style={[strong ? type.bodyStrong : type.body, { color: colors.textPrimary, flex: 1 }]} numberOfLines={1}>{label}</Text>
+          {sub ? <Text style={[type.caption, tabular, { color: colors.textTertiary }]}>{sub}</Text> : null}
+        </>
+      )}
     </PressableScale>
   );
 }
@@ -311,5 +434,8 @@ const styles = StyleSheet.create({
   selbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   consent: { flexDirection: "row", alignItems: "center", gap: spacing.sm, borderWidth: 1, borderRadius: radius.md, padding: spacing.sm },
   check: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.md, minHeight: 48 },
+  filterBar: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  wrapRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  scrollRow: { flexDirection: "row", gap: 6, paddingRight: spacing.md },
   box: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, alignItems: "center", justifyContent: "center" },
 });
