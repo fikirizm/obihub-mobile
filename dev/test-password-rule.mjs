@@ -17,27 +17,32 @@ let n = 0;
 function t(name, fn) { fn(); n++; console.log("ok -", name); }
 const email = "ayse@example.test";
 
-t("ipucu metni kuralı söyler", () => {
-  assert.equal(m.PASSWORD_HINT, "En az 8 karakter, harf ve rakam");
+// 24 Kas 2026 (Amazon DPP, backend/password_policy.py + web lib/passwordPolicy.js): en az 12 karakter; büyük harf, küçük harf,
+// rakam ve özel karakter; e-postanın yerel kısmı ya da adın (≥4 harf) bir parçası geçemez. Son 10 şifre yalnız sunucuda.
+const WEAK = "Şifre en az 12 karakter olmalı; büyük harf, küçük harf, rakam ve özel karakter içermeli.";
+const NAME = "Şifre e-posta adresinizin ya da adınızın bir bölümünü içeremez.";
+t("ipucu metni web'le aynı", () => {
+  assert.equal(m.PASSWORD_HINT, "En az 12 karakter; büyük harf, küçük harf, rakam ve özel karakter içermeli");
 });
-t("kısa şifre: en az 8 karakter", () => {
-  assert.match(m.passwordProblem("abc123", email), /en az 8/);
-  assert.match(m.passwordProblem("abcde12", email), /en az 8/);
-  assert.equal(m.passwordProblem("abcdef12", email), null);
+t("en az 12 karakter, dört karakter türü", () => {
+  assert.equal(m.passwordProblem("Kısa1!abc", email), WEAK);
+  assert.equal(m.passwordProblem("Uzunsifre123!", email), null);
+  assert.equal(m.passwordProblem("uzunsifre123!", email), WEAK);     // büyük harf yok
+  assert.equal(m.passwordProblem("UZUNSIFRE123!", email), WEAK);     // küçük harf yok
+  assert.equal(m.passwordProblem("Uzunsifreabc!", email), WEAK);     // rakam yok
+  assert.equal(m.passwordProblem("Uzunsifre1234", email), WEAK);     // özel karakter yok
+  assert.equal(m.passwordProblem("Şğüıöçİabc12.", email), null);     // Türkçe harfler sayılır
 });
-t("harf ve rakam zorunlu (Türkçe harfler harf sayılır)", () => {
-  assert.match(m.passwordProblem("12345678", email), /harf/);
-  assert.match(m.passwordProblem("abcdefgh", email), /rakam/);
-  assert.equal(m.passwordProblem("şğüıöç12", email), null);
-});
-t("e-postayla aynı olamaz (büyük/küçük harf ve boşluk fark etmez)", () => {
-  assert.match(m.passwordProblem("ayse1@example.test", "ayse1@example.test"), /e-posta/);
-  assert.match(m.passwordProblem("AYSE1@EXAMPLE.TEST", " ayse1@example.test "), /e-posta/);
-  assert.equal(m.passwordProblem("ayse1@example.test2", "ayse1@example.test"), null);
+t("e-postanın yerel kısmı ve ad parçaları geçemez (≥4 harf, Türkçe katlama)", () => {
+  assert.equal(m.passwordProblem("Xayse.yilmaz9!", "ayse.yilmaz@example.test"), NAME);
+  assert.equal(m.passwordProblem("YILMAZ2026!!x", "ayse.yilmaz@example.test"), NAME);
+  assert.equal(m.passwordProblem("Gizli-Kapı2026", "ali@example.test"), null);        // "ali" 4 harften kısa
+  assert.equal(m.passwordProblem("Mehmet.2026!x", "m@example.test", "Mehmet Kaya"), NAME);
+  assert.equal(m.passwordProblem("İSTANBUL.2026x", "istanbul@example.test"), NAME);
 });
 t("sunucu PASSWORD_WEAK: sunucunun metni gösterilir, yoksa kural metni", () => {
   assert.equal(m.resetErrorText(Object.assign(new Error("Şifre çok zayıf."), { status: 400, code: "PASSWORD_WEAK" })), "Şifre çok zayıf.");
-  assert.match(m.resetErrorText({ status: 400, code: "PASSWORD_WEAK", message: "" }), /en az 8/);
+  assert.equal(m.resetErrorText({ status: 400, code: "PASSWORD_WEAK", message: "" }), WEAK);
   assert.equal(m.resetErrorText({ status: 400, message: "Kod geçersiz" }), "Kod geçersiz");
   assert.match(m.resetErrorText({}), /Kodu kontrol/);
 });

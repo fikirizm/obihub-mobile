@@ -41,4 +41,12 @@ t("kodsuz hata: sunucu metni; o da yoksa genel metin; eski 403 davranışı koru
   assert.equal(m.loginErrorText(err(403, undefined, "Engellendi.")).subscription, true);
 });
 
+t("24 Kas DPP: şifre süresi doldu (403 PASSWORD_EXPIRED) abonelik değil; şifre sıfırlamaya yönlendirir", () => {
+  const v = m.loginErrorText({ status: 403, code: "PASSWORD_EXPIRED", message: "Şifrenizin süresi doldu (365 gün)." });
+  assert.equal(v.subscription, false);
+  assert.equal(v.reset, true);
+  assert.equal(v.text, "Şifrenizin süresi doldu (365 gün). \"Yeni şifre belirle\" ile e-postanıza gelen kodla yeni şifre belirleyin.");
+  assert.equal(m.loginErrorText({ status: 429, code: "LOGIN_LOCKED", retryAfter: 60 }).reset, true);
+  assert.equal(m.loginErrorText({ status: 401, code: "INVALID_CREDENTIALS" }).reset, false);
+});
 console.log(`\n${n} test geçti`);

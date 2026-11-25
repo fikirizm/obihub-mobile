@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { router, Stack } from "expo-router";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FadeInDown } from "react-native-reanimated";
 import { SafeAnimatedView } from "../src/components/SafeAnimatedView";
@@ -18,7 +18,9 @@ export default function ForgotPasswordScreen() {
   const { colors, shadows } = useTheme();
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>("email");
-  const [email, setEmail] = useState("");
+  // Giriş ekranından (ör. şifre süresi doldu) e-postayla dolu açılır.
+  const params = useLocalSearchParams<{ email?: string }>();
+  const [email, setEmail] = useState(() => (typeof params.email === "string" ? params.email : ""));
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
@@ -176,13 +178,13 @@ export default function ForgotPasswordScreen() {
                   autoComplete="new-password"
                   accessibilityLabel="Yeni şifre"
                   accessibilityHint={PASSWORD_HINT}
-                  placeholder={PASSWORD_HINT}
+                  placeholder="En az 12 karakter"
                   placeholderTextColor={colors.textTertiary}
                   style={inputStyle}
                   testID="reset-new-password"
                 />
                 <Text testID="reset-password-rule" style={[type.caption, { color: colors.textTertiary, marginTop: 6 }]}>
-                  {`${PASSWORD_HINT}; e-posta adresinizle aynı olamaz.`}
+                  {`${PASSWORD_HINT}. E-posta adresinizin ya da adınızın bir bölümünü içeremez; son 10 şifrenizden biri olamaz.`}
                 </Text>
                 <Text style={[labelStyle, styles.labelGap]}>Yeni şifre (tekrar)</Text>
                 <TextInput

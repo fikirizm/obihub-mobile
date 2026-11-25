@@ -1,16 +1,32 @@
-// Şifre sıfırlama kuralı (saf modül; birim testi dev/test-password-rule.mjs).
-// Sunucu (POST /auth/password-reset/confirm): en az 8 karakter, en az bir harf ve bir rakam, e-postayla aynı olamaz;
-// zayıf şifrede 400 {code: "PASSWORD_WEAK", detail: "<Türkçe metin>"}.  İstemci aynı kuralı göndermeden önce denetler.
+// Şifre kuralı (saf modül; birim testi dev/test-password-rule.mjs). Yalnız YENİ şifre belirlenirken (sıfırlama); girişte denetlenmez.
+// 24 Kas 2026 Amazon DPP — sunucu backend/password_policy.py, web frontend/src/lib/passwordPolicy.js ile aynı kural:
+// en az 12 karakter; büyük harf, küçük harf, rakam ve özel karakter; e-postanın yerel kısmı ya da adın (≥4 harf) bir parçası geçemez.
+// Son 10 şifre denetimi yalnız sunucuda (400 PASSWORD_WEAK, Türkçe detail).
 
-export const PASSWORD_HINT = "En az 8 karakter, harf ve rakam";
+export const PASSWORD_HINT = "En az 12 karakter; büyük harf, küçük harf, rakam ve özel karakter içermeli";
+export const MSG_WEAK = "Şifre en az 12 karakter olmalı; büyük harf, küçük harf, rakam ve özel karakter içermeli.";
+export const MSG_CONTAINS_NAME = "Şifre e-posta adresinizin ya da adınızın bir bölümünü içeremez.";
+const MIN_IDENTITY_LEN = 4;
 
-export function passwordProblem(password: string, email: string): string | null {
-  const pw = String(password ?? "");
-  if (pw.length < 8) return "Şifre en az 8 karakter olmalıdır.";
-  if (!/\p{L}/u.test(pw)) return "Şifre en az bir harf içermelidir.";
-  if (!/\p{Nd}/u.test(pw)) return "Şifre en az bir rakam içermelidir.";
-  const e = String(email ?? "").trim().toLocaleLowerCase("tr-TR");
-  if (e && pw.trim().toLocaleLowerCase("tr-TR") === e) return "Şifre e-posta adresinizle aynı olamaz.";
+const fold = (text: string) =>
+  String(text || "").replace(/İ/g, "i").replace(/ı/g, "i").replace(/I/g, "i").toLowerCase().replace(/[^0-9a-zçğöşü]/g, "");
+
+function identityTokens(email: string, fullName?: string): string[] {
+  const local = String(email || "").trim().toLowerCase().split("@")[0];
+  const tokens: string[] = [];
+  if (local) {
+    tokens.push(fold(local));
+    local.split(/[^0-9a-zçğıöşüİ]+/).forEach((p) => tokens.push(fold(p)));
+  }
+  String(fullName || "").trim().toLowerCase().split(/\s+/).forEach((p) => tokens.push(fold(p)));
+  return Array.from(new Set(tokens)).filter((t) => t.length >= MIN_IDENTITY_LEN);
+}
+
+export function passwordProblem(password: string, email: string, fullName?: string): string | null {
+  const value = String(password ?? "");
+  if (value.length < 12 || !/\p{Lu}/u.test(value) || !/\p{Ll}/u.test(value) || !/\p{Nd}/u.test(value) || !/[^\p{L}\p{Nd}]/u.test(value)) return MSG_WEAK;
+  const folded = fold(value);
+  if (identityTokens(email, fullName).some((t) => folded.includes(t))) return MSG_CONTAINS_NAME;
   return null;
 }
 
@@ -42,7 +58,7 @@ const CONFIRM_TEXT: Record<string, string> = {
 };
 export function resetErrorText(e: any): string {
   const msg = typeof e?.message === "string" ? e.message.trim() : "";
-  if (e?.code === "PASSWORD_WEAK") return msg || "Şifre en az 8 karakter olmalı, harf ve rakam içermeli ve e-posta adresinizle aynı olmamalıdır.";
+  if (e?.code === "PASSWORD_WEAK") return generic(msg) ? MSG_WEAK : msg;
   if (e?.code && CONFIRM_TEXT[e.code]) return generic(msg) ? CONFIRM_TEXT[e.code] : msg;
   return generic(msg) ? "Şifre sıfırlanamadı. Kodu kontrol edin." : msg;
 }

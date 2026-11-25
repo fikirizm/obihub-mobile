@@ -358,9 +358,9 @@ http
     }
     console.log(req.method, path, JSON.stringify(state));
     const user = { id: "u1", email: "test@example.test", company_name: "Deneme A.Ş.", full_name: "Deneme Kullanıcı" };
-    // Giriş hata kodları: /__mode?loginErr=invalid|suspended|expired|locked (kalıcı; 0 ile kapanır)
+    // Giriş hata kodları: /__mode?loginErr=invalid|suspended|expired|locked|pwexpired (kalıcı; 0 ile kapanır)
     if (path === "/auth/login" && state.loginErr && state.loginErr !== "0") {
-      const E = { invalid: [401, "INVALID_CREDENTIALS", "E-posta veya şifre hatalı"], suspended: [403, "ACCOUNT_SUSPENDED", "Abonelik erişimi duraklatıldı."], expired: [403, "SUBSCRIPTION_EXPIRED", "Aboneliğinizin süresi doldu."], locked: [429, "LOGIN_LOCKED", "Çok fazla deneme."] }[state.loginErr];
+      const E = { invalid: [401, "INVALID_CREDENTIALS", "E-posta veya şifre hatalı"], suspended: [403, "ACCOUNT_SUSPENDED", "Abonelik erişimi duraklatıldı."], expired: [403, "SUBSCRIPTION_EXPIRED", "Aboneliğinizin süresi doldu."], locked: [429, "LOGIN_LOCKED", "Çok fazla deneme."], pwexpired: [403, "PASSWORD_EXPIRED", "Şifrenizin süresi doldu (365 gün). Lütfen 'Şifremi unuttum' ile yeni şifre belirleyin."] }[state.loginErr];
       if (E) {
         res.writeHead(E[0], { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Expose-Headers": "Retry-After", ...(E[0] === 429 ? { "Retry-After": "420" } : {}) });
         return res.end(JSON.stringify({ code: E[1], detail: E[2] }));
@@ -420,7 +420,8 @@ http
     if (path === "/auth/login" && state.expire) { currentRefresh = "r1"; return send(res, 200, { access_token: "acc-old", refresh_token: "r1", token_type: "bearer", user }); }
     if (state.expire && req.headers.authorization === "Bearer acc-old") return send(res, 401, { detail: "Oturum süresi doldu." });
     if (path === "/auth/login") return send(res, 200, { access_token: "test-token", token_type: "bearer", user });
-    // Şifre sıfırlama (sunucu kuralı: en az 8, harf + rakam, e-postayla aynı değil → 400 PASSWORD_WEAK). /__mode?pwWeak=1 → bir kez zayıf say.
+    // Şifre sıfırlama (24 Kas DPP kuralı: en az 12, büyük+küçük harf, rakam, özel karakter → 400 PASSWORD_WEAK). /__mode?pwWeak=1 →
+    // bir kez "son 10 şifreden biri" (geçmiş denetimi yalnız sunucuda).
     // 17 Kas: web ucu artık Turnstile ister; mobil kendi ucunu kullanır. Aynı adrese 45 sn içinde ikinci istek 429 + Retry-After.
     if (path === "/auth/password-reset/request-code" && req.method === "POST") return send(res, 400, { code: "TURNSTILE_REQUIRED", detail: "Doğrulama gerekli." });
     if (path === "/auth/mobile/password-reset/request-code" && req.method === "POST") {
@@ -434,8 +435,9 @@ http
         const b = JSON.parse(raw || "{}"); const pw = String(b.new_password || "");
         console.log("PW-RESET email=" + b.email + " code=" + b.code + " len=" + pw.length);
         const forced = state.pwWeak === "1"; state.pwWeak = "0";
-        if (forced || pw.length < 8 || !/\p{L}/u.test(pw) || !/\d/.test(pw) || pw.toLowerCase() === String(b.email || "").toLowerCase())
-          return send(res, 400, { code: "PASSWORD_WEAK", detail: "Şifre en az 8 karakter olmalı, en az bir harf ve bir rakam içermeli ve e-posta adresinizle aynı olmamalı." });
+        if (forced) return send(res, 400, { code: "PASSWORD_WEAK", detail: "Bu şifreyi daha önce kullandınız. Son 10 şifrenizden farklı bir şifre seçin." });
+        if (pw.length < 12 || !/\p{Lu}/u.test(pw) || !/\p{Ll}/u.test(pw) || !/\p{Nd}/u.test(pw) || !/[^\p{L}\p{Nd}]/u.test(pw))
+          return send(res, 400, { code: "PASSWORD_WEAK", detail: "Şifre en az 12 karakter olmalı; büyük harf, küçük harf, rakam ve özel karakter içermeli." });
         if (b.code === "000000") return send(res, 400, { detail: "Doğrulama kodu geçersiz ya da süresi dolmuş." });
         send(res, 200, { success: true });
       });

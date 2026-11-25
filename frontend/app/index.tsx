@@ -33,6 +33,9 @@ export default function Index() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Şifre süresi doldu / çok fazla deneme: hata kutusunda "Yeni şifre belirle" düğmesi.
+  const [errorReset, setErrorReset] = useState(false);
+  const openReset = () => router.push({ pathname: "/forgot-password", params: email.trim() ? { email: email.trim().toLowerCase() } : {} });
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
   const navigated = useRef(false);
@@ -56,6 +59,7 @@ export default function Index() {
   const handleSubmit = async () => {
     setSubmitting(true);
     setError(null);
+    setErrorReset(false);
     try {
       // Yönlendirmeyi yukarıdaki effect yapar; burada ikinci kez yapılmaz.
       const r = await login(email.trim(), password);
@@ -66,7 +70,9 @@ export default function Index() {
     } catch (e: any) {
       // Sunucunun makine okunur kodu (INVALID_CREDENTIALS, ACCOUNT_SUSPENDED, LOGIN_LOCKED…) ile Türkçe metin;
       // süresi dolan/duraklatılan abonelikte web'den yenileme yönlendirmesi (mobilde satın alma yok).
-      setError(loginErrorText(e).text);
+      const view = loginErrorText(e);
+      setError(view.text);
+      setErrorReset(view.reset);
     } finally {
       setSubmitting(false);
     }
@@ -182,6 +188,9 @@ export default function Index() {
                 style={[styles.errorBox, { backgroundColor: colors.errorBg }]}
               >
                 <Text style={[type.footnote, styles.errorText, { color: colors.error }]}>{error}</Text>
+                {errorReset ? (
+                  <Button testID="login-reset-password" size="sm" variant="secondary" label="Yeni şifre belirle" onPress={openReset} style={styles.resetBtn} />
+                ) : null}
               </View>
             ) : null}
 
@@ -194,7 +203,7 @@ export default function Index() {
             />
 
             <PressableScale
-              onPress={() => router.push("/forgot-password")}
+              onPress={openReset}
               accessibilityRole="link"
               style={styles.forgotBtn}
             >
@@ -216,6 +225,7 @@ export default function Index() {
 }
 
 const styles = StyleSheet.create({
+  resetBtn: { alignSelf: "flex-start", marginTop: spacing.sm },
   wrap: { flex: 1 },
   flex: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
