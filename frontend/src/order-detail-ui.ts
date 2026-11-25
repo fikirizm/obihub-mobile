@@ -47,7 +47,16 @@ export function fullAddress(o: AnyOrder): string {
     .filter(Boolean)
     .join(", ");
   const has = (part: string) => trLower(text).includes(trLower(part));
-  const place = [o?.shipping_district, o?.shipping_city, o?.shipping_state].map(clean).filter((p) => p && !has(p));
+  // Yer adı metinde yalnız mahalle adı olarak geçiyorsa ("Çankaya Mah.") ilçe/il sayılmaz: ilçe yine eklenir.
+  const hasPlace = (part: string) => {
+    const t = trLower(text);
+    const p = trLower(part);
+    for (let i = t.indexOf(p); i >= 0; i = t.indexOf(p, i + 1)) {
+      if (!/^\s*(mah\b|mah\.|mahalle)/.test(t.slice(i + p.length))) return true;
+    }
+    return false;
+  };
+  const place = [o?.shipping_district, o?.shipping_city, o?.shipping_state].map(clean).filter((p) => p && !hasPlace(p));
   const uniq = place.filter((p, i) => place.findIndex((x) => trLower(x) === trLower(p)) === i);
   if (uniq.length) text = [text, ...uniq].filter(Boolean).join(", ");
   const post = clean(o?.shipping_postcode);

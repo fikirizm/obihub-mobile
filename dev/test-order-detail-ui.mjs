@@ -144,4 +144,18 @@ t("a: adres parçaları eklenir (tekrar etmeden); Türkiye yazılmaz; fatura adr
   assert.equal(m.customerContact({ shipping_city: "Ankara" }).address.text, "Ankara");
 });
 
+// 24 Kas 2026 (ad88e75c5): HB siparişinde sunucu il/ilçeyi il-ilçe listesiyle doğrulayıp shipping_city / shipping_district'e yazar;
+// adres metni (shippingAddressDetail) çoğu zaman il/ilçe içermez. Web gibi ilçe ve il metnin sonuna eklenir, mahalle eklenmez.
+t("HB: doğrulanmış ilçe ve il adres metnine eklenir; metinde varsa tekrarlanmaz", () => {
+  assert.equal(m.fullAddress({ shipping_address: "Atatürk Mah. 123. Sk. No:4 D:2", shipping_city: "İzmir", shipping_district: "Bornova", shipping_neighborhood: "Atatürk" }),
+    "Atatürk Mah. 123. Sk. No:4 D:2, Bornova, İzmir");
+  assert.equal(m.fullAddress({ shipping_address: "Kazımdirik Mah. 372 Sk. Bornova İzmir", shipping_city: "İzmir", shipping_district: "Bornova" }),
+    "Kazımdirik Mah. 372 Sk. Bornova İzmir");
+});
+t("ilçe adı yalnız mahalle adı olarak geçiyorsa (Çankaya Mah.) ilçe yine eklenir", () => {
+  assert.equal(m.fullAddress({ shipping_address: "Çankaya Mah. Atatürk Blv. No:5", shipping_city: "Ankara", shipping_district: "Çankaya" }),
+    "Çankaya Mah. Atatürk Blv. No:5, Çankaya, Ankara");
+  assert.equal(m.fullAddress({ shipping_address: "Merkez Mahallesi 1. Sk, Merkez", shipping_city: "Bingöl", shipping_district: "Merkez" }),
+    "Merkez Mahallesi 1. Sk, Merkez, Bingöl");
+});
 console.log(`\n${n} test geçti`);
