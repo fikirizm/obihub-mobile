@@ -36,3 +36,16 @@ form taslakları; cari/ürün hızlı bakışı; HB il/ilçe adres düzeltmesi; 
 3. `node dev/check-ios-build.mjs <ipa>` → UYGUN olmalı.
 4. Dalı GitHub'a gönder (`surum-1.1.03`), `eas submit` ile TestFlight.
 5. PM'e dal ucu, build numarası ve test sonucu bildirilir.
+
+## Cihaz kontrol listesi (TestFlight'tan kurduktan sonra, ~10 dk)
+
+1. Giriş: e-posta + şifreyle gir (yeni cihazda kod gelir). Yanlış şifrede metin Türkçe; "Şifremi unuttum" e-postayla dolu açılır.
+2. Menü: Hesap bölümü Ayarlar · Abonelik · Destek Taleplerim · Bildirimler sırasıyla.
+3. Bildirimler: zil → Siparişler / Destek çipleri, Bugün / Dün grupları.
+4. Sipariş: bekleyen bir siparişi aç → İşleme al → Faturalandır; sipariş ekranında fatura kartı ve düğme metinleri taşmıyor.
+5. Fatura: faturayı aç → Tahsilat ekle (taslak faturada bu düğme yok) → kaydet; "Tahsil edildi". Tahsilatlı faturada "Faturayı sil" yok.
+6. Yeni fatura: müşteri seç → müşteriye dokun (hızlı bakış alttan açılır) → ürün ekle → ürün adına dokun (ürün özeti). Formdan çık, tekrar aç: "Kaydedilmemiş bir taslağınız var".
+7. Cari listesi: kategori/etiket çipleri; "Kategori / etiket" filtresi.
+8. EDM / Trendyol E-Faturam ile kesilmiş bir fatura varsa: e-Belge kartı (durum, ETTN; test bağlantısıysa "Test ortamı").
+9. Toplu SMS (Netgsm bağlıysa): tek liste, arama, Filtrele.
+10. Amazon bağlıysa: ürün detayında Amazon logosu ve stok gönderim durumu.
