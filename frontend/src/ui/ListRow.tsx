@@ -47,7 +47,10 @@ export function ListRow({
   destructive,
   testID,
   accessibilityLabel,
+  footer,
 }: {
+  // Metin sütununun altında ek satır (ör. kategori/etiket çipleri).
+  footer?: React.ReactNode;
   leading?: React.ReactNode;
   title: string;
   subtitle?: string;
@@ -78,6 +81,7 @@ export function ListRow({
             {meta}
           </Text>
         ) : null}
+        {footer ? <View style={{ marginTop: 6 }}>{footer}</View> : null}
       </View>
       {trailing ? <View style={styles.trailing}>{trailing}</View> : null}
       {chevron ? <ArrowRightIcon size={16} color={colors.textTertiary} /> : null}

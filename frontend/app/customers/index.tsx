@@ -18,6 +18,9 @@ import { StackHeader } from "../../src/ui/Header";
 import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
 import { ListBody } from "../../src/ui/ListBody";
 import { RowCard } from "../../src/ui/RowCard";
+import { ClassChips } from "../../src/components/ClassChips";
+import { useClassNames } from "../../src/classification-store";
+import { hasClass } from "../../src/classification";
 import { SearchField } from "../../src/ui/SearchField";
 import type { Party, PartyView } from "../../src/types";
 
@@ -144,6 +147,9 @@ export default function CustomersScreen() {
     [token, debounced, filter, role]
   );
   const list = usePagedList<PartyView>(token ? fetchPage : null);
+  // A: kategori/etiket çipleri (salt okuma); adlar yalnız sınıflandırması olan satır varsa yüklenir.
+  const classRows = list.items.filter(hasClass);
+  const cls = useClassNames(token, "party", classRows, classRows.length > 0);
 
   // Detayda tahsilat alınıp geri dönüldüğünde bakiyeler ve toplamlar tazelenir (ilk açılışı liste kendisi yükler).
   // Yüklenmiş sayfalar yerinde yenilenir; liste ilk sayfaya düşmez, kaydırma konumu korunur.
@@ -229,6 +235,7 @@ export default function CustomersScreen() {
               onPress={() =>
                 router.push({ pathname: "/customers/[id]", params: partyRouteParams(p) })
               }
+              footer={hasClass(p) ? <ClassChips row={p} names={cls.names} hidden={cls.hidden} /> : undefined}
             />
           );
         }}

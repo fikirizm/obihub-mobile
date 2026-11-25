@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { clearDrafts } from "../draft-store";
 import { tenantPrefix } from "../form-draft";
+import { clearClassificationCache } from "../classification-store";
 import { setAppBadge } from "../notifications/badge";
 import * as Notifications from "expo-notifications";
 import * as FileSystem from "expo-file-system/legacy";
@@ -452,6 +453,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const draftScope = tenantPrefix(user as any);
   useEffect(() => {
     if (draftScope) clearDrafts(draftScope).catch(() => {});
+    // Kategori/etiket adları firmaya özeldir: kapsam değişince (çıkış dahil) önbellek temizlenir.
+    clearClassificationCache();
   }, [draftScope]);
 
   // D-30: ekip üyesinde (role "member") menü/düğme izinleri /team/me'den; değişiklik anında geçerli olduğu için her

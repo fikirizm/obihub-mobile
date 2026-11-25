@@ -16,6 +16,7 @@ export function RowCard({
   testID,
   accent,
   leading,
+  footer,
 }: {
   // Sol kenarda ince renkli şerit (durum ya da kanal rengi).
   accent?: string;
@@ -29,6 +30,8 @@ export function RowCard({
   badge?: React.ReactNode;
   onPress?: () => void;
   testID?: string;
+  // Sol sütunun altında ek satır (ör. kategori/etiket çipleri).
+  footer?: React.ReactNode;
 }) {
   const { colors, shadows } = useTheme();
   const body = (
@@ -49,6 +52,7 @@ export function RowCard({
             {meta}
           </Text>
         ) : null}
+        {footer ? <View style={{ marginTop: 6 }}>{footer}</View> : null}
       </View>
       {/* Sağ sütun en çok yarı genişlik: çok rozetli satırda rozetler alt satıra kayar, başlık ezilmez. */}
       <View style={{ alignItems: "flex-end", gap: 4, maxWidth: "55%", flexShrink: 1 }}>

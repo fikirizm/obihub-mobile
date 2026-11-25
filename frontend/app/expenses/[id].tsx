@@ -2,6 +2,8 @@
 // GET /accounting/expense-invoices/{id}: kalemler, KDV / tevkifat / diğer vergiler, kategori, borç ve kalan.
 // "Ödeme ekle" yalnız modül açık + ui-capabilities.payable_payment + actions.can_pay + geri alınmamış borçta.
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { ClassChips } from "../../src/components/ClassChips";
+import { useClassNames } from "../../src/classification-store";
 import {
   Platform,
   RefreshControl,
@@ -103,6 +105,7 @@ export default function ExpenseDetailScreen() {
   const { token, user } = useAuth();
   const { colors } = useTheme();
   const [d, setD] = useState<ExpenseDetail | null>(null);
+  const tagNames = useClassNames(token, null, d?.tagIds?.length ? [{ tag_ids: d.tagIds }] : [], Boolean(d?.tagIds?.length));
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [message, setMessage] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -349,6 +352,12 @@ export default function ExpenseDetailScreen() {
                 </Text>
               }
             />
+            {d.tagIds.length && !tagNames.hidden ? (
+              <View style={[styles.tagRow, { borderTopColor: colors.border }]} testID="expense-tags">
+                <Text style={[type.callout, { color: colors.textSecondary }]}>Etiketler</Text>
+                <ClassChips row={{ tag_ids: d.tagIds }} names={tagNames.names} max={8} style={{ flex: 1, justifyContent: "flex-end" }} />
+              </View>
+            ) : null}
             {d.sourceKind ? (
               <ListRow
                 divider
@@ -566,6 +575,7 @@ export default function ExpenseDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  tagRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
   wrap: { flex: 1 },
   block: { marginHorizontal: spacing.lg },
   heroIcon: {

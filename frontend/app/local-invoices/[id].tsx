@@ -1,4 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { ClassChips } from "../../src/components/ClassChips";
+import { useClassNames } from "../../src/classification-store";
+import { hasClass } from "../../src/classification";
 import { isReadOnly, mirrorBadge } from "../../src/mirror";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -95,6 +98,9 @@ export default function LocalInvoiceDetailScreen() {
   const { colors } = useTheme();
   const { toast, confirm, promptEntry, promptNumber, choose } = useFeedback();
   const [inv, setInv] = useState<LocalInvoice | null>(null);
+  // A: satış faturası kategori/etiketi (salt okuma).
+  const invClassOn = Boolean(inv && hasClass(inv));
+  const invCls = useClassNames(token, "sales", invClassOn ? [inv] : [], invClassOn);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState<"official" | "payment" | "edoc" | "delete" | "void" | "copy" | "archive" | "pdf" | null>(null);
@@ -548,6 +554,7 @@ export default function LocalInvoiceDetailScreen() {
             </View>
           ) : null}
         </DetailHero>
+        {invClassOn ? <ClassChips row={inv} names={invCls.names} hidden={invCls.hidden} max={6} style={styles.classRow} testID="invoice-class-chips" /> : null}
 
         {inv.edoc_error ? (
           <SafeAnimatedView entering={FadeInDown.delay(60).duration(380)}>
@@ -840,6 +847,7 @@ export default function LocalInvoiceDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  classRow: { marginHorizontal: spacing.lg, marginTop: spacing.sm },
   lcGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginHorizontal: spacing.lg },
   badges: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 },
   note: { marginHorizontal: spacing.lg, marginBottom: spacing.sm, padding: spacing.sm, borderRadius: radius.md },

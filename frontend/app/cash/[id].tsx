@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { ClassChips } from "../../src/components/ClassChips";
+import { useClassNames } from "../../src/classification-store";
 import { isReadOnly, mirrorBadge } from "../../src/mirror";
 import { InlineEmpty } from "../../src/components/InlineEmpty";
 import { RefreshControl, ScrollView, Share, StyleSheet, Text, View } from "react-native";
@@ -81,6 +83,9 @@ export default function CashAccountScreen() {
   const { toast, promptEntry, confirm } = useFeedback();
   const [account, setAccount] = useState<CashAccount | null>(null);
   const [entries, setEntries] = useState<CashEntry[]>([]);
+  // A: kasa hareketi etiketleri (salt okuma; web KasaOS TagCells).
+  const taggedMoves = entries.filter((e: any) => Array.isArray(e.tag_ids) && e.tag_ids.length);
+  const moveTags = useClassNames(token, null, taggedMoves, taggedMoves.length > 0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState<"income" | "expense" | "archive" | "unarchive" | "delete" | null>(null);
@@ -366,6 +371,7 @@ export default function CashAccountScreen() {
                       title={e.description || e.counterparty_name || e.category_name || e.source?.label || ENTRY_LABELS[e.entry_type] || "Hareket"}
                       subtitle={[movementLabel(e as any) === "Bakiye düzeltme" ? "Bakiye düzeltme" : row.typeLabel, e.related_account_name, e.counterparty_name && e.description ? e.counterparty_name : null, formatDate(e.entry_date)].filter(Boolean).join(" · ")}
                       meta={row.tag ? `${row.tag} · bakiyeyi etkilemez` : undefined}
+                      footer={Array.isArray((e as any).tag_ids) && (e as any).tag_ids.length ? <ClassChips row={{ tag_ids: (e as any).tag_ids }} names={moveTags.names} hidden={moveTags.hidden} /> : undefined}
                       trailing={
                         <View style={styles.amountCol}>
                           <Text style={[type.bodyStrong, tabular, styles.amount, { color: row.tag ? colors.textTertiary : incoming ? colors.success : colors.textPrimary }]} numberOfLines={1} adjustsFontSizeToFit>

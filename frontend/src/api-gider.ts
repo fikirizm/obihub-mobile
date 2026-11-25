@@ -107,6 +107,8 @@ function expenseRowOf(x: any): ExpenseLedgerRow {
     source_kind: typeof x?.source_kind === "string" ? x.source_kind : undefined,
     archived: x?.archived === true,
     category: expenseCategory(x),
+    // A: etiket kimlikleri (adlar classification-store'dan; kategori adı yukarıda metin olarak).
+    tag_ids: Array.isArray(x?.classification?.tag_ids) ? x.classification.tag_ids : [],
   };
 }
 
@@ -173,6 +175,8 @@ function partyFromReadModel(item: any): PartyView {
     // G4-30 Paraşüt aynası (firma Paraşüt bağlıyken cari salt okunur).
     read_only: item?.read_only === true,
     source_kind: typeof item?.source_kind === "string" ? item.source_kind : undefined,
+    category_id: item?.category_id || null,
+    tag_ids: Array.isArray(item?.tag_ids) ? item.tag_ids : [],
   };
 }
 
@@ -407,6 +411,7 @@ export type ExpenseDetail = {
   sourceKind: string;
   archived: boolean;
   categoryFromParasut: boolean;
+  tagIds: string[];
 };
 
 export async function getExpenseDetail(token: string, ref: string): Promise<ExpenseDetail> {
@@ -437,6 +442,7 @@ export async function getExpenseDetail(token: string, ref: string): Promise<Expe
     },
     categoryName: expenseCategory(d)?.name || String(d?.expense?.category_name || ""),
     categoryFromParasut: expenseCategory(d)?.parasut === true,
+    tagIds: Array.isArray(d?.classification?.tag_ids) ? d.classification.tag_ids : [],
     payable: p && p.ref ? { ref: String(p.ref), paid: decimalOf(p.paid), remaining: decimalOf(p.remaining), payment_status: String(p.payment_status || "unknown") } : null,
     reversed: d?.reversed === true,
     canPay: d?.actions?.can_pay === true,

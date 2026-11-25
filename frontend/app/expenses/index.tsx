@@ -27,6 +27,8 @@ import { canManage } from "../../src/auth/permissions";
 import { ListBody } from "../../src/ui/ListBody";
 import { IconTile } from "../../src/ui/ListRow";
 import { RowCard } from "../../src/ui/RowCard";
+import { ClassChips } from "../../src/components/ClassChips";
+import { useClassNames } from "../../src/classification-store";
 import type { ExpenseInvoice, ExpenseLedgerRow, ExpenseSummaryRow, UiCapabilities } from "../../src/types";
 
 // Web ile aynı (frontend/src/pages/ExpenseInvoicesPage.js): varsayılan liste ObiHub'ın kendi gider defteri
@@ -73,6 +75,9 @@ export default function ExpensesScreen() {
     [token, payment, archived]
   );
   const ledger = usePagedList<ExpenseLedgerRow>(token && tab === "obihub" ? fetchLedger : null);
+  // A: etiket çipleri (salt okuma); adlar yalnız etiketli satır varsa yüklenir.
+  const taggedRows = ledger.items.filter((x) => x.tag_ids?.length);
+  const tagNames = useClassNames(token, null, taggedRows, taggedRows.length > 0);
   // Detay/ödeme ya da yeni kayıt ekranından dönüldüğünde yüklü sayfalar ve özet sessizce tazelenir.
   const focusedOnce = useRef(false);
   useFocusEffect(
@@ -232,6 +237,7 @@ export default function ExpensesScreen() {
               meta={metaParts.length ? metaParts.join(" · ") : undefined}
               amount={x.total !== null ? formatMoney(x.total, cur) : "—"}
               badge={<StatusBadge label={x.archived ? "Arşivde" : st.label} kind={x.archived ? "neutral" : st.kind} size="sm" />}
+              footer={x.tag_ids?.length ? <ClassChips row={{ tag_ids: x.tag_ids }} names={tagNames.names} hidden={tagNames.hidden} /> : undefined}
             />
           );
         }}

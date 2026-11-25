@@ -19,6 +19,9 @@ import { Button } from "../../src/ui/Button";
 import { useFeedback } from "../../src/ui/Feedback";
 import { StackHeader } from "../../src/ui/Header";
 import { DetailHero } from "../../src/ui/DetailHero";
+import { ClassChips } from "../../src/components/ClassChips";
+import { useClassNames } from "../../src/classification-store";
+import { hasClass } from "../../src/classification";
 import { ON_HERO } from "../../src/ui/HeroCard";
 import { Card, IconTile, ListRow, SectionTitle } from "../../src/ui/ListRow";
 import { AlertIcon, ArrowRightIcon, DownloadIcon, InboxIcon, ReceiptIcon, RefreshIcon, WalletIcon } from "../../src/components/Icons";
@@ -97,6 +100,20 @@ export default function CustomerDetailScreen() {
   const busy = false;
   // Tahsilat yalnızca kayıtlı carilerde yapılabilir; siparişlerden türetilen carilerde uç 404 döner.
   const registered = params.registered === "1";
+  // A: kategori/etiket (salt okuma). Web gibi yalnız kayıtlı (eski kart) caride; kart bir kez okunur, 403/hata sessiz.
+  const [classRow, setClassRow] = useState<any>(null);
+  useEffect(() => {
+    if (!token || !registered || params.source === "obihub" || params.source === "orders") return;
+    let live = true;
+    getParty(token, legacyIdOf(id))
+      .then((c: any) => live && setClassRow({ category_id: c?.category_id || null, tag_ids: Array.isArray(c?.tag_ids) ? c.tag_ids : [] }))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [token, registered, id, params.source]);
+  const classOn = Boolean(classRow && hasClass(classRow));
+  const cls = useClassNames(token, "party", classRow ? [classRow] : [], classOn);
   // Web (CustomersPage.js): kaynağı ObiHub defteri olan caride tahsilat bu ekrandan alınmaz.
   // G4-30: Paraşüt aynalı cari (ro=1) ObiHub'da tahsil edilmez/düzenlenmez; Paraşüt'te yönetilir.
   const readOnlyParty = params.ro === "1";
@@ -348,6 +365,7 @@ export default function CustomerDetailScreen() {
             ) : null}
           </View>
         </DetailHero>
+        {classOn ? <ClassChips row={classRow} names={cls.names} hidden={cls.hidden} max={6} style={styles.classRow} testID="customer-class-chips" /> : null}
 
         {registered && mayCollect && cur && !foreign ? (
           <SafeAnimatedView entering={FadeInDown.delay(70).duration(380)} style={styles.action}>
@@ -541,6 +559,7 @@ export default function CustomerDetailScreen() {
 }
 
 const styles = StyleSheet.create({
+  classRow: { marginHorizontal: spacing.lg, marginTop: spacing.sm },
   rowActs: { flexDirection: "row", justifyContent: "flex-end", gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, marginTop: -spacing.xs },
   manageRow: { flexDirection: "row", gap: spacing.sm, marginHorizontal: spacing.lg, marginTop: spacing.md },
   wrap: { flex: 1 },

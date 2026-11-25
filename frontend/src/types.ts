@@ -528,6 +528,7 @@ export type UiCapabilities = {
 // Tutarlar sunucuda Decimal dizedir; burada sayıya çevrilmiş hâlidir. `total` KDV dışı vergileri (other_levies) içerir.
 export type ExpenseLedgerRow = {
   id: string;
+  tag_ids?: string[];
   supplier_name?: string | null;
   document_number?: string | null;
   issue_date?: string | null;
@@ -549,6 +550,9 @@ export type PartyActions = { view_ledger: boolean; view_orders: boolean; edit: b
 
 // Cari listesi satırı: okuma modeli (/accounting/read-model/parties) ya da eski uç (/customers) aynı biçime çevrilir.
 export type PartyView = Party & {
+  // Sınıflandırma (kategori/etiket kimlikleri; adlar classification-store'dan).
+  category_id?: string | null;
+  tag_ids?: string[];
   read_only?: boolean;
   source_kind?: string;
   // "read_model": yeni okuma modeli; "customers": eski uç (okuma modeli 404 döndü).

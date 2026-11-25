@@ -117,7 +117,7 @@ const kasaExtra = [
 const kasaMoves = Array.from({ length: 62 }, (_, i) => {
   const day = 62 - i; // en yeni önce
   const inc = i % 3 !== 0;
-  return { id: `mv-${i}`, entry_date: `2026-${day > 31 ? "10" : "11"}-${String(((day - 1) % 31) + 1).padStart(2, "0")}`, entry_type: i % 7 === 0 ? "transfer_out" : inc ? "income" : "expense", direction: i % 7 === 0 ? "out" : inc ? "in" : "out", amount: 100 + i * 5, description: i % 7 === 0 ? "Bankaya aktarım" : inc ? `Satış tahsilatı ${i}` : "Kırtasiye", related_account_name: i % 7 === 0 ? "Garanti Ticari" : "", counterparty_name: inc && i % 2 ? "Deniz Ltd" : "", source: { type: "manual", label: "Elle girilen hareket" }, running_balance: i >= 58 ? null : 12450.75 - i * 40, before_opening: i >= 58 };
+  return { ...(i === 1 ? { tag_ids: ["tg1", "tg3"] } : {}), id: `mv-${i}`, entry_date: `2026-${day > 31 ? "10" : "11"}-${String(((day - 1) % 31) + 1).padStart(2, "0")}`, entry_type: i % 7 === 0 ? "transfer_out" : inc ? "income" : "expense", direction: i % 7 === 0 ? "out" : inc ? "in" : "out", amount: 100 + i * 5, description: i % 7 === 0 ? "Bankaya aktarım" : inc ? `Satış tahsilatı ${i}` : "Kırtasiye", related_account_name: i % 7 === 0 ? "Garanti Ticari" : "", counterparty_name: inc && i % 2 ? "Deniz Ltd" : "", source: { type: "manual", label: "Elle girilen hareket" }, running_balance: i >= 58 ? null : 12450.75 - i * 40, before_opening: i >= 58 };
 });
 const accounts = [
   { id: "a1", name: "Nakit Kasa", account_type: "cash", currency: "TRY", balance: 12450.75, is_default: true },
@@ -198,11 +198,11 @@ const sms = { connected: false, username: "", enabled: false, sender: "", encodi
   senders: [{ name: "DENEMEMGZ", type: "ALPHANUMERIC", usable: true }, { name: "8501234567", type: "SUBSCRIBER_NUMBER", usable: true }, { name: "ESKIBASLIK", type: "ALPHANUMERIC", usable: false, reason: "ROUTING_CODE_MISSING" }],
   campaigns: [] };
 const parties = [
-  { id: "c9", name: "Hareketli Cari Ltd.", source: "registered", balance: 0, has_activity: true, payments: [] },
+  { id: "c9", name: "Hareketli Cari Ltd.", source: "registered", balance: 0, has_activity: true, payments: [], category_id: "pc2", tag_ids: [] },
   { id: "c1", name: "Elif Kaya", phone: "0555 111 22 33", source: "registered", balance: 4725, advance: 250, payments: [],
     // P11: cari tahsilatı (faturaya dağıtılmış) — ekstrede düzenle / sil
     collections: [{ id: "cp1", type: "customer", amount: "1500.00", currency: "TRY", date: "2026-11-05", method: "havale", note: "Kasım ödemesi", account_id: "a2", invoices: [{ invoice_id: "li1", invoice_number: "OBI2026101", amount: "1500.00" }], parasut: false }] },
-  { id: "c2", name: "Can Öztürk", email: "can@example.test", source: "registered", balance: 12850.5, payments: [] },
+  { id: "c2", name: "Can Öztürk", email: "can@example.test", source: "registered", balance: 12850.5, payments: [], category_id: "pc1", tag_ids: ["tg1", "tg2", "tg3", "tg4", "tg9"] },
   { id: "c3", name: "Tedarikçi A.Ş.", contact_role: "supplier", source: "registered", balance: -9400, payments: [] },
   { id: "c4", name: "Usta Market", contact_role: "supplier", source: "registered", balance: 0, payments: [] },
   { id: "e:ayse@example.test", name: "Ayşe Yılmaz", source: "orders", balance: 0, payments: [] },
@@ -228,7 +228,7 @@ localInvoices.push({ id: "li9", doc_schema: 1, invoice_number: "OBI2026150", inv
   payments: [{ id: "pof1", amount: 400, date: "2026-11-15", method: "mahsup", source: "offset", offset_id: "op-offset-0001", parasut_sync_state: "local_only" }], items: [] });
 // 24 Kas edoc-retry: Paraşüt'te faturası oluşmuş, e-belgesi alıcı il/ilçe/VKN eksiğinden düşmüş fatura.
 localInvoices.push({ id: "li10", doc_schema: 1, invoice_number: "OBI2026160", invoice_type: "satis", status: "gonderildi", display_status: "gonderildi", money_state: "pending",
-  edoc_state: "failed", edoc_error: "Alıcı il, ilçe ve VKN/TCKN bilgisi eksik.", parasut_invoice_id: "prs-inv-10",
+  edoc_state: "failed", edoc_error: "Alıcı il, ilçe ve VKN/TCKN bilgisi eksik.", parasut_invoice_id: "prs-inv-10", category_id: "sc1", tag_ids: ["tg1"],
   customer_id: "c2", customer_name: "Can Öztürk", issue_date: "2026-11-24", due_date: "2026-12-24", currency: "TRY", subtotal: 500, discount_amount: 0, vat_amount: 100, total: 600, paid_amount: 0, remaining_amount: 600,
   payments: [], items: [{ line_key: "l-10", product_name: "Deneme Ürün 2", quantity: 1, unit_price: 500, vat_rate: 20, total: 600 }] });
 // Dalga 1: resmileşmiş e-Arşiv fatura (e-belge iptali, resmi PDF).
@@ -358,7 +358,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig", "yurtici", "yurticiCancel", "officializer", "ppay", "counters", "ieFail", "amzBlock", "amzApproved", "nextPlan", "smsOn"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig", "yurtici", "yurticiCancel", "officializer", "ppay", "counters", "ieFail", "amzBlock", "amzApproved", "nextPlan", "smsOn", "clsDeny"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -2418,9 +2418,25 @@ http
       });
       return;
     }
+    // Sınıflandırma (A/B): /__mode?clsDeny=1 → 403 (çipler gizlenmeli).
+    if (path.startsWith("/classification/")) {
+      if (state.clsDeny === "1") return send(res, 403, { code: "FORBIDDEN", detail: "Yetkiniz yok." });
+      if (path === "/classification/categories") {
+        const kind = url.searchParams.get("kind");
+        const all = { party: [{ id: "pc1", name: "Toptan", color: "blue", active: true }, { id: "pc2", name: "Eski müşteri", color: "slate", active: false }],
+          sales: [{ id: "sc1", name: "Pazaryeri satışı", color: "orange", active: true }], expense: [{ id: "ec1", name: "Lojistik", color: "teal", active: true }] };
+        return send(res, 200, { items: all[kind] || [] });
+      }
+      if (path === "/classification/tags") {
+        const tags = [{ id: "tg1", name: "VIP", color: "amber", active: true }, { id: "tg2", name: "Kampanya", color: "pink", active: true }, { id: "tg3", name: "Kurumsal", active: true }, { id: "tg4", name: "Eski kampanya", color: "red", active: false }];
+        const ids = url.searchParams.get("ids");
+        if (ids) return send(res, 200, { items: ids.split(",").includes("tg9") ? [{ id: "tg9", name: "Yurt dışı", color: "violet", active: true }] : [] });
+        return send(res, 200, { items: tags });
+      }
+    }
     if (path === "/accounting/expense-invoices") {
       const rows = [
-        { id: "obihub:e1", source: "obihub", supplier_name: "Kargo Lojistik A.Ş.", document_number: "ABC2026000123", issue_date: "2026-11-09", due_date: "2026-11-24", total: "1840.60", currency: "TRY", payment_status: "pending", reversed: false, other_levies: null, remaining: "1840.60", source_kind: "import" },
+        { id: "obihub:e1", source: "obihub", classification: { category_id: null, tag_ids: ["tg2", "tg3"] }, supplier_name: "Kargo Lojistik A.Ş.", document_number: "ABC2026000123", issue_date: "2026-11-09", due_date: "2026-11-24", total: "1840.60", currency: "TRY", payment_status: "pending", reversed: false, other_levies: null, remaining: "1840.60", source_kind: "import" },
         { id: "obihub:e2", source: "obihub", supplier_name: "Ofis Kırtasiye", document_number: "OK-77", issue_date: "2026-10-20", due_date: "2026-11-01", total: "1250.50", currency: "TRY", payment_status: "overdue", reversed: false, other_levies: "50.00", remaining: "1250.50", source_kind: "manual" },
         { id: "legacy:p1", source: "legacy", mirror: { provider: "parasut", category_name: "Kira" }, supplier_name: "Ambalaj Ltd.", document_number: "XYZ2026000456", issue_date: "2026-10-07", due_date: null, total: "3275.00", currency: "TRY", payment_status: "paid", reversed: false, other_levies: null, remaining: "0.00", source_kind: "legacy" },
       ];
