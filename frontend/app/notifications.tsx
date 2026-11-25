@@ -1,9 +1,9 @@
 import React from "react";
+import { setAppBadge } from "../src/notifications/badge";
 import { FlatList, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { useAuth } from "../src/auth/AuthProvider";
 import { markSupportNotificationsRead } from "../src/api";
-import * as Notifications from "expo-notifications";
 import { markAllNotificationsRead, markNotificationRead, useNotifications } from "../src/notifications/store";
 import { useTheme } from "../src/theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../src/theme/tokens";
@@ -32,7 +32,7 @@ export default function NotificationsScreen() {
   const { token } = useAuth();
   const markAll = () => {
     markAllNotificationsRead();
-    Notifications.setBadgeCountAsync(0).catch(() => {});
+    setAppBadge(0).catch(() => {});
     // Destek yanıtları sunucuda da okundu sayılır (web ve diğer cihazlarla eş); hata yerel işareti geri almaz.
     if (token) markSupportNotificationsRead(token).catch(() => undefined);
   };

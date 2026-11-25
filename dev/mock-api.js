@@ -226,6 +226,11 @@ localInvoices.push({ id: "li8", doc_schema: 1, invoice_number: "IADE2026001", in
 localInvoices.push({ id: "li9", doc_schema: 1, invoice_number: "OBI2026150", invoice_type: "satis", status: "gonderildi", display_status: "gonderildi", money_state: "partial",
   customer_id: "c1", customer_name: "Elif Kaya", issue_date: "2026-11-10", due_date: "2026-11-30", currency: "TRY", subtotal: 1000, discount_amount: 0, vat_amount: 200, total: 1200, paid_amount: 400, remaining_amount: 800,
   payments: [{ id: "pof1", amount: 400, date: "2026-11-15", method: "mahsup", source: "offset", offset_id: "op-offset-0001", parasut_sync_state: "local_only" }], items: [] });
+// 24 Kas edoc-retry: Paraşüt'te faturası oluşmuş, e-belgesi alıcı il/ilçe/VKN eksiğinden düşmüş fatura.
+localInvoices.push({ id: "li10", doc_schema: 1, invoice_number: "OBI2026160", invoice_type: "satis", status: "gonderildi", display_status: "gonderildi", money_state: "pending",
+  edoc_state: "failed", edoc_error: "Alıcı il, ilçe ve VKN/TCKN bilgisi eksik.", parasut_invoice_id: "prs-inv-10",
+  customer_id: "c2", customer_name: "Can Öztürk", issue_date: "2026-11-24", due_date: "2026-12-24", currency: "TRY", subtotal: 500, discount_amount: 0, vat_amount: 100, total: 600, paid_amount: 0, remaining_amount: 600,
+  payments: [], items: [{ line_key: "l-10", product_name: "Deneme Ürün 2", quantity: 1, unit_price: 500, vat_rate: 20, total: 600 }] });
 // Dalga 1: resmileşmiş e-Arşiv fatura (e-belge iptali, resmi PDF).
 localInvoices.push({ id: "li7", doc_schema: 1, invoice_number: "OBI2026140", invoice_type: "satis", status: "resmilesti", display_status: "resmilesti", money_state: "pending", edoc_state: "done", edoc_type: "e_archive", parasut_invoice_id: "prs-inv-7",
   customer_id: "c1", customer_name: "Elif Kaya", issue_date: "2026-11-15", due_date: "2026-11-30", currency: "TRY", subtotal: 1000, discount_amount: 0, vat_amount: 200, total: 1200, paid_amount: 0, remaining_amount: 1200,
@@ -1976,6 +1981,24 @@ http
     }
     // D-12 yaşam döngüsü: iptal (gerekçe, e-belge adımı), iade, kopya, arşiv, geçmiş, PDF.
     let lcm;
+    // 24 Kas: e-belgeyi yeniden dene. Gövdesiz ilk istek 422 RECIPIENT_INCOMPLETE; il+ilçe+geçerli numara gelince e-belge düzenlenir.
+    let erm;
+    if (req.method === "POST" && (erm = path.match(/^\/local-invoices\/([^/]+)\/edoc-retry$/))) {
+      let raw = ""; req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        const inv = localInvoices.find((x) => x.id === erm[1]);
+        if (!inv) return send(res, 404, { detail: "Fatura bulunamadı" });
+        if (inv.edoc_state !== "failed") return send(res, 409, { detail: "Bu faturada başarısız bir e-belge isteği yok; yeniden denenecek bir şey yok." });
+        let b = {}; try { b = JSON.parse(raw || "{}"); } catch {}
+        console.log("WRITE edoc-retry", erm[1], JSON.stringify(b));
+        const tax = String(b.tax_number || "");
+        const missing = [!String(b.city || "").trim() && "city", !String(b.district || "").trim() && "district", !(/^\d{10}$/.test(tax) || /^\d{11}$/.test(tax)) && "tax_number"].filter(Boolean);
+        if (missing.length) return send(res, 422, { code: "RECIPIENT_INCOMPLETE", detail: "Alıcı bilgisi eksik: il, ilçe, VKN/TCKN.", missing, suggested: { city: "İzmir", district: "", tax_number: "" }, individual_allowed: true });
+        Object.assign(inv, { edoc_state: "done", status: "resmilesti", display_status: "resmilesti", edoc_error: null, edoc_type: "e_archive" });
+        send(res, 200, { ok: true, edoc_state: "done", status: "resmilesti", message: "Fatura resmileştirildi", resent: true });
+      });
+      return;
+    }
     if ((lcm = path.match(/^\/local-invoices\/([^/]+)\/(cancel|cancel\/edoc|returns|copy|archive|unarchive|events|pdf|share|share-preview)$/))) {
       const inv = localInvoices.find((i) => i.id === lcm[1]);
       if (!inv) return send(res, 404, { code: "NOT_FOUND", detail: "Fatura bulunamadı." });

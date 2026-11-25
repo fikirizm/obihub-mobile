@@ -134,4 +134,29 @@ t("Dalga 1: paylaşım önizlemesi formu doldurur; gönderilemiyorsa söylenir",
   assert.deepEqual(m.sharePrefill({ kind: "quote", to: [], subject: "", can_send: false }), { to: "", subject: "", canSend: false, official: false, kind: "quote" });
   assert.equal(m.sharePrefill(null).canSend, true);
 });
+// 24 Kas 2026 (web lib/documentLifecycle.js canSendInvoice / canRetryEdoc): mükerrer e-belge koruması ve e-belge yeniden deneme kapısı.
+t("Resmileştir yalnız Paraşüt'e hiç gitmemiş, e-belge süreci başlamamış, kilitsiz faturada", () => {
+  assert.equal(m.canSendInvoice({ status: "kesildi" }), true);
+  assert.equal(m.canSendInvoice({ status: "kesildi", parasut_invoice_id: "9" }), false);
+  assert.equal(m.canSendInvoice({ status: "kesildi", officialize_lock: { at: "x" } }), false);
+  assert.equal(m.canSendInvoice({ status: "kesildi", edoc_state: "failed" }), false);
+  assert.equal(m.canSendInvoice({ status: "kesildi", edoc_requested: true }), false);
+  assert.equal(m.canSendInvoice({ status: "kesildi", edoc_job_id: "j1" }), false);
+  assert.equal(m.canSendInvoice({ status: "resmilesti" }), false);
+  assert.equal(m.canSendInvoice({ status: "iptal" }), false);
+  assert.equal(m.canSendInvoice({ status: "kesildi", source: "parasut_import" }), false);
+  assert.equal(m.canSendInvoice({ status: "kesildi", read_only: true }), false);
+});
+t("E-belgeyi yeniden dene: Paraşüt'te faturası olan, e-belgesi düşmüş, kilitsiz, kesilmiş fatura", () => {
+  const ok = { status: "kesildi", parasut_invoice_id: "9", edoc_state: "failed" };
+  assert.equal(m.canRetryEdoc(ok), true);
+  assert.equal(m.canRetryEdoc({ ...ok, edoc_state: "pending" }), false);
+  assert.equal(m.canRetryEdoc({ ...ok, parasut_invoice_id: "" }), false);
+  assert.equal(m.canRetryEdoc({ ...ok, officialize_lock: { at: "x" } }), false);
+  assert.equal(m.canRetryEdoc({ ...ok, edoc_cancelled_at: "2026-11-20" }), false);
+  assert.equal(m.canRetryEdoc({ ...ok, status: "iptal" }), false);
+  assert.equal(m.canRetryEdoc({ ...ok, status: "resmilesti" }), false);
+  assert.equal(m.canRetryEdoc({ ...ok, source: "parasut_import" }), false);
+});
+
 console.log(`\n${n} test geçti`);

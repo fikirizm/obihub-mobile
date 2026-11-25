@@ -10,6 +10,7 @@ import { accountOptionLabel, accountsForCurrency, collectErrorText, unmatchAlloc
 import { canOfferParasutSync, collectResultText, parasutActionFailText, parasutActionRequest, parasutActionResult, parasutCollectFields, parasutPayView, PARASUT_ACTION_LABELS, type ParasutAction } from "../../src/parasut-pay";
 import { isInvoiceOverdue, PAYMENT_METHODS, todayIso } from "../../src/finance";
 import { amountRows, collectAmount, invoiceStatusView, edocCancelled } from "../../src/invoice-status";
+import { canRetryEdoc, canSendInvoice } from "../../src/document-lifecycle";
 import { invoicePaymentActions, invoicePaymentCollection, OFFSET_RELEASE_TEXT, offsetErrorText, offsetReleasePath } from "../../src/collection-actions";
 import { deleteConfirmText, lifecycleActions, lifecycleErrorText } from "../../src/document-lifecycle";
 import { copyInvoice, getFxRates, getInvoicePdf, setInvoiceArchived } from "../../src/api-finans";
@@ -242,7 +243,10 @@ export default function LocalInvoiceDetailScreen() {
     }
   };
   // Dalga 1: e-belgesi iptal edilmiş fatura yeniden resmileştirilmez; sıradaki adım yerel iptaldir.
-  const officializeCandidate = mayWrite && !readOnly && parasutConnected === true && !inv.parasut_invoice_id && inv.status !== "resmilesti" && !isCancelled && !edocCancelled(inv);
+  // 24 Kas mükerrer e-belge koruması (web canSendInvoice): Paraşüt kimliği, işlem kilidi ya da herhangi bir e-belge izi varsa yeniden gönderilmez.
+  const officializeCandidate = mayWrite && !readOnly && parasutConnected === true && canSendInvoice(inv as any) && !isCancelled && !edocCancelled(inv);
+  // E-belgesi düşmüş (Paraşüt'te faturası olan) fatura: yalnız e-belge yeniden denenir, yeni fatura açılmaz.
+  const canRetry = mayWrite && !readOnly && canRetryEdoc(inv as any);
   // G2 §6: tevkifat / ÖTV-ÖİV / konaklama / stopaj Paraşüt'e taşınamaz; düğme yerine açıklama (sunucu yine reddeder).
   // Dalga 2: tevkifat / ÖTV-ÖİV / konaklama / stopajlı fatura da resmileşir (sunucu tutar korumasıyla); iade faturası da (asıl faturaya bağlı).
   const canOfficialize = (officializeCandidate && inv.invoice_type !== "iade") || (mayWrite && parasutConnected === true && canOfficializeReturn(inv));
@@ -517,6 +521,7 @@ export default function LocalInvoiceDetailScreen() {
           }
           title={inv.customer_name || "Müşteri"}
           subtitle={[String(inv.document_name || "").trim() || null, inv.invoice_number, formatDate(inv.issue_date)].filter(Boolean).join(" · ")}
+          badgeBelow
           badge={
             <View style={styles.badges} testID="invoice-status-badges">
               <StatusBadge label={st.document.label} kind={st.document.kind} size="sm" />
@@ -548,7 +553,20 @@ export default function LocalInvoiceDetailScreen() {
           <SafeAnimatedView entering={FadeInDown.delay(60).duration(380)}>
             <View style={[styles.alert, { backgroundColor: colors.errorBg }]}>
               <AlertIcon size={18} color={colors.error} />
-              <Text style={[type.footnote, { color: colors.error, flex: 1 }]}>E-belge hatası: {inv.edoc_error}</Text>
+              <View style={{ flex: 1, gap: spacing.sm }}>
+                <Text style={[type.footnote, { color: colors.error }]}>E-belge hatası: {inv.edoc_error}</Text>
+                {canRetry ? (
+                  <Button
+                    testID="invoice-edoc-retry"
+                    label="E-belgeyi yeniden dene"
+                    size="sm"
+                    variant="secondary"
+                    disabled={Boolean(busy)}
+                    onPress={() => router.push({ pathname: "/local-invoices/edoc-retry", params: { id: inv.id, title: [inv.invoice_number, inv.customer_name].filter(Boolean).join(" · "), reason: String(inv.edoc_error || "") } } as any)}
+                    style={{ alignSelf: "flex-start" }}
+                  />
+                ) : null}
+              </View>
             </View>
           </SafeAnimatedView>
         ) : null}
@@ -823,7 +841,7 @@ export default function LocalInvoiceDetailScreen() {
 
 const styles = StyleSheet.create({
   lcGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginHorizontal: spacing.lg },
-  badges: { flexDirection: "column", alignItems: "flex-end", gap: 4 },
+  badges: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 },
   note: { marginHorizontal: spacing.lg, marginBottom: spacing.sm, padding: spacing.sm, borderRadius: radius.md },
   wrap: { flex: 1 },
   hero: { marginTop: spacing.sm },

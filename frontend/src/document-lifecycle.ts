@@ -15,6 +15,25 @@ const docAxis = (inv: Inv) => {
 };
 export const isMirror = (inv: Inv) => inv?.read_only === true || inv?.source === "parasut_mirror";
 
+// 24 Kas 2026 mükerrer e-belge koruması (web lib/documentLifecycle.js canSendInvoice): "Resmileştir" yalnız Paraşüt'e hiç gitmemiş,
+// e-belge süreci başlamamış, kilitsiz, resmileşmemiş faturada. Paraşüt kimliği ya da herhangi bir e-belge izi varsa Paraşüt'te belge
+// oluşmuş olabilir: yeniden gönderilmez, yalnız durum sorgulanır / e-belge yeniden denenir.
+export function canSendInvoice(inv: Inv): boolean {
+  if (!inv) return true;
+  if (isMirror(inv) || inv.source === "parasut_import") return false;
+  const axis = docAxis(inv);
+  if (axis === "cancelled" || axis === "official" || inv.status === "resmilesti") return false;
+  return !inv.parasut_invoice_id && !inv.officialize_lock && !inv.edoc_state && !inv.edoc_requested && !inv.edoc_job_id;
+}
+
+// "E-belgeyi yeniden dene" (POST /local-invoices/{id}/edoc-retry): Paraşüt'te faturası OLUŞMUŞ ama e-belgesi düşmüş fatura.
+// Yeni fatura açılmaz; Paraşüt'teki fatura korunur, yalnız e-belge yeniden denenir.
+export function canRetryEdoc(inv: Inv): boolean {
+  if (!inv || !inv.parasut_invoice_id || inv.edoc_state !== "failed") return false;
+  if (isMirror(inv) || inv.source === "parasut_import" || inv.officialize_lock || inv.edoc_cancelled_at) return false;
+  return docAxis(inv) === "issued" && inv.status !== "iptal" && inv.status !== "resmilesti";
+}
+
 export type LifecycleActions = {
   edit_amounts: boolean;
   delete: boolean;

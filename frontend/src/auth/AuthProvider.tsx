@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { setAppBadge } from "../notifications/badge";
 import * as Notifications from "expo-notifications";
 import * as FileSystem from "expo-file-system/legacy";
 import * as BackgroundFetch from "expo-background-fetch";
@@ -440,7 +441,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await clearAllCache().catch(() => {});
     clearCatalogCache();
     clearNotificationsStore();
-    Notifications.setBadgeCountAsync(0).catch(() => {});
+    setAppBadge(0).catch(() => {});
   }, []);
 
   // D-30: ekip üyesinde (role "member") menü/düğme izinleri /team/me'den; değişiklik anında geçerli olduğu için her
@@ -620,7 +621,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const syncBadge = async () => {
       try {
         const n = badgeFromStats(await getOrderStats(token));
-        if (n !== null && !stopped) await Notifications.setBadgeCountAsync(n);
+        if (n !== null && !stopped) await setAppBadge(n);
       } catch {}
     };
     const appSub = AppState.addEventListener("change", (st) => {

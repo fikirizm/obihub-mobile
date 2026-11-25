@@ -26,6 +26,7 @@ export function DetailHero({
   title,
   subtitle,
   badge,
+  badgeBelow = false,
   value,
   valueLabel,
   stats,
@@ -42,6 +43,8 @@ export function DetailHero({
   title: string;
   subtitle?: string;
   badge?: React.ReactNode;
+  // Rozetler başlığın altında yatay satırda (çok/uzun rozette başlık sıkışmasın; ör. fatura "Resmileşti · e-Arşiv").
+  badgeBelow?: boolean;
   // Kartın büyük ana değeri (ör. toplam tutar, bakiye).
   value?: string;
   valueLabel?: string;
@@ -77,7 +80,7 @@ export function DetailHero({
           </Text>
         ) : null}
       </View>
-      {badge ? <View style={styles.badge}>{badge}</View> : null}
+      {badge && !badgeBelow ? <View style={styles.badge}>{badge}</View> : null}
     </>
   );
   return (
@@ -97,6 +100,7 @@ export function DetailHero({
           ) : (
             <View style={styles.head}>{head}</View>
           )}
+          {badge && badgeBelow ? <View style={styles.badgeBelow}>{badge}</View> : null}
         </View>
 
         {value ? (
@@ -156,6 +160,7 @@ const styles = StyleSheet.create({
   head: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   leading: { alignItems: "center", justifyContent: "center" },
   badge: { alignSelf: "flex-start" },
+  badgeBelow: { marginTop: spacing.sm },
   eyebrow: { color: ON_HERO.soft, fontSize: 12, fontWeight: "600", marginBottom: 2 },
   title: { color: ON_HERO.text, fontSize: 18, lineHeight: 23, fontWeight: "700", letterSpacing: -0.3 },
   subtitle: { color: ON_HERO.soft, fontSize: 13, lineHeight: 18, marginTop: 2 },
