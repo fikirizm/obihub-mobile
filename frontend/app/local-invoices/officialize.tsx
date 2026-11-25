@@ -53,7 +53,8 @@ export default function OfficializeScreen() {
       const r = await officializeLocalInvoice(token, id, officializeBody(sale));
       const settled = autoSettlementText((r as any)?.auto_settlement);
       const main = r?.message || (r?.pending ? "E-belge sıraya alındı" : isReturn ? "İade faturası resmileşti" : "Fatura resmileşti");
-      toast([main, settled, r?.amount_note ? String(r.amount_note) : null].filter(Boolean).join(" "), "success");
+      // 24 Kas: Paraşüt kategori/etiketi reddedip fatura sınıflandırmasız kesildiyse uyarı metni mesajdadır; başarı tonu yerine bilgi.
+      toast([main, settled, r?.amount_note ? String(r.amount_note) : null].filter(Boolean).join(" "), (r as any)?.classification_skipped ? "info" : "success");
       router.back();
     } catch (e: any) {
       setError(officializeErrorText(e));
