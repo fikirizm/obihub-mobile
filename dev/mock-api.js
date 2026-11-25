@@ -760,6 +760,16 @@ http
       { ticket_id: "t-2", ticket_code: "D-0990", subject: "Etiket yazdırma", preview: "Yazdırma programının yeni sürümü yayında.", last_super_message_at: new Date(Date.now() - 9 * 86400000).toISOString() },
     ] });
     if (path === "/support/notifications/mark-read" && req.method === "POST") { console.log("WRITE mark-read"); return send(res, 200, { success: true, updated: 1 }); }
+    // KABUK-2 ürün hızlı bakışı: depo stoğu, son alış, son satışlar.
+    let qlm;
+    if ((qlm = path.match(/^\/products\/([^/]+)\/warehouse-stock$/))) {
+      const p = products.find((x) => x.id === qlm[1]);
+      return send(res, 200, { tracks_stock: true, split: true, warehouses: [{ warehouse_id: "w1", name: "Ana depo", quantity: Math.max(0, (p?.stock || 0) - 2) }, { warehouse_id: "w2", name: "Mağaza", quantity: 2 }], total: { on_hand: (p?.stock || 0) + 1, sellable: p?.stock || 0 } });
+    }
+    if ((qlm = path.match(/^\/products\/([^/]+)\/price-history$/))) return send(res, 200, { items: [{ date: "2026-11-03", unit_price_net: "64.50", currency: "TRY", party: { name: "Kaya Tedarik" }, document: { number: "ALIS-2026-31" } }] });
+    if ((qlm = path.match(/^\/products\/([^/]+)\/sales$/))) return send(res, 200, { total: 2, items: [
+      { date: "2026-11-22", party: { name: "Elif Kaya" }, invoice: { id: "li1", number: "OBI2026101" }, quantity: 2, unit: "ADET", unit_price_net: "99.90", currency: "TRY" },
+      { date: "2026-11-18", party: { name: "Can Öztürk" }, invoice: { id: "li2", number: "OBI2026098" }, quantity: 1, unit: "ADET", unit_price_net: "104.90", currency: "TRY" } ] });
     if (/^\/products\/[^/]+\/insights$/.test(path)) {
       const r = url.searchParams.get("range") || "month"; const k = r === "week" ? 1 : r === "year" ? 12 : 3;
       return send(res, 200, { range: r, sales: { total_revenue: 1240.5 * k, total_quantity: 11 * k, total_orders: 7 * k, by_provider: [

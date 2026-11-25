@@ -44,6 +44,7 @@ import { todayIso } from "../finance";
 import { useDebounce } from "../hooks/useDebounce";
 import { useFormDraft } from "../hooks/useFormDraft";
 import { DraftBanner } from "../ui/DraftBanner";
+import { QuickLookSheet } from "../components/QuickLookSheet";
 import { useTheme } from "../theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../theme/tokens";
 import { formatDate, formatTry } from "../utils";
@@ -162,6 +163,8 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
     return JSON.stringify(rest) !== JSON.stringify(blank);
   }, [form]);
   const draft = useFormDraft({ kind: "sales", form, dirty: draftDirty, enabled: !quote && !editId && mayWrite });
+  // KABUK-2 hızlı bakış: seçili cari ya da ürün kalemi için alttan açılan, yalnız okuma özet (form durumu değişmez).
+  const [quick, setQuick] = useState<{ kind: "cari" | "urun"; id: string; name: string; sub?: string } | null>(null);
   const restoreDraft = () => {
     const f = draft.restore();
     if (f) setForm({ ...blankForm(todayIso()), ...(f as Partial<DocForm>), lines: Array.isArray((f as any).lines) ? (f as any).lines : [] });
@@ -668,6 +671,9 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
                 title={form.customer_name}
                 subtitle={[form.customer_tax_no ? `VKN/TCKN ${form.customer_tax_no}` : "", form.customer_tax_office].filter(Boolean).join(" · ") || (form.customer_id ? "Kayıtlı cari" : "Cari kaydı olmadan")}
                 meta={form.customer_address || undefined}
+                testID="invoice-customer-quicklook"
+                chevron={Boolean(form.customer_id)}
+                onPress={form.customer_id ? () => setQuick({ kind: "cari", id: String(form.customer_id), name: form.customer_name, sub: "Bakiye, son hareketler ve siparişler" }) : undefined}
               />
             </Card>
           ) : (
@@ -761,12 +767,23 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
                   <IconTile tint={l.product_id ? colors.infoBg : colors.amberSoft}>
                     <PackageIcon size={18} color={l.product_id ? colors.info : colors.amber} />
                   </IconTile>
-                  <View style={{ flex: 1, minWidth: 0 }}>
+                  <PressableScale
+                    testID={`invoice-line-quicklook-${i}`}
+                    disabled={!l.product_id}
+                    onPress={l.product_id ? () => setQuick({ kind: "urun", id: String(l.product_id), name: l.product_name, sub: "Fiyat, stok, son alış ve satışlar" }) : undefined}
+                    accessibilityRole={l.product_id ? "button" : undefined}
+                    accessibilityLabel={l.product_id ? `${name || "Ürün"}, ürün özetini aç` : undefined}
+                    style={{ flex: 1, minWidth: 0 }}
+                  >
                     <Text style={[type.bodyStrong, { color: colors.textPrimary }]} numberOfLines={2}>
                       {name || `Kalem ${i + 1}`}
                     </Text>
-                    <Text style={[type.caption, { color: colors.textTertiary }]}>{l.product_id ? "Ürün" : "Serbest kalem"}</Text>
-                  </View>
+                    {l.product_id ? (
+                      <Text style={[type.caption, { color: colors.primary, fontWeight: "600" }]}>Ürün · Özet ›</Text>
+                    ) : (
+                      <Text style={[type.caption, { color: colors.textTertiary }]}>Serbest kalem</Text>
+                    )}
+                  </PressableScale>
                   <PressableScale
                     testID={`invoice-line-remove-${i}`}
                     onPress={() => removeLine(l.line_key)}
@@ -1105,6 +1122,7 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      <QuickLookSheet token={token} target={quick} onClose={() => setQuick(null)} />
     </View>
   );
 }
