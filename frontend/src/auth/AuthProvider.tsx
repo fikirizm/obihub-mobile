@@ -1,4 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { clearDrafts } from "../draft-store";
+import { tenantPrefix } from "../form-draft";
 import { setAppBadge } from "../notifications/badge";
 import * as Notifications from "expo-notifications";
 import * as FileSystem from "expo-file-system/legacy";
@@ -437,12 +439,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAccountingProvider(null);
     setAccountingProgram(null);
     setAccountingLoaded(false);
+    // KABUK-2: çıkışta form taslakları silinir; oturum süresi dolarak düşünce (401) korunur (web formDraft ile aynı).
+    if (!opts?.sessionExpired) await clearDrafts(null).catch(() => {});
     // Önceki kullanıcının verisi sonraki girişte görünmesin.
     await clearAllCache().catch(() => {});
     clearCatalogCache();
     clearNotificationsStore();
     setAppBadge(0).catch(() => {});
   }, []);
+
+  // KABUK-2: firma ya da kullanıcı değişince (başka hesapla giriş) önceki kapsamın taslakları silinir.
+  const draftScope = tenantPrefix(user as any);
+  useEffect(() => {
+    if (draftScope) clearDrafts(draftScope).catch(() => {});
+  }, [draftScope]);
 
   // D-30: ekip üyesinde (role "member") menü/düğme izinleri /team/me'den; değişiklik anında geçerli olduğu için her
   // oturum açılışında ve kullanıcı yenilenince okunur. Okunamazsa izinler boş kalır (sunucu zaten 403 verir).

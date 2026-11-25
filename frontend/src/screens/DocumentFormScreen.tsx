@@ -42,6 +42,8 @@ import { canChangeCustomer, isPosLocked, posLockedBody, posLockNote } from "../p
 import { StatusBadge } from "../components/StatusBadge";
 import { todayIso } from "../finance";
 import { useDebounce } from "../hooks/useDebounce";
+import { useFormDraft } from "../hooks/useFormDraft";
+import { DraftBanner } from "../ui/DraftBanner";
 import { useTheme } from "../theme/ThemeProvider";
 import { radius, spacing, tabular, type } from "../theme/tokens";
 import { formatDate, formatTry } from "../utils";
@@ -152,6 +154,18 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
   const [form, setForm] = useState<DocForm>(() => blankForm(todayIso()));
   const patch = (p: Partial<DocForm>) => setForm((f) => ({ ...f, ...p }));
   const patchLine = (key: string, p: Partial<DocLine>) => setForm((f) => ({ ...f, lines: f.lines.map((l) => (l.line_key === key ? { ...l, ...p } : l)) }));
+  // KABUK-2 taslak: yalnız YENİ satış faturası (teklif ve düzenleme değil). Tarihler dışında boş formdan farkı varsa yazılır;
+  // tutarlar girilen metin olarak (ham) saklanır, işlem anahtarı (createKey) taslağa girmez.
+  const draftDirty = useMemo(() => {
+    const { issue_date, due_date, ...rest } = form;
+    const { issue_date: _a, due_date: _b, ...blank } = blankForm(todayIso());
+    return JSON.stringify(rest) !== JSON.stringify(blank);
+  }, [form]);
+  const draft = useFormDraft({ kind: "sales", form, dirty: draftDirty, enabled: !quote && !editId && mayWrite });
+  const restoreDraft = () => {
+    const f = draft.restore();
+    if (f) setForm({ ...blankForm(todayIso()), ...(f as Partial<DocForm>), lines: Array.isArray((f as any).lines) ? (f as any).lines : [] });
+  };
   const [meta, setMeta] = useState<DocumentMeta | null>(null);
   const [lineMenu, setLineMenu] = useState<string | null>(null);
   const [docMenu, setDocMenu] = useState<null | "root" | "stopaj" | "withholding">(null);
@@ -385,12 +399,15 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
         router.back();
         return;
       }
+      draft.clear();
       toast(issue ? (inv?.invoice_number ? `Fatura kesildi: ${inv.invoice_number}` : "Fatura kaydedildi ve kesildi") : inv?.invoice_number ? `Taslak kaydedildi: ${inv.invoice_number}` : "Taslak kaydedildi", "success");
       if (inv?.id) router.replace({ pathname: "/local-invoices/[id]", params: { id: inv.id } });
       else router.back();
     } catch (e: any) {
       if (isUncertainWrite(e)) {
         setUncertain(true);
+        // Fatura oluşmuş olabilir: yeniden deneme bu ekranda aynı işlem anahtarıyla yapılır; taslaktan yeni anahtarla gönderim çift açabilir.
+        draft.clear();
         toast("Sonuç alınamadı. Yeniden gönderebilirsiniz; aynı taslak iki kez açılmaz.", "error");
       } else toast(documentErrorText(e), "error");
     } finally {
@@ -610,6 +627,7 @@ export function DocumentFormScreen({ docType, id }: { docType: DocType; id?: str
       />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+          {draft.pending ? <DraftBanner at={draft.pending.at} onRestore={restoreDraft} onDiscard={draft.discard} /> : null}
           <HeroCard tone="blue">
             <Text style={styles.heroLabel}>{quote ? "Teklif toplamı" : "Genel toplam"}</Text>
             <Text testID="invoice-total-preview" style={[styles.heroValue, tabular]} numberOfLines={1} adjustsFontSizeToFit>

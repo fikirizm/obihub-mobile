@@ -21,6 +21,8 @@ import { FormField } from "../../src/ui/FormField";
 import { StackHeader } from "../../src/ui/Header";
 import { HeroCard, ON_HERO } from "../../src/ui/HeroCard";
 import { SectionTitle } from "../../src/ui/ListRow";
+import { DraftBanner } from "../../src/ui/DraftBanner";
+import { useFormDraft } from "../../src/hooks/useFormDraft";
 
 const suggestSku = () => `SKU-${Date.now().toString().slice(-6)}`;
 
@@ -31,6 +33,7 @@ export default function NewProductScreen() {
   const allowed = canManage(user, "catalog");
   const [name, setName] = useState("");
   const [sku, setSku] = useState(suggestSku);
+  const initialSku = useRef(sku);
   const [barcode, setBarcode] = useState("");
   const [priceText, setPriceText] = useState("");
   const [stockText, setStockText] = useState("0");
@@ -39,6 +42,19 @@ export default function NewProductScreen() {
   const [uncertain, setUncertain] = useState(false);
   const [ownerAccounting, setOwnerAccounting] = useState(false);
   const sending = useRef(false);
+  // KABUK-2 taslak: önerilen SKU ve açılış stoğu "0" değişiklik sayılmaz; fiyat/stok girilen metin olarak (ham) saklanır.
+  const draftForm = useMemo(() => ({ name, sku, barcode, priceText, stockText }), [name, sku, barcode, priceText, stockText]);
+  const draftDirty = Boolean(name.trim() || barcode.trim() || priceText.trim() || (stockText.trim() !== "0" && stockText.trim() !== "") || sku !== initialSku.current);
+  const draft = useFormDraft({ kind: "product", form: draftForm, dirty: draftDirty && allowed });
+  const restoreDraft = () => {
+    const f: any = draft.restore();
+    if (!f) return;
+    if (typeof f.name === "string") setName(f.name);
+    if (typeof f.sku === "string") setSku(f.sku);
+    if (typeof f.barcode === "string") setBarcode(f.barcode);
+    if (typeof f.priceText === "string") setPriceText(f.priceText);
+    if (typeof f.stockText === "string") setStockText(f.stockText);
+  };
 
   React.useEffect(() => {
     if (!token) return;
@@ -72,12 +88,15 @@ export default function NewProductScreen() {
         []
       );
       markCatalogDirty();
+      draft.clear();
       toast("Ürün oluşturuldu.", "success");
       router.replace({ pathname: "/products/[id]", params: { id: created.id } });
     } catch (e: any) {
       if (isUncertainWrite(e)) {
         // Ürün oluşmuş olabilir: ikinci kez göndermeden önce listeyi kontrol etmesi istenir.
         setUncertain(true);
+        // Ürün oluşmuş olabilir: taslaktan ikinci kez gönderilip çift ürün açılmasın.
+        draft.clear();
         markCatalogDirty();
         toast("Sonuç alınamadı. Ürün oluşmuş olabilir; listeyi kontrol edin.", "error");
       } else toast(createErrorText(e), "error");
@@ -101,6 +120,7 @@ export default function NewProductScreen() {
       <StackHeader title="Yeni ürün" />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+          {draft.pending ? <DraftBanner at={draft.pending.at} onRestore={restoreDraft} onDiscard={draft.discard} /> : null}
           <HeroCard tone="blue">
             <View style={styles.heroRow}>
               <View style={styles.heroIcon}>
