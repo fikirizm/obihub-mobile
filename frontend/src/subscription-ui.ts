@@ -69,3 +69,45 @@ export function usageBars(status: UsageSrc, summary: UsageSrc): UsageBar[] {
   }
   return out;
 }
+
+// Paket adı (web billing/subscription/model.planDisplayName ile aynı): growth satışta "Pro" adıyla görünür.
+export function planName(plan: unknown): string {
+  const p = String(plan || "").trim().toLowerCase();
+  if (p === "trial") return "Deneme";
+  if (p === "growth") return "Pro";
+  return p ? p.charAt(0).toLocaleUpperCase("tr-TR") + p.slice(1) : "-";
+}
+
+const thousands = (n: unknown) => String(Math.trunc(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+// Türkiye saati (UTC+3, yaz saati yok) ile "18 Ara 2026" (ekrandaki formatDate biçimiyle aynı).
+const TR_MONTHS = ["Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"];
+function trDay(iso: unknown): string {
+  const t = Date.parse(String(iso || ""));
+  if (!Number.isFinite(t)) return "dönem sonu";
+  const d = new Date(t + 3 * 3600 * 1000);
+  return `${d.getUTCDate()} ${TR_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+export type NextPlanView = { status: string; detail: string; overflow: { key: string; label: string; text: string }[]; note: string };
+
+// 25 Kas 2026 D2-C: GET /billing/trial-status → next_plan {plan_key, billing_cycle, paid, effective_at, overflow[], overflow_note}.
+// Mobilde salt okunur (seçim ve "mevcut paketle devam et" web'de; App Store: uygulama içinde fiyat/ödeme yönlendirmesi yok).
+export function nextPlanView(np: any): NextPlanView | null {
+  if (!np || typeof np !== "object" || !String(np.plan_key || "").trim()) return null;
+  const name = planName(np.plan_key);
+  const when = trDay(np.effective_at);
+  const cycle = String(np.billing_cycle || "") === "yearly" ? "Yıllık" : "Aylık";
+  const paid = np.paid === true;
+  return {
+    status: `${name} · ${cycle} — ${when} tarihinden itibaren`,
+    detail: paid
+      ? `Ödemesi alındı. Mevcut paketiniz ${when} tarihine kadar aynen sürer; sonra ${name} başlar.`
+      : `Mevcut paketiniz dönem sonuna kadar aynen sürer. Yeni paket, yeni dönemi ödediğinizde ${when} tarihinde başlar.`,
+    overflow: (Array.isArray(np.overflow) ? np.overflow : []).map((r: any) => ({
+      key: String(r?.key || r?.label || ""),
+      label: String(r?.label || r?.key || ""),
+      text: `${thousands(r?.used)} / ${thousands(r?.limit)} (${thousands(r?.excess)} fazla)`,
+    })),
+    note: String(np.overflow_note || ""),
+  };
+}

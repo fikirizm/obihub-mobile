@@ -6,7 +6,7 @@ import { getTrialStatus, getUsageSummary } from "../src/api";
 import { useTheme } from "../src/theme/ThemeProvider";
 import { spacing, tabular, type } from "../src/theme/tokens";
 import { formatDate } from "../src/utils";
-import { renewalNotice, usageBars } from "../src/subscription-ui";
+import { nextPlanView, planName, renewalNotice, usageBars } from "../src/subscription-ui";
 import { AlertIcon, ClockIcon } from "../src/components/Icons";
 import { StackHeader } from "../src/ui/Header";
 import { Card, ListRow, SectionTitle } from "../src/ui/ListRow";
@@ -43,6 +43,8 @@ export default function SubscriptionScreen() {
   // Bitişe 14 gün ya da daha az kalınca yalnız bilgi (ödeme bağlantısı / fiyat yok: App Store kuralı).
   const notice = renewalNotice(trial);
   const bars = usageBars(trial, usage);
+  // D2-C: web'de seçilen sonraki dönem paketi (salt okunur).
+  const next = nextPlanView((trial as any)?.next_plan);
   const tone = notice?.tone === "error" ? colors.error : notice?.tone === "warning" ? colors.warning : colors.info;
   const toneBg = notice?.tone === "error" ? colors.errorBg : notice?.tone === "warning" ? colors.warningBg : colors.infoBg;
 
@@ -67,13 +69,37 @@ export default function SubscriptionScreen() {
           ) : null}
           <SectionTitle title="Paket" />
           <Card style={styles.block}>
-            <ListRow title="Paket" trailing={<Value>{trial?.is_trial ? "Deneme" : trial?.plan ? trial.plan.charAt(0).toLocaleUpperCase("tr-TR") + trial.plan.slice(1) : "-"}</Value>} />
+            <ListRow title="Paket" trailing={<Value>{trial?.is_trial ? "Deneme" : planName(trial?.plan)}</Value>} />
             <ListRow divider title="Durum" trailing={<Value>{STATUS_LABELS[String(trial?.subscription_status)] || trial?.subscription_status || "-"}</Value>} />
             {trial?.expires_at ? <ListRow divider title="Bitiş tarihi" trailing={<Value>{formatDate(trial.expires_at)}</Value>} /> : null}
             {typeof days === "number" ? (
               <ListRow divider title="Kalan süre" trailing={<Value tone={days <= 7 ? colors.error : undefined}>{days > 0 ? `${days} gün` : "Süre doldu"}</Value>} />
             ) : null}
           </Card>
+
+          {next ? (
+            <>
+              <SectionTitle title="Sonraki dönem paketi" />
+              <Card style={styles.block}>
+                <View testID="next-plan" style={styles.nextBody}>
+                  <Text style={[type.bodyStrong, { color: colors.textPrimary }]}>{next.status}</Text>
+                  <Text style={[type.footnote, { color: colors.textSecondary }]}>{next.detail}</Text>
+                  {next.overflow.length ? (
+                    <View testID="next-plan-overflow" accessibilityRole="alert" style={[styles.overflow, { backgroundColor: colors.warningBg }]}>
+                      <Text style={[type.footnote, { color: colors.textPrimary, fontWeight: "700" }]}>Yeni paketin limitlerini aşan kullanımınız var</Text>
+                      {next.overflow.map((r) => (
+                        <View key={r.key} style={styles.overflowRow}>
+                          <Text style={[type.footnote, { color: colors.textPrimary, flex: 1 }]}>{r.label}</Text>
+                          <Text style={[type.footnote, tabular, { color: colors.textPrimary }]}>{r.text}</Text>
+                        </View>
+                      ))}
+                      {next.note ? <Text style={[type.caption, { color: colors.textSecondary }]}>{next.note}</Text> : null}
+                    </View>
+                  ) : null}
+                </View>
+              </Card>
+            </>
+          ) : null}
 
           {bars.length ? (
             <>
@@ -124,5 +150,8 @@ const styles = StyleSheet.create({
   barHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
   track: { height: 8, borderRadius: 4, overflow: "hidden" },
   fill: { height: 8, borderRadius: 4 },
+  nextBody: { padding: spacing.md, gap: 4 },
+  overflow: { marginTop: spacing.sm, padding: spacing.sm, borderRadius: 12, gap: 4 },
+  overflowRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   notice: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start", marginHorizontal: spacing.lg, marginTop: spacing.md, padding: spacing.md, borderRadius: 16, borderWidth: 1 },
 });

@@ -99,4 +99,25 @@ t("kullanım: trial-status'ta yoksa /usage/summary (billable_integrations); limi
   assert.deepEqual(m.usageBars(null, null), []);
 });
 
+// 25 Kas 2026 D2-C (web NextPlanCard / model.nextPlanCopy): trial-status.next_plan salt okunur; seçim web'de (App Store: fiyat/ödeme yok).
+t("paket adı web'le aynı: growth → Pro, trial → Deneme", () => {
+  assert.equal(m.planName("growth"), "Pro");
+  assert.equal(m.planName("trial"), "Deneme");
+  assert.equal(m.planName("starter"), "Starter");
+  assert.equal(m.planName(""), "-");
+});
+t("sonraki dönem paketi: ödenmemiş / ödenmiş metni, limit fazlası satırları", () => {
+  assert.equal(m.nextPlanView(null), null);
+  const v = m.nextPlanView({ plan_key: "starter", billing_cycle: "monthly", paid: false, effective_at: "2026-12-20T09:00:00Z",
+    overflow: [{ key: "products", label: "Ürün", used: 1200, limit: 1000, excess: 200 }], overflow_note: "Verileriniz silinmez." });
+  assert.equal(v.status, "Starter · Aylık — 20 Ara 2026 tarihinden itibaren");
+  assert.equal(v.detail, "Mevcut paketiniz dönem sonuna kadar aynen sürer. Yeni paket, yeni dönemi ödediğinizde 20 Ara 2026 tarihinde başlar.");
+  assert.deepEqual(v.overflow, [{ key: "products", label: "Ürün", text: "1.200 / 1.000 (200 fazla)" }]);
+  assert.equal(v.note, "Verileriniz silinmez.");
+  const p = m.nextPlanView({ plan_key: "growth", billing_cycle: "yearly", paid: true, effective_at: "2026-12-20T09:00:00Z" });
+  assert.equal(p.status, "Pro · Yıllık — 20 Ara 2026 tarihinden itibaren");
+  assert.equal(p.detail, "Ödemesi alındı. Mevcut paketiniz 20 Ara 2026 tarihine kadar aynen sürer; sonra Pro başlar.");
+  assert.deepEqual(p.overflow, []);
+});
+
 console.log(`\n${n} test geçti`);

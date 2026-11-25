@@ -353,7 +353,7 @@ http
     }
     if (url.pathname === "/__mode") {
       for (const k in remembered) delete remembered[k];
-      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig", "yurtici", "yurticiCancel", "officializer", "ppay", "counters", "ieFail", "amzBlock", "amzApproved"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
+      for (const k of ["session", "parasut", "stock409", "autoprint", "payFail", "posFail", "entryFail", "ieEmpty", "posAccts", "posPending", "colFail", "psFail", "psCaps", "curMismatch", "offerFail", "pwWeak", "demo", "loginErr", "hj", "ledgerBlock", "subDays", "subOld", "iaGate", "iaKurus", "iaOwner", "inbox", "expire", "otp", "member", "kasa", "receiptPending", "custFail", "probeFail", "smsUnknown", "smsOwner", "reportBig", "yurtici", "yurticiCancel", "officializer", "ppay", "counters", "ieFail", "amzBlock", "amzApproved", "nextPlan"]) if (url.searchParams.get(k)) state[k] = url.searchParams.get(k);
       return send(res, 200, state);
     }
     console.log(req.method, path, JSON.stringify(state));
@@ -2558,6 +2558,10 @@ http
           usage: { integrations: 3, products: 4100, orders_monthly: 212 },
           limits: { integrations: 5, products: 5000, orders_monthly: 3000 },
         });
+        // D2-C sonraki dönem paketi: /__mode?nextPlan=1 (ödenmemiş, limit fazlası) | paid (ödendi)
+        if (state.nextPlan === "1" || state.nextPlan === "paid") body.next_plan = { plan_key: "starter", billing_cycle: "monthly", paid: state.nextPlan === "paid", effective_at: exp, selected_at: new Date().toISOString(),
+          overflow: state.nextPlan === "1" ? [{ key: "products", label: "Ürün", used: 4100, limit: 1000, excess: 3100 }, { key: "integrations", label: "Mağaza bağlantısı", used: 3, limit: 2, excess: 1 }] : [],
+          overflow_note: "Limit fazlası verileriniz silinmez; ürünleriniz, siparişleriniz ve bağlantılarınız çalışmaya devam eder. Yeni dönemde limitin altına inene kadar yalnız yeni ekleme yapılamaz. Pazaryeri ve mağaza siparişleri gelmeye devam eder." };
       }
       return send(res, 200, body);
     }
